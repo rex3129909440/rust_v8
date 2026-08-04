@@ -1,0 +1,115 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Edge WebCodecs evidence</title>
+<script>
+async function inspectSupport(Constructor, config) {
+  const descriptor = Object.getOwnPropertyDescriptor(Constructor, "isConfigSupported");
+  let outcome;
+  try {
+    const promise = Constructor.isConfigSupported(config);
+    outcome = {
+      promise: Object.prototype.toString.call(promise),
+      result: await promise
+    };
+  } catch (error) {
+    outcome = {error: [error.name, error.message]};
+  }
+  return {
+    ownKeys: Reflect.ownKeys(Constructor).map(String),
+    descriptor: descriptor && {
+      enumerable: descriptor.enumerable,
+      configurable: descriptor.configurable,
+      writable: descriptor.writable,
+      type: typeof descriptor.value,
+      name: descriptor.value.name,
+      length: descriptor.value.length,
+      source: Function.prototype.toString.call(descriptor.value)
+    },
+    outcome
+  };
+}
+
+async function stateEvidence(name, Constructor, Chunk, encode, validConfig) {
+  const callbacks = [];
+  const codec = new Constructor({
+    output: value => callbacks.push(["output", Object.prototype.toString.call(value)]),
+    error: error => callbacks.push(["error", error.name, error.message])
+  });
+  let flushError = null;
+  try { await codec.flush(); } catch (error) { flushError = [error.name, error.message]; }
+  let operationError = null;
+  try {
+    const value = encode
+      ? name === "AudioEncoder"
+        ? new AudioData({
+            format: "f32-planar",
+            sampleRate: 48000,
+            numberOfFrames: 1,
+            numberOfChannels: 1,
+            timestamp: 0,
+            data: new Float32Array(1)
+          })
+        : new VideoFrame(new OffscreenCanvas(2, 2), {timestamp: 0})
+      : new Chunk({type: "key", timestamp: 0, data: new Uint8Array()});
+    codec[encode ? "encode" : "decode"](value);
+    value.close?.();
+  } catch (error) {
+    operationError = [error.name, error.message];
+  }
+  codec.close();
+  let configureAfterClose = null;
+  try { codec.configure(validConfig); }
+  catch (error) { configureAfterClose = [error.name, error.message]; }
+  return {
+    name,
+    state: codec.state,
+    queue: codec[encode ? "encodeQueueSize" : "decodeQueueSize"],
+    flushError,
+    operationError,
+    configureAfterClose,
+    callbacks
+  };
+}
+
+addEventListener("load", async () => {
+  const results = {
+    support: {
+      audioDecoder: await inspectSupport(AudioDecoder, {
+        codec: "opus", sampleRate: 48000, numberOfChannels: 2
+      }),
+      audioEncoder: await inspectSupport(AudioEncoder, {
+        codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 128000
+      }),
+      videoDecoder: await inspectSupport(VideoDecoder, {
+        codec: "vp8", codedWidth: 320, codedHeight: 240
+      }),
+      videoEncoder: await inspectSupport(VideoEncoder, {
+        codec: "vp8", width: 320, height: 240, bitrate: 500000, framerate: 30
+      })
+    },
+    invalid: {},
+    states: []
+  };
+  for (const [name, Constructor] of Object.entries({
+    AudioDecoder, AudioEncoder, VideoDecoder, VideoEncoder
+  })) {
+    try { await Constructor.isConfigSupported({}); }
+    catch (error) { results.invalid[name] = [error.name, error.message]; }
+  }
+  results.states.push(
+    await stateEvidence("AudioDecoder", AudioDecoder, EncodedAudioChunk, false, {
+      codec: "opus", sampleRate: 48000, numberOfChannels: 2
+    }),
+    await stateEvidence("AudioEncoder", AudioEncoder, null, true, {
+      codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 128000
+    }),
+    await stateEvidence("VideoDecoder", VideoDecoder, EncodedVideoChunk, false, {
+      codec: "vp8", codedWidth: 320, codedHeight: 240
+    }),
+    await stateEvidence("VideoEncoder", VideoEncoder, null, true, {
+      codec: "vp8", width: 320, height: 240, bitrate: 500000, framerate: 30
+    })
+  );
+  document.body.textContent = JSON.stringify(results);
+});
+</script>

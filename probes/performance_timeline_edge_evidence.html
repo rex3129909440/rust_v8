@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Edge performance timeline evidence</title>
+<script>
+async function snapshot() {
+  const records = [];
+  const observerRecords = [];
+  const observer = new PerformanceObserver(list => {
+    for (const entry of list.getEntries()) {
+      observerRecords.push([entry.name, entry.entryType, entry.initiatorType]);
+    }
+  });
+  observer.observe({type: "resource", buffered: true});
+
+  const fetchResponse = await fetch("performance_timeline_edge_asset.js?fetch");
+  await fetchResponse.text();
+
+  await new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", "performance_timeline_edge_asset.js?xhr");
+    xhr.onloadend = resolve;
+    xhr.send();
+  });
+
+  await new Promise(resolve => {
+    const frame = document.createElement("iframe");
+    frame.onload = resolve;
+    frame.src = "performance_timeline_edge_frame.html";
+    document.body.append(frame);
+  });
+
+  await new Promise(resolve => {
+    const worker = new Worker("performance_timeline_edge_asset.js?worker");
+    worker.onmessage = () => { worker.terminate(); resolve(); };
+    worker.onerror = () => resolve();
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const simplify = entry => ({
+    name: new URL(entry.name, location.href).pathname + new URL(entry.name, location.href).search,
+    tag: Object.prototype.toString.call(entry),
+    entryType: entry.entryType,
+    initiatorType: entry.initiatorType,
+    nextHopProtocol: entry.nextHopProtocol,
+    responseStatus: entry.responseStatus,
+    transferSize: entry.transferSize,
+    encodedBodySize: entry.encodedBodySize,
+    decodedBodySize: entry.decodedBodySize,
+    startTime: entry.startTime,
+    duration: entry.duration,
+    fetchStart: entry.fetchStart,
+    requestStart: entry.requestStart,
+    responseStart: entry.responseStart,
+    responseEnd: entry.responseEnd
+  });
+  for (const type of ["navigation", "paint", "resource"]) {
+    records.push([type, performance.getEntriesByType(type).map(simplify)]);
+  }
+
+  performance.clearResourceTimings();
+  let fullCount = 0;
+  performance.onresourcetimingbufferfull = () => fullCount++;
+  performance.setResourceTimingBufferSize(1);
+  await Promise.all([
+    fetch("performance_timeline_edge_asset.js?buffer1"),
+    fetch("performance_timeline_edge_asset.js?buffer2")
+  ]);
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  document.body.textContent = JSON.stringify({
+    records,
+    observerRecords,
+    buffer: {
+      fullCount,
+      count: performance.getEntriesByType("resource").length
+    }
+  });
+}
+addEventListener("load", () => snapshot().catch(error => {
+  document.body.textContent = JSON.stringify({error: String(error), stack: error.stack});
+}));
+</script>

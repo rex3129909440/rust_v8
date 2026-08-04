@@ -1,0 +1,247 @@
+api	case	value
+CanvasRenderingContext2D	measureText-default-abcd	22.84417724609375,0,22.644180297851562,12,3,8,1,9.600000381469727,0,-1.1999969482421875
+CanvasRenderingContext2D	measureText-empty	0,0,0,12,3,0,0,9.600000381469727,0,-1.1999969482421875
+CanvasRenderingContext2D	measureText-20px-monospace-Wi	20,1,19,17,3,13,0,13.600000381469727,0,-3
+CanvasRenderingContext2D	measureText-20px-sans-serif-Wi	23.05999755859375,0,22.55999755859375,23,6,16,0,18.399999618530273,0,-2.399993896484375
+CanvasRenderingContext2D	measureText-spacing	19.049972534179688,0,17.869979858398438,12,3,8,1,9.600000381469727,0,-1.1999969482421875
+CanvasRenderingContext2D	measureText-center	11.809982299804688,5.904991149902344,5.724998474121094,12,3,8,1,9.600000381469727,0,-1.1999969482421875
+CanvasRenderingContext2D	measureText-right	11.809982299804688,11.809982299804688,-0.17999267578125,12,3,8,1,9.600000381469727,0,-1.1999969482421875
+WebGLRenderingContext	getParameter-unmasked-vendor	[object String]:Google Inc. (Microsoft)
+WebGLRenderingContext	getParameter-unmasked-renderer	[object String]:ANGLE (Microsoft, Microsoft Basic Render Driver (0x0000008C) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGLRenderingContext	getParameter-35724	[object String]:WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)
+WebGLRenderingContext	getParameter-7936	[object String]:WebKit
+WebGLRenderingContext	getParameter-7937	[object String]:WebKit WebGL
+WebGLRenderingContext	getParameter-7938	[object String]:WebGL 1.0 (OpenGL ES 2.0 Chromium)
+WebGLRenderingContext	getParameter-34921	[object Number]:16
+WebGLRenderingContext	getParameter-36347	[object Number]:4096
+WebGLRenderingContext	getParameter-35660	[object Number]:16
+WebGLRenderingContext	getParameter-36348	[object Number]:30
+WebGLRenderingContext	getParameter-36349	[object Number]:1024
+WebGLRenderingContext	getParameter-33901	[object Float32Array]:1,1024
+WebGLRenderingContext	getParameter-33902	[object Float32Array]:1,1
+WebGLRenderingContext	getParameter-34930	[object Number]:16
+WebGLRenderingContext	getParameter-3379	[object Number]:16384
+WebGLRenderingContext	getParameter-35661	[object Number]:32
+WebGLRenderingContext	getParameter-34024	[object Number]:16384
+WebGLRenderingContext	getParameter-3386	[object Int32Array]:32767,32767
+WebGLRenderingContext	getParameter-34076	[object Number]:16384
+WebGLRenderingContext	getParameter-2963	[object Number]:4294967295
+WebGLRenderingContext	getParameter-2968	[object Number]:4294967295
+WebGLRenderingContext	getParameter-36004	[object Number]:4294967295
+WebGLRenderingContext	getParameter-36005	[object Number]:4294967295
+WebGLRenderingContext	getParameter-3408	[object Number]:4
+WebGLRenderingContext	getParameter-35658	[object Null]:null
+WebGLRenderingContext	getParameter-35371	[object Null]:null
+WebGLRenderingContext	getParameter-37154	[object Null]:null
+WebGLRenderingContext	getParameter-35377	[object Null]:null
+WebGLRenderingContext	getParameter-35659	[object Null]:null
+WebGLRenderingContext	getParameter-35968	[object Null]:null
+WebGLRenderingContext	getParameter-35978	[object Null]:null
+WebGLRenderingContext	getParameter-35979	[object Null]:null
+WebGLRenderingContext	getParameter-35657	[object Null]:null
+WebGLRenderingContext	getParameter-35373	[object Null]:null
+WebGLRenderingContext	getParameter-37157	[object Null]:null
+WebGLRenderingContext	getParameter-35379	[object Null]:null
+WebGLRenderingContext	getParameter-35077	[object Null]:null
+WebGLRenderingContext	getParameter-34852	[object Null]:null
+WebGLRenderingContext	getParameter-36063	[object Null]:null
+WebGLRenderingContext	getParameter-36183	[object Null]:null
+WebGLRenderingContext	getParameter-32883	[object Null]:null
+WebGLRenderingContext	getParameter-35071	[object Null]:null
+WebGLRenderingContext	getParameter-34045	[object Null]:null
+WebGLRenderingContext	getParameter-35375	[object Null]:null
+WebGLRenderingContext	getParameter-35376	[object Null]:null
+WebGLRenderingContext	getParameter-35374	[object Null]:null
+WebGLRenderingContext	getParameter-33000	[object Null]:null
+WebGLRenderingContext	getParameter-33001	[object Null]:null
+WebGLRenderingContext	getParameter-36203	[object Null]:null
+WebGLRenderingContext	getParameter-invalid	[object Null]:null|1280|0
+WebGL2RenderingContext	getParameter-unmasked-vendor	[object String]:Google Inc. (Microsoft)
+WebGL2RenderingContext	getParameter-unmasked-renderer	[object String]:ANGLE (Microsoft, Microsoft Basic Render Driver (0x0000008C) Direct3D11 vs_5_0 ps_5_0, D3D11)
+WebGL2RenderingContext	getParameter-35724	[object String]:WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)
+WebGL2RenderingContext	getParameter-7936	[object String]:WebKit
+WebGL2RenderingContext	getParameter-7937	[object String]:WebKit WebGL
+WebGL2RenderingContext	getParameter-7938	[object String]:WebGL 2.0 (OpenGL ES 3.0 Chromium)
+WebGL2RenderingContext	getParameter-34921	[object Number]:16
+WebGL2RenderingContext	getParameter-36347	[object Number]:4096
+WebGL2RenderingContext	getParameter-35660	[object Number]:16
+WebGL2RenderingContext	getParameter-36348	[object Number]:30
+WebGL2RenderingContext	getParameter-36349	[object Number]:1024
+WebGL2RenderingContext	getParameter-33901	[object Float32Array]:1,1024
+WebGL2RenderingContext	getParameter-33902	[object Float32Array]:1,1
+WebGL2RenderingContext	getParameter-34930	[object Number]:16
+WebGL2RenderingContext	getParameter-3379	[object Number]:16384
+WebGL2RenderingContext	getParameter-35661	[object Number]:32
+WebGL2RenderingContext	getParameter-34024	[object Number]:16384
+WebGL2RenderingContext	getParameter-3386	[object Int32Array]:32767,32767
+WebGL2RenderingContext	getParameter-34076	[object Number]:16384
+WebGL2RenderingContext	getParameter-2963	[object Number]:4294967295
+WebGL2RenderingContext	getParameter-2968	[object Number]:4294967295
+WebGL2RenderingContext	getParameter-36004	[object Number]:4294967295
+WebGL2RenderingContext	getParameter-36005	[object Number]:4294967295
+WebGL2RenderingContext	getParameter-3408	[object Number]:4
+WebGL2RenderingContext	getParameter-35658	[object Number]:16384
+WebGL2RenderingContext	getParameter-35371	[object Number]:12
+WebGL2RenderingContext	getParameter-37154	[object Number]:120
+WebGL2RenderingContext	getParameter-35377	[object Number]:212992
+WebGL2RenderingContext	getParameter-35659	[object Number]:120
+WebGL2RenderingContext	getParameter-35968	[object Number]:4
+WebGL2RenderingContext	getParameter-35978	[object Number]:120
+WebGL2RenderingContext	getParameter-35979	[object Number]:4
+WebGL2RenderingContext	getParameter-35657	[object Number]:4096
+WebGL2RenderingContext	getParameter-35373	[object Number]:12
+WebGL2RenderingContext	getParameter-37157	[object Number]:120
+WebGL2RenderingContext	getParameter-35379	[object Number]:200704
+WebGL2RenderingContext	getParameter-35077	[object Number]:7
+WebGL2RenderingContext	getParameter-34852	[object Number]:8
+WebGL2RenderingContext	getParameter-36063	[object Number]:8
+WebGL2RenderingContext	getParameter-36183	[object Number]:16
+WebGL2RenderingContext	getParameter-32883	[object Number]:2048
+WebGL2RenderingContext	getParameter-35071	[object Number]:2048
+WebGL2RenderingContext	getParameter-34045	[object Number]:2
+WebGL2RenderingContext	getParameter-35375	[object Number]:24
+WebGL2RenderingContext	getParameter-35376	[object Number]:65536
+WebGL2RenderingContext	getParameter-35374	[object Number]:24
+WebGL2RenderingContext	getParameter-33000	[object Number]:2147483647
+WebGL2RenderingContext	getParameter-33001	[object Number]:2147483647
+WebGL2RenderingContext	getParameter-36203	[object Number]:4294967294
+WebGL2RenderingContext	getParameter-invalid	[object Null]:null|1280|0
+Document.currentScript	outside-script	null
+HTMLScriptElement	dynamic-inline-classic	before|false,edge-current-script-inline,SCRIPT,true|after
+Document.currentScript	dynamic-external-classic	before|after-append|false,edge-current-script-external,true,true|load:true
+Document.currentScript	dynamic-external-module	before|after-append|true,string|load:true
+Document.styleSheets	stable-identity	true
+Document.styleSheets	initial-shape	[object StyleSheetList]|true|1|[object CSSStyleSheet]|0
+HTMLStyleElement.sheet	detached	null
+HTMLStyleElement.sheet	connected-shape	[object CSSStyleSheet]|true|true||||screen|false|1|#edge-computed-style-probe { color: rgb(1, 2, 3); margin-left: 7px; }
+CSSStyleSheet.replaceSync	owner-backed-sheet	throws NotAllowedError:Failed to execute 'replaceSync' on 'CSSStyleSheet': Can't call replaceSync on non-constructed CSSStyleSheets.
+CSSStyleSheet.replace	owner-backed-return	[object Promise]
+CSSStyleSheet.replace	owner-backed-resolution	throws NotAllowedError:Failed to execute 'replace' on 'CSSStyleSheet': Can't call replace on non-constructed CSSStyleSheets.
+HTMLStyleElement.sheet	disabled-identity	true|true|false|true|false
+HTMLStyleElement.sheet	media-update-identity	true|print|print
+Document.styleSheets	live-after-style-append	true|2|true|true|0,1
+HTMLStyleElement.sheet	text-update	false|1|#edge-computed-style-probe { color: rgb(1, 2, 3); margin-left: 7px; }
+getComputedStyle	cascade-and-shape	[object CSSStyleDeclaration]|true|false|rgb(4, 5, 6)|9px|inline-block|11px|rgb(4, 5, 6)|[object Object]
+getComputedStyle	readonly	rgb(4, 5, 6)|throws NoModificationAllowedError|rgb(4, 5, 6)
+Element.getBoundingClientRect	fixed-content-box	10|20|114|64|20|124|84|10|110|60|114|64|10|20|110|60|
+Element.getClientRects	fixed-content-box	[object DOMRectList]|1|true|10|20|114|64
+Element.getBoundingClientRect	detached	0|0|0|0|0|0|0
+Element.getBoundingClientRect	display-none	0|0|0|0|0|0|0
+ResizeObserver	initial-delivery	1,true,true,100,50,100,50,114,64,100,50
+ResizeObserver	style-change-delivery	1,true,true,120,50,120,50,134,64,120,50
+IntersectionObserver	initial-delivery	1,true,true,true,1,10,20,134,64,0,0,746,483,10,20,134,64,false,true
+IntersectionObserver	outside-viewport-delivery	1,true,true,false,0,10,10000,134,64,0,0,746,483,0,0,0,0,false,true
+Range.getBoundingClientRect	positioned-elements	[object DOMRect]|true|200|100|70|35|100|270|135|200
+Range.getClientRects	positioned-elements	[object DOMRectList]|true|2|true|200,100,30,10/250,120,20,15
+Range.getBoundingClientRect	collapsed-element-boundary	0|0|0|0|0
+Element.scrollWidth	positioned-overflow	95|45|170|90|0|0
+Element.scrollLeft	clamped-overflow	75|45|377|287
+Element.scrollLeft	non-overflow-container	0|0|448|20
+HTMLImageElement	rendered-position-and-size	400|300|10|20|0|0|400|300|10|20
+Document.elementsFromPoint	stacking-and-pointer-events	hit-high,hit-low,hit-root|true|false|[object Array]|true
+Document.elementFromPoint	bounds-and-visibility	true|true|false||||
+ShadowRoot.elementFromPoint	retargeted-hit	true|true|true|shadow-high,shadow-low,hit-host|[object Array]|true
+Element.scrollIntoView	alignment-options	85|35|300|200|85,80,965,100|85,55,965,125|118,68,932,112|85,55,965,125
+Element.scrollIntoViewIfNeeded	center-if-needed	118,68,932,112|85,55,965,125
+Document.adoptedStyleSheets	initial-shape	true|true|0
+CSSStyleSheet	constructed-shape	[object CSSStyleSheet]||||||print|true|0
+CSSStyleSheet.replaceSync	rules-and-return	|2|.edge-a { color: red; }|.edge-b { display: block; }
+CSSStyleSheet.insertRule	default-index	0|3|.edge-zero
+CSSStyleSheet.insertRule	index-error	throws IndexSizeError:Failed to execute 'insertRule' on 'CSSStyleSheet': The index provided (999) is larger than the maximum index (3).
+CSSStyleSheet.replace	return-shape	[object Promise]|true
+CSSStyleSheet.replace	resolution	true|1|.edge-replaced { z-index: 2; }
+Document.adoptedStyleSheets	assign-constructed	false|1|true
+Document.adoptedStyleSheets	assign-invalid	throws TypeError:Failed to set the 'adoptedStyleSheets' property on 'Document': Failed to convert value to 'CSSStyleSheet'.
+HTMLStyleElement.sheet	after-remove	|1|false
+HTMLLinkElement.sheet	before-connect	null
+HTMLLinkElement.sheet	immediately-after-connect	[object CSSStyleSheet]
+HTMLLinkElement.sheet	data-stylesheet-load	load|true|true|data:text/css,%23edge-link-style-probe%7Bcolor%3Argb(7%2C8%2C9)%7D|1|true
+ProcessingInstruction	initial-data	href="theme.css" media="screen" disabled
+ProcessingInstruction	getAttribute-href	null
+ProcessingInstruction	getAttribute-media	null
+ProcessingInstruction	getAttribute-disabled	null
+ProcessingInstruction	getAttributeNames	
+ProcessingInstruction	hasAttribute-href	false
+ProcessingInstruction	hasAttributes	false
+ProcessingInstruction	setAttribute	title="hello world"|hello world
+ProcessingInstruction	toggleAttribute-remove	undefined|title="hello world" disabled=""
+ProcessingInstruction	toggleAttribute-add	undefined|title="hello world"
+ProcessingInstruction	removeAttribute	title="hello world"|null
+ProcessingInstruction	invalid-name	throws InvalidCharacterError:Failed to execute 'setAttribute' on 'ProcessingInstruction': Invalid attribute name: bad name
+HTMLScriptElement	empty-reflection	||
+HTMLScriptElement	set-textContent	one|one|one
+HTMLScriptElement	set-innerText	two|two|two
+HTMLScriptElement	set-text	three|three|three
+Worker	prototype-own-onmessageerror	false
+Worker	instance-has-onmessageerror	false
+Worker	instance-read-onmessageerror	undefined
+CrossOriginWindowProxy	window-identity	true
+CrossOriginWindowProxy	self-identity	true
+CrossOriginWindowProxy	frames-identity	true
+CrossOriginWindowProxy	parent-identity	true
+CrossOriginWindowProxy	top-identity	true
+CrossOriginWindowProxy	length	1
+CrossOriginWindowProxy	closed	false
+CrossOriginWindowProxy	close	function
+CrossOriginWindowProxy	focus	function
+CrossOriginWindowProxy	blur	function
+CrossOriginWindowProxy	postMessage	function
+CrossOriginWindowProxy	opener	null
+CrossOriginWindowProxy	location-tag	[object Object]
+CrossOriginWindowProxy	location-href	throws SecurityError:Failed to read a named property 'href' from 'Location': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	location-replace	function
+CrossOriginWindowProxy	blur-parent-identity	false
+CrossOriginWindowProxy	close-parent-identity	false
+CrossOriginWindowProxy	focus-parent-identity	false
+CrossOriginWindowProxy	postMessage-parent-identity	false
+CrossOriginWindowProxy	postMessage-stable-identity	true
+CrossOriginWindowProxy	postMessage-parent-function-prototype	true
+CrossOriginWindowProxy	descriptor-getter-stable-identity	true
+CrossOriginWindowProxy	indexed-child	object
+CrossOriginWindowProxy	document	throws SecurityError:Failed to read a named property 'document' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	name	throws SecurityError:Failed to read a named property 'name' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	history	throws SecurityError:Failed to read a named property 'history' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	navigator	throws SecurityError:Failed to read a named property 'navigator' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	Array	throws SecurityError:Failed to read a named property 'Array' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	Event	throws SecurityError:Failed to read a named property 'Event' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	addEventListener	throws SecurityError:Failed to read a named property 'addEventListener' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	custom-property	throws SecurityError:Failed to read a named property 'edgeSandboxProbe' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	in-postMessage	true
+CrossOriginWindowProxy	in-document	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	descriptor-postMessage	true
+CrossOriginWindowProxy	descriptor-document	throws SecurityError:Failed to read a named property 'document' from 'Window': Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	prototype	null
+CrossOriginWindowProxy	own-names	0,window,self,location,closed,frames,length,top,opener,parent,blur,close,focus,postMessage,then
+CrossOriginWindowProxy	own-symbols	Symbol(Symbol.toStringTag),Symbol(Symbol.hasInstance),Symbol(Symbol.isConcatSpreadable)
+CrossOriginWindowProxy	reflect-own-keys	0,window,self,location,closed,frames,length,top,opener,parent,blur,close,focus,postMessage,then,Symbol(Symbol.toStringTag),Symbol(Symbol.hasInstance),Symbol(Symbol.isConcatSpreadable)
+CrossOriginWindowProxy	object-keys	0
+CrossOriginWindowProxy	object-values	1
+CrossOriginWindowProxy	object-entries	1
+CrossOriginWindowProxy	own-descriptor-names	0,window,self,location,closed,frames,length,top,opener,parent,blur,close,focus,postMessage,then
+CrossOriginWindowProxy	descriptor-index	object,false,true,true
+CrossOriginWindowProxy	descriptor-shape-window	accessor,undefined,function,get window,0,undefined,,,undefined,false,true
+CrossOriginWindowProxy	descriptor-shape-location	accessor,undefined,function,get location,0,function,set location,1,undefined,false,true
+CrossOriginWindowProxy	descriptor-shape-closed	accessor,undefined,function,get closed,0,undefined,,,undefined,false,true
+CrossOriginWindowProxy	descriptor-shape-length	accessor,undefined,function,get length,0,undefined,,,undefined,false,true
+CrossOriginWindowProxy	descriptor-shape-postMessage	data,function,undefined,,,undefined,,,false,false,true
+CrossOriginWindowProxy	descriptor-shape-then	data,undefined,undefined,,,undefined,,,false,false,true
+CrossOriginWindowProxy	descriptor-symbols	Symbol(Symbol.toStringTag):undefined:false:false:true|Symbol(Symbol.hasInstance):undefined:false:false:true|Symbol(Symbol.isConcatSpreadable):undefined:false:false:true
+CrossOriginWindowProxy	object-values-types	object
+CrossOriginWindowProxy	object-entries-values	0:object
+CrossOriginWindowProxy	object-is-extensible	true
+CrossOriginWindowProxy	reflect-is-extensible	true
+CrossOriginWindowProxy	object-set-prototype	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	reflect-set-prototype	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	object-prevent-extensions	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	reflect-prevent-extensions	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	symbol-read-to-string-tag	undefined
+CrossOriginWindowProxy	symbol-in-to-string-tag	true
+CrossOriginWindowProxy	delete-window	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	delete-document	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	delete-index	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	delete-symbol	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	define-window	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	define-custom	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	define-index	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	object-freeze	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.
+CrossOriginWindowProxy	object-seal	throws SecurityError:Blocked a frame with origin "https://example.com" from accessing a cross-origin frame.

@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<body></body>
+<script>
+(async () => {
+  const order = [];
+  const image = new Image();
+  image.addEventListener("load", () => order.push("load"));
+  image.addEventListener("error", () => order.push("error"));
+  image.src = "image_edge_asset.svg";
+  const immediate = [
+    image.complete,
+    image.currentSrc,
+    image.naturalWidth,
+    image.naturalHeight,
+  ];
+  await image.decode().then(() => order.push("decode"));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const entry = performance.getEntriesByName(image.currentSrc, "resource")[0];
+  document.body.textContent = JSON.stringify({
+    immediate,
+    final: [
+      image.complete,
+      image.currentSrc,
+      image.naturalWidth,
+      image.naturalHeight,
+      image.width,
+      image.height,
+    ],
+    order,
+    timing: {
+      tag: Object.prototype.toString.call(entry),
+      entryType: entry.entryType,
+      initiatorType: entry.initiatorType,
+      responseStatus: entry.responseStatus,
+      contentType: entry.contentType,
+      transferSize: entry.transferSize,
+      encodedBodySize: entry.encodedBodySize,
+      decodedBodySize: entry.decodedBodySize,
+      startTime: entry.startTime,
+      duration: entry.duration,
+      fetchStart: entry.fetchStart,
+      responseStart: entry.responseStart,
+      responseEnd: entry.responseEnd,
+      renderBlockingStatus: entry.renderBlockingStatus,
+    },
+  });
+})();
+</script>

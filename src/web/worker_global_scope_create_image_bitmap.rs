@@ -1,0 +1,13 @@
+pub(crate) fn define(
+    scope: &mut v8::PinScope<'_, '_>,
+    prototype: v8::Local<'_, v8::Object>,
+) -> Result<(), String> {
+    crate::webidl::define_method(scope, prototype, "createImageBitmap", 1, call)
+}
+fn call(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    result: v8::ReturnValue<'_>,
+) {
+    super::create_image_bitmap_global::execute(scope, arguments, result)
+}

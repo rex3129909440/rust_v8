@@ -1,0 +1,172 @@
+name: build Python wheels
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-and-macos:
+    name: ${{ matrix.artifact }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: edge-sandbox-windows-x64
+            runner: windows-2025
+            native_path: target/release/edge_sandbox.dll
+            library_name: edge_sandbox.dll
+            wheel_platform: win_amd64
+            deployment_target: ""
+          - artifact: edge-sandbox-macos-arm64
+            runner: macos-15
+            native_path: target/release/libedge_sandbox.dylib
+            library_name: libedge_sandbox.dylib
+            wheel_platform: macosx_12_0_arm64
+            deployment_target: "12.0"
+          - artifact: edge-sandbox-macos-x64
+            runner: macos-15-intel
+            native_path: target/release/libedge_sandbox.dylib
+            library_name: libedge_sandbox.dylib
+            wheel_platform: macosx_12_0_x86_64
+            deployment_target: "12.0"
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+      EDGE_SANDBOX_WHEEL_PLATFORM: ${{ matrix.wheel_platform }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+      RUST_BACKTRACE: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust 1.93
+        run: rustup toolchain install 1.93.0 --profile minimal
+
+      - name: Build native library
+        run: cargo +1.93.0 build --release --lib --locked
+
+      - name: Stage native library for the wheel
+        shell: python
+        run: |
+          from pathlib import Path
+          from shutil import copy2
+
+          source = Path("${{ matrix.native_path }}")
+          destination = Path("examples/_native/${{ matrix.library_name }}")
+          if not source.is_file():
+              raise SystemExit(f"native build output does not exist: {source}")
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          copy2(source, destination)
+
+      - name: Build platform wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel --outdir wheelhouse
+
+      - name: Install and smoke-test wheel
+        shell: python
+        run: |
+          from glob import glob
+          from subprocess import check_call
+          from sys import executable
+
+          wheels = glob("wheelhouse/*.whl")
+          if len(wheels) != 1:
+              raise SystemExit(f"expected one wheel, found {wheels!r}")
+          check_call([executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", wheels[0]])
+
+          from edge_sandbox import EdgeSandbox
+
+          with EdgeSandbox() as sandbox:
+              result = sandbox.evaluate("1 + 1", source_url="ci://wheel-smoke.js")
+          if result != "2":
+              raise SystemExit(f"unexpected sandbox result: {result!r}")
+          print(f"wheel smoke test passed: {result}")
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          compression-level: 0
+
+  linux-manylinux:
+    name: edge-sandbox-linux-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    env:
+      CARGO_HOME: /opt/edge-sandbox-rust/cargo
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+      EDGE_SANDBOX_WHEEL_PLATFORM: linux_x86_64
+      RUSTUP_HOME: /opt/edge-sandbox-rust/rustup
+      RUST_BACKTRACE: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Rust 1.93
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain 1.93.0 --no-modify-path
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Build native library
+        shell: bash
+        run: "$CARGO_HOME/bin/cargo build --release --lib --locked"
+
+      - name: Stage native library for the wheel
+        shell: bash
+        run: |
+          install -D -m 0755 \
+            target/release/libedge_sandbox.so \
+            examples/_native/libedge_sandbox.so
+
+      - name: Build Linux wheel
+        shell: bash
+        run: |
+          /opt/python/cp311-cp311/bin/python -m pip install --upgrade build
+          /opt/python/cp311-cp311/bin/python -m build --wheel --outdir wheelhouse-unrepaired
+          auditwheel repair \
+            --plat manylinux_2_28_x86_64 \
+            --wheel-dir wheelhouse \
+            wheelhouse-unrepaired/*.whl
+
+      - name: Install and smoke-test wheel
+        shell: bash
+        run: |
+          /opt/python/cp311-cp311/bin/python -m pip install \
+            --force-reinstall --no-deps wheelhouse/*.whl
+          /opt/python/cp311-cp311/bin/python - <<'PY'
+          from edge_sandbox import EdgeSandbox
+
+          with EdgeSandbox() as sandbox:
+              result = sandbox.evaluate("1 + 1", source_url="ci://wheel-smoke.js")
+          if result != "2":
+              raise SystemExit(f"unexpected sandbox result: {result!r}")
+          print(f"wheel smoke test passed: {result}")
+          PY
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v7
+        with:
+          name: edge-sandbox-linux-x64
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          compression-level: 0

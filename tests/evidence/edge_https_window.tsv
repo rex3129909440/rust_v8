@@ -1,0 +1,1233 @@
+index	name	descriptor	enumerable	configurable	writable	type	tag	function_name	function_length	native	error
+0	Object	data	false	true	true	function	[object Function]	Object	1	true	
+1	Function	data	false	true	true	function	[object Function]	Function	1	true	
+2	Array	data	false	true	true	function	[object Function]	Array	1	true	
+3	Number	data	false	true	true	function	[object Function]	Number	1	true	
+4	parseFloat	data	false	true	true	function	[object Function]	parseFloat	1	true	
+5	parseInt	data	false	true	true	function	[object Function]	parseInt	2	true	
+6	Infinity	data	false	false	false	number	[object Number]				
+7	NaN	data	false	false	false	number	[object Number]				
+8	undefined	data	false	false	false	undefined	undefined				
+9	Boolean	data	false	true	true	function	[object Function]	Boolean	1	true	
+10	String	data	false	true	true	function	[object Function]	String	1	true	
+11	Symbol	data	false	true	true	function	[object Function]	Symbol	0	true	
+12	Date	data	false	true	true	function	[object Function]	Date	7	true	
+13	Promise	data	false	true	true	function	[object Function]	Promise	1	true	
+14	RegExp	data	false	true	true	function	[object Function]	RegExp	2	true	
+15	Error	data	false	true	true	function	[object Function]	Error	1	true	
+16	AggregateError	data	false	true	true	function	[object Function]	AggregateError	2	true	
+17	EvalError	data	false	true	true	function	[object Function]	EvalError	1	true	
+18	RangeError	data	false	true	true	function	[object Function]	RangeError	1	true	
+19	ReferenceError	data	false	true	true	function	[object Function]	ReferenceError	1	true	
+20	SyntaxError	data	false	true	true	function	[object Function]	SyntaxError	1	true	
+21	TypeError	data	false	true	true	function	[object Function]	TypeError	1	true	
+22	URIError	data	false	true	true	function	[object Function]	URIError	1	true	
+23	globalThis	data	false	true	true	object	[object Window]				
+24	JSON	data	false	true	true	object	[object JSON]				
+25	Math	data	false	true	true	object	[object Math]				
+26	Intl	data	false	true	true	object	[object Intl]				
+27	ArrayBuffer	data	false	true	true	function	[object Function]	ArrayBuffer	1	true	
+28	Atomics	data	false	true	true	object	[object Atomics]				
+29	Uint8Array	data	false	true	true	function	[object Function]	Uint8Array	3	true	
+30	Int8Array	data	false	true	true	function	[object Function]	Int8Array	3	true	
+31	Uint16Array	data	false	true	true	function	[object Function]	Uint16Array	3	true	
+32	Int16Array	data	false	true	true	function	[object Function]	Int16Array	3	true	
+33	Uint32Array	data	false	true	true	function	[object Function]	Uint32Array	3	true	
+34	Int32Array	data	false	true	true	function	[object Function]	Int32Array	3	true	
+35	BigUint64Array	data	false	true	true	function	[object Function]	BigUint64Array	3	true	
+36	BigInt64Array	data	false	true	true	function	[object Function]	BigInt64Array	3	true	
+37	Uint8ClampedArray	data	false	true	true	function	[object Function]	Uint8ClampedArray	3	true	
+38	Float32Array	data	false	true	true	function	[object Function]	Float32Array	3	true	
+39	Float64Array	data	false	true	true	function	[object Function]	Float64Array	3	true	
+40	DataView	data	false	true	true	function	[object Function]	DataView	1	true	
+41	Map	data	false	true	true	function	[object Function]	Map	0	true	
+42	BigInt	data	false	true	true	function	[object Function]	BigInt	1	true	
+43	Set	data	false	true	true	function	[object Function]	Set	0	true	
+44	Iterator	data	false	true	true	function	[object Function]	Iterator	0	true	
+45	WeakMap	data	false	true	true	function	[object Function]	WeakMap	0	true	
+46	WeakSet	data	false	true	true	function	[object Function]	WeakSet	0	true	
+47	Proxy	data	false	true	true	function	[object Function]	Proxy	2	true	
+48	Reflect	data	false	true	true	object	[object Reflect]				
+49	FinalizationRegistry	data	false	true	true	function	[object Function]	FinalizationRegistry	1	true	
+50	WeakRef	data	false	true	true	function	[object Function]	WeakRef	1	true	
+51	decodeURI	data	false	true	true	function	[object Function]	decodeURI	1	true	
+52	decodeURIComponent	data	false	true	true	function	[object Function]	decodeURIComponent	1	true	
+53	encodeURI	data	false	true	true	function	[object Function]	encodeURI	1	true	
+54	encodeURIComponent	data	false	true	true	function	[object Function]	encodeURIComponent	1	true	
+55	escape	data	false	true	true	function	[object Function]	escape	1	true	
+56	unescape	data	false	true	true	function	[object Function]	unescape	1	true	
+57	eval	data	false	true	true	function	[object Function]	eval	1	true	
+58	isFinite	data	false	true	true	function	[object Function]	isFinite	1	true	
+59	isNaN	data	false	true	true	function	[object Function]	isNaN	1	true	
+60	console	data	false	true	true	object	[object console]				
+61	Option	data	false	true	true	function	[object Function]	Option	0	true	
+62	Image	data	false	true	true	function	[object Function]	Image	0	true	
+63	Audio	data	false	true	true	function	[object Function]	Audio	0	true	
+64	webkitURL	data	false	true	true	function	[object Function]	URL	1	true	
+65	webkitRTCPeerConnection	data	false	true	true	function	[object Function]	RTCPeerConnection	0	true	
+66	webkitMediaStream	data	false	true	true	function	[object Function]	MediaStream	0	true	
+67	WebKitMutationObserver	data	false	true	true	function	[object Function]	MutationObserver	1	true	
+68	WebKitCSSMatrix	data	false	true	true	function	[object Function]	DOMMatrix	0	true	
+69	XPathResult	data	false	true	true	function	[object Function]	XPathResult	0	true	
+70	XPathExpression	data	false	true	true	function	[object Function]	XPathExpression	0	true	
+71	XPathEvaluator	data	false	true	true	function	[object Function]	XPathEvaluator	0	true	
+72	XMLSerializer	data	false	true	true	function	[object Function]	XMLSerializer	0	true	
+73	XMLHttpRequestUpload	data	false	true	true	function	[object Function]	XMLHttpRequestUpload	0	true	
+74	XMLHttpRequestEventTarget	data	false	true	true	function	[object Function]	XMLHttpRequestEventTarget	0	true	
+75	XMLHttpRequest	data	false	true	true	function	[object Function]	XMLHttpRequest	0	true	
+76	XMLDocument	data	false	true	true	function	[object Function]	XMLDocument	0	true	
+77	WritableStreamDefaultWriter	data	false	true	true	function	[object Function]	WritableStreamDefaultWriter	1	true	
+78	WritableStreamDefaultController	data	false	true	true	function	[object Function]	WritableStreamDefaultController	0	true	
+79	WritableStream	data	false	true	true	function	[object Function]	WritableStream	0	true	
+80	Worker	data	false	true	true	function	[object Function]	Worker	1	true	
+81	WindowControlsOverlayGeometryChangeEvent	data	false	true	true	function	[object Function]	WindowControlsOverlayGeometryChangeEvent	2	true	
+82	WindowControlsOverlay	data	false	true	true	function	[object Function]	WindowControlsOverlay	0	true	
+83	Window	data	false	true	true	function	[object Function]	Window	0	true	
+84	WheelEvent	data	false	true	true	function	[object Function]	WheelEvent	1	true	
+85	WebSocket	data	false	true	true	function	[object Function]	WebSocket	1	true	
+86	WebGLVertexArrayObject	data	false	true	true	function	[object Function]	WebGLVertexArrayObject	0	true	
+87	WebGLUniformLocation	data	false	true	true	function	[object Function]	WebGLUniformLocation	0	true	
+88	WebGLTransformFeedback	data	false	true	true	function	[object Function]	WebGLTransformFeedback	0	true	
+89	WebGLTexture	data	false	true	true	function	[object Function]	WebGLTexture	0	true	
+90	WebGLSync	data	false	true	true	function	[object Function]	WebGLSync	0	true	
+91	WebGLShaderPrecisionFormat	data	false	true	true	function	[object Function]	WebGLShaderPrecisionFormat	0	true	
+92	WebGLShader	data	false	true	true	function	[object Function]	WebGLShader	0	true	
+93	WebGLSampler	data	false	true	true	function	[object Function]	WebGLSampler	0	true	
+94	WebGLRenderingContext	data	false	true	true	function	[object Function]	WebGLRenderingContext	0	true	
+95	WebGLRenderbuffer	data	false	true	true	function	[object Function]	WebGLRenderbuffer	0	true	
+96	WebGLQuery	data	false	true	true	function	[object Function]	WebGLQuery	0	true	
+97	WebGLProgram	data	false	true	true	function	[object Function]	WebGLProgram	0	true	
+98	WebGLObject	data	false	true	true	function	[object Function]	WebGLObject	0	true	
+99	WebGLFramebuffer	data	false	true	true	function	[object Function]	WebGLFramebuffer	0	true	
+100	WebGLContextEvent	data	false	true	true	function	[object Function]	WebGLContextEvent	1	true	
+101	WebGLBuffer	data	false	true	true	function	[object Function]	WebGLBuffer	0	true	
+102	WebGLActiveInfo	data	false	true	true	function	[object Function]	WebGLActiveInfo	0	true	
+103	WebGL2RenderingContext	data	false	true	true	function	[object Function]	WebGL2RenderingContext	0	true	
+104	WaveShaperNode	data	false	true	true	function	[object Function]	WaveShaperNode	1	true	
+105	VisualViewport	data	false	true	true	function	[object Function]	VisualViewport	0	true	
+106	VisibilityStateEntry	data	false	true	true	function	[object Function]	VisibilityStateEntry	0	true	
+107	VirtualKeyboardGeometryChangeEvent	data	false	true	true	function	[object Function]	VirtualKeyboardGeometryChangeEvent	1	true	
+108	ViewTransitionTypeSet	data	false	true	true	function	[object Function]	ViewTransitionTypeSet	0	true	
+109	ViewTransition	data	false	true	true	function	[object Function]	ViewTransition	0	true	
+110	ViewTimeline	data	false	true	true	function	[object Function]	ViewTimeline	0	true	
+111	VideoPlaybackQuality	data	false	true	true	function	[object Function]	VideoPlaybackQuality	0	true	
+112	VideoFrame	data	false	true	true	function	[object Function]	VideoFrame	1	true	
+113	VideoColorSpace	data	false	true	true	function	[object Function]	VideoColorSpace	0	true	
+114	ValidityState	data	false	true	true	function	[object Function]	ValidityState	0	true	
+115	VTTCue	data	false	true	true	function	[object Function]	VTTCue	3	true	
+116	UserActivation	data	false	true	true	function	[object Function]	UserActivation	0	true	
+117	URLSearchParams	data	false	true	true	function	[object Function]	URLSearchParams	0	true	
+118	URLPattern	data	false	true	true	function	[object Function]	URLPattern	0	true	
+119	URL	data	false	true	true	function	[object Function]	URL	1	true	
+120	UIEvent	data	false	true	true	function	[object Function]	UIEvent	1	true	
+121	TrustedTypePolicyFactory	data	false	true	true	function	[object Function]	TrustedTypePolicyFactory	0	true	
+122	TrustedTypePolicy	data	false	true	true	function	[object Function]	TrustedTypePolicy	0	true	
+123	TrustedScriptURL	data	false	true	true	function	[object Function]	TrustedScriptURL	0	true	
+124	TrustedScript	data	false	true	true	function	[object Function]	TrustedScript	0	true	
+125	TrustedHTML	data	false	true	true	function	[object Function]	TrustedHTML	0	true	
+126	TreeWalker	data	false	true	true	function	[object Function]	TreeWalker	0	true	
+127	TransitionEvent	data	false	true	true	function	[object Function]	TransitionEvent	1	true	
+128	TransformStreamDefaultController	data	false	true	true	function	[object Function]	TransformStreamDefaultController	0	true	
+129	TransformStream	data	false	true	true	function	[object Function]	TransformStream	0	true	
+130	TrackEvent	data	false	true	true	function	[object Function]	TrackEvent	1	true	
+131	TouchList	data	false	true	true	function	[object Function]	TouchList	0	true	
+132	TouchEvent	data	false	true	true	function	[object Function]	TouchEvent	1	true	
+133	Touch	data	false	true	true	function	[object Function]	Touch	1	true	
+134	ToggleEvent	data	false	true	true	function	[object Function]	ToggleEvent	1	true	
+135	TimeRanges	data	false	true	true	function	[object Function]	TimeRanges	0	true	
+136	TextUpdateEvent	data	false	true	true	function	[object Function]	TextUpdateEvent	1	true	
+137	TextTrackList	data	false	true	true	function	[object Function]	TextTrackList	0	true	
+138	TextTrackCueList	data	false	true	true	function	[object Function]	TextTrackCueList	0	true	
+139	TextTrackCue	data	false	true	true	function	[object Function]	TextTrackCue	0	true	
+140	TextTrack	data	false	true	true	function	[object Function]	TextTrack	0	true	
+141	TextMetrics	data	false	true	true	function	[object Function]	TextMetrics	0	true	
+142	TextFormatUpdateEvent	data	false	true	true	function	[object Function]	TextFormatUpdateEvent	1	true	
+143	TextFormat	data	false	true	true	function	[object Function]	TextFormat	0	true	
+144	TextEvent	data	false	true	true	function	[object Function]	TextEvent	0	true	
+145	TextEncoderStream	data	false	true	true	function	[object Function]	TextEncoderStream	0	true	
+146	TextEncoder	data	false	true	true	function	[object Function]	TextEncoder	0	true	
+147	TextDecoderStream	data	false	true	true	function	[object Function]	TextDecoderStream	0	true	
+148	TextDecoder	data	false	true	true	function	[object Function]	TextDecoder	0	true	
+149	Text	data	false	true	true	function	[object Function]	Text	0	true	
+150	TaskSignal	data	false	true	true	function	[object Function]	TaskSignal	0	true	
+151	TaskPriorityChangeEvent	data	false	true	true	function	[object Function]	TaskPriorityChangeEvent	2	true	
+152	TaskController	data	false	true	true	function	[object Function]	TaskController	0	true	
+153	TaskAttributionTiming	data	false	true	true	function	[object Function]	TaskAttributionTiming	0	true	
+154	SyncManager	data	false	true	true	function	[object Function]	SyncManager	0	true	
+155	Subscriber	data	false	true	true	function	[object Function]	Subscriber	0	true	
+156	SubmitEvent	data	false	true	true	function	[object Function]	SubmitEvent	1	true	
+157	StyleSheetList	data	false	true	true	function	[object Function]	StyleSheetList	0	true	
+158	StyleSheet	data	false	true	true	function	[object Function]	StyleSheet	0	true	
+159	StylePropertyMapReadOnly	data	false	true	true	function	[object Function]	StylePropertyMapReadOnly	0	true	
+160	StylePropertyMap	data	false	true	true	function	[object Function]	StylePropertyMap	0	true	
+161	StorageEvent	data	false	true	true	function	[object Function]	StorageEvent	1	true	
+162	Storage	data	false	true	true	function	[object Function]	Storage	0	true	
+163	StereoPannerNode	data	false	true	true	function	[object Function]	StereoPannerNode	1	true	
+164	StaticRange	data	false	true	true	function	[object Function]	StaticRange	1	true	
+165	SourceBufferList	data	false	true	true	function	[object Function]	SourceBufferList	0	true	
+166	SourceBuffer	data	false	true	true	function	[object Function]	SourceBuffer	0	true	
+167	ShadowRoot	data	false	true	true	function	[object Function]	ShadowRoot	0	true	
+168	Selection	data	false	true	true	function	[object Function]	Selection	0	true	
+169	SecurityPolicyViolationEvent	data	false	true	true	function	[object Function]	SecurityPolicyViolationEvent	1	true	
+170	ScrollTimeline	data	false	true	true	function	[object Function]	ScrollTimeline	0	true	
+171	ScriptProcessorNode	data	false	true	true	function	[object Function]	ScriptProcessorNode	0	true	
+172	ScreenOrientation	data	false	true	true	function	[object Function]	ScreenOrientation	0	true	
+173	Screen	data	false	true	true	function	[object Function]	Screen	0	true	
+174	Scheduling	data	false	true	true	function	[object Function]	Scheduling	0	true	
+175	Scheduler	data	false	true	true	function	[object Function]	Scheduler	0	true	
+176	SVGViewElement	data	false	true	true	function	[object Function]	SVGViewElement	0	true	
+177	SVGUseElement	data	false	true	true	function	[object Function]	SVGUseElement	0	true	
+178	SVGUnitTypes	data	false	true	true	function	[object Function]	SVGUnitTypes	0	true	
+179	SVGTransformList	data	false	true	true	function	[object Function]	SVGTransformList	0	true	
+180	SVGTransform	data	false	true	true	function	[object Function]	SVGTransform	0	true	
+181	SVGTitleElement	data	false	true	true	function	[object Function]	SVGTitleElement	0	true	
+182	SVGTextPositioningElement	data	false	true	true	function	[object Function]	SVGTextPositioningElement	0	true	
+183	SVGTextPathElement	data	false	true	true	function	[object Function]	SVGTextPathElement	0	true	
+184	SVGTextElement	data	false	true	true	function	[object Function]	SVGTextElement	0	true	
+185	SVGTextContentElement	data	false	true	true	function	[object Function]	SVGTextContentElement	0	true	
+186	SVGTSpanElement	data	false	true	true	function	[object Function]	SVGTSpanElement	0	true	
+187	SVGSymbolElement	data	false	true	true	function	[object Function]	SVGSymbolElement	0	true	
+188	SVGSwitchElement	data	false	true	true	function	[object Function]	SVGSwitchElement	0	true	
+189	SVGStyleElement	data	false	true	true	function	[object Function]	SVGStyleElement	0	true	
+190	SVGStringList	data	false	true	true	function	[object Function]	SVGStringList	0	true	
+191	SVGStopElement	data	false	true	true	function	[object Function]	SVGStopElement	0	true	
+192	SVGSetElement	data	false	true	true	function	[object Function]	SVGSetElement	0	true	
+193	SVGScriptElement	data	false	true	true	function	[object Function]	SVGScriptElement	0	true	
+194	SVGSVGElement	data	false	true	true	function	[object Function]	SVGSVGElement	0	true	
+195	SVGRectElement	data	false	true	true	function	[object Function]	SVGRectElement	0	true	
+196	SVGRect	data	false	true	true	function	[object Function]	SVGRect	0	true	
+197	SVGRadialGradientElement	data	false	true	true	function	[object Function]	SVGRadialGradientElement	0	true	
+198	SVGPreserveAspectRatio	data	false	true	true	function	[object Function]	SVGPreserveAspectRatio	0	true	
+199	SVGPolylineElement	data	false	true	true	function	[object Function]	SVGPolylineElement	0	true	
+200	SVGPolygonElement	data	false	true	true	function	[object Function]	SVGPolygonElement	0	true	
+201	SVGPointList	data	false	true	true	function	[object Function]	SVGPointList	0	true	
+202	SVGPoint	data	false	true	true	function	[object Function]	SVGPoint	0	true	
+203	SVGPatternElement	data	false	true	true	function	[object Function]	SVGPatternElement	0	true	
+204	SVGPathElement	data	false	true	true	function	[object Function]	SVGPathElement	0	true	
+205	SVGNumberList	data	false	true	true	function	[object Function]	SVGNumberList	0	true	
+206	SVGNumber	data	false	true	true	function	[object Function]	SVGNumber	0	true	
+207	SVGMetadataElement	data	false	true	true	function	[object Function]	SVGMetadataElement	0	true	
+208	SVGMatrix	data	false	true	true	function	[object Function]	SVGMatrix	0	true	
+209	SVGMaskElement	data	false	true	true	function	[object Function]	SVGMaskElement	0	true	
+210	SVGMarkerElement	data	false	true	true	function	[object Function]	SVGMarkerElement	0	true	
+211	SVGMPathElement	data	false	true	true	function	[object Function]	SVGMPathElement	0	true	
+212	SVGLinearGradientElement	data	false	true	true	function	[object Function]	SVGLinearGradientElement	0	true	
+213	SVGLineElement	data	false	true	true	function	[object Function]	SVGLineElement	0	true	
+214	SVGLengthList	data	false	true	true	function	[object Function]	SVGLengthList	0	true	
+215	SVGLength	data	false	true	true	function	[object Function]	SVGLength	0	true	
+216	SVGImageElement	data	false	true	true	function	[object Function]	SVGImageElement	0	true	
+217	SVGGraphicsElement	data	false	true	true	function	[object Function]	SVGGraphicsElement	0	true	
+218	SVGGradientElement	data	false	true	true	function	[object Function]	SVGGradientElement	0	true	
+219	SVGGeometryElement	data	false	true	true	function	[object Function]	SVGGeometryElement	0	true	
+220	SVGGElement	data	false	true	true	function	[object Function]	SVGGElement	0	true	
+221	SVGForeignObjectElement	data	false	true	true	function	[object Function]	SVGForeignObjectElement	0	true	
+222	SVGFilterElement	data	false	true	true	function	[object Function]	SVGFilterElement	0	true	
+223	SVGFETurbulenceElement	data	false	true	true	function	[object Function]	SVGFETurbulenceElement	0	true	
+224	SVGFETileElement	data	false	true	true	function	[object Function]	SVGFETileElement	0	true	
+225	SVGFESpotLightElement	data	false	true	true	function	[object Function]	SVGFESpotLightElement	0	true	
+226	SVGFESpecularLightingElement	data	false	true	true	function	[object Function]	SVGFESpecularLightingElement	0	true	
+227	SVGFEPointLightElement	data	false	true	true	function	[object Function]	SVGFEPointLightElement	0	true	
+228	SVGFEOffsetElement	data	false	true	true	function	[object Function]	SVGFEOffsetElement	0	true	
+229	SVGFEMorphologyElement	data	false	true	true	function	[object Function]	SVGFEMorphologyElement	0	true	
+230	SVGFEMergeNodeElement	data	false	true	true	function	[object Function]	SVGFEMergeNodeElement	0	true	
+231	SVGFEMergeElement	data	false	true	true	function	[object Function]	SVGFEMergeElement	0	true	
+232	SVGFEImageElement	data	false	true	true	function	[object Function]	SVGFEImageElement	0	true	
+233	SVGFEGaussianBlurElement	data	false	true	true	function	[object Function]	SVGFEGaussianBlurElement	0	true	
+234	SVGFEFuncRElement	data	false	true	true	function	[object Function]	SVGFEFuncRElement	0	true	
+235	SVGFEFuncGElement	data	false	true	true	function	[object Function]	SVGFEFuncGElement	0	true	
+236	SVGFEFuncBElement	data	false	true	true	function	[object Function]	SVGFEFuncBElement	0	true	
+237	SVGFEFuncAElement	data	false	true	true	function	[object Function]	SVGFEFuncAElement	0	true	
+238	SVGFEFloodElement	data	false	true	true	function	[object Function]	SVGFEFloodElement	0	true	
+239	SVGFEDropShadowElement	data	false	true	true	function	[object Function]	SVGFEDropShadowElement	0	true	
+240	SVGFEDistantLightElement	data	false	true	true	function	[object Function]	SVGFEDistantLightElement	0	true	
+241	SVGFEDisplacementMapElement	data	false	true	true	function	[object Function]	SVGFEDisplacementMapElement	0	true	
+242	SVGFEDiffuseLightingElement	data	false	true	true	function	[object Function]	SVGFEDiffuseLightingElement	0	true	
+243	SVGFEConvolveMatrixElement	data	false	true	true	function	[object Function]	SVGFEConvolveMatrixElement	0	true	
+244	SVGFECompositeElement	data	false	true	true	function	[object Function]	SVGFECompositeElement	0	true	
+245	SVGFEComponentTransferElement	data	false	true	true	function	[object Function]	SVGFEComponentTransferElement	0	true	
+246	SVGFEColorMatrixElement	data	false	true	true	function	[object Function]	SVGFEColorMatrixElement	0	true	
+247	SVGFEBlendElement	data	false	true	true	function	[object Function]	SVGFEBlendElement	0	true	
+248	SVGEllipseElement	data	false	true	true	function	[object Function]	SVGEllipseElement	0	true	
+249	SVGElement	data	false	true	true	function	[object Function]	SVGElement	0	true	
+250	SVGDescElement	data	false	true	true	function	[object Function]	SVGDescElement	0	true	
+251	SVGDefsElement	data	false	true	true	function	[object Function]	SVGDefsElement	0	true	
+252	SVGComponentTransferFunctionElement	data	false	true	true	function	[object Function]	SVGComponentTransferFunctionElement	0	true	
+253	SVGClipPathElement	data	false	true	true	function	[object Function]	SVGClipPathElement	0	true	
+254	SVGCircleElement	data	false	true	true	function	[object Function]	SVGCircleElement	0	true	
+255	SVGAnimationElement	data	false	true	true	function	[object Function]	SVGAnimationElement	0	true	
+256	SVGAnimatedTransformList	data	false	true	true	function	[object Function]	SVGAnimatedTransformList	0	true	
+257	SVGAnimatedString	data	false	true	true	function	[object Function]	SVGAnimatedString	0	true	
+258	SVGAnimatedRect	data	false	true	true	function	[object Function]	SVGAnimatedRect	0	true	
+259	SVGAnimatedPreserveAspectRatio	data	false	true	true	function	[object Function]	SVGAnimatedPreserveAspectRatio	0	true	
+260	SVGAnimatedNumberList	data	false	true	true	function	[object Function]	SVGAnimatedNumberList	0	true	
+261	SVGAnimatedNumber	data	false	true	true	function	[object Function]	SVGAnimatedNumber	0	true	
+262	SVGAnimatedLengthList	data	false	true	true	function	[object Function]	SVGAnimatedLengthList	0	true	
+263	SVGAnimatedLength	data	false	true	true	function	[object Function]	SVGAnimatedLength	0	true	
+264	SVGAnimatedInteger	data	false	true	true	function	[object Function]	SVGAnimatedInteger	0	true	
+265	SVGAnimatedEnumeration	data	false	true	true	function	[object Function]	SVGAnimatedEnumeration	0	true	
+266	SVGAnimatedBoolean	data	false	true	true	function	[object Function]	SVGAnimatedBoolean	0	true	
+267	SVGAnimatedAngle	data	false	true	true	function	[object Function]	SVGAnimatedAngle	0	true	
+268	SVGAnimateTransformElement	data	false	true	true	function	[object Function]	SVGAnimateTransformElement	0	true	
+269	SVGAnimateMotionElement	data	false	true	true	function	[object Function]	SVGAnimateMotionElement	0	true	
+270	SVGAnimateElement	data	false	true	true	function	[object Function]	SVGAnimateElement	0	true	
+271	SVGAngle	data	false	true	true	function	[object Function]	SVGAngle	0	true	
+272	SVGAElement	data	false	true	true	function	[object Function]	SVGAElement	0	true	
+273	Response	data	false	true	true	function	[object Function]	Response	0	true	
+274	ResizeObserverSize	data	false	true	true	function	[object Function]	ResizeObserverSize	0	true	
+275	ResizeObserverEntry	data	false	true	true	function	[object Function]	ResizeObserverEntry	0	true	
+276	ResizeObserver	data	false	true	true	function	[object Function]	ResizeObserver	1	true	
+277	Request	data	false	true	true	function	[object Function]	Request	1	true	
+278	ReportingObserver	data	false	true	true	function	[object Function]	ReportingObserver	1	true	
+279	ReportBody	data	false	true	true	function	[object Function]	ReportBody	0	true	
+280	ReadableStreamDefaultReader	data	false	true	true	function	[object Function]	ReadableStreamDefaultReader	1	true	
+281	ReadableStreamDefaultController	data	false	true	true	function	[object Function]	ReadableStreamDefaultController	0	true	
+282	ReadableStreamBYOBRequest	data	false	true	true	function	[object Function]	ReadableStreamBYOBRequest	0	true	
+283	ReadableStreamBYOBReader	data	false	true	true	function	[object Function]	ReadableStreamBYOBReader	1	true	
+284	ReadableStream	data	false	true	true	function	[object Function]	ReadableStream	0	true	
+285	ReadableByteStreamController	data	false	true	true	function	[object Function]	ReadableByteStreamController	0	true	
+286	Range	data	false	true	true	function	[object Function]	Range	0	true	
+287	RadioNodeList	data	false	true	true	function	[object Function]	RadioNodeList	0	true	
+288	RTCTrackEvent	data	false	true	true	function	[object Function]	RTCTrackEvent	2	true	
+289	RTCStatsReport	data	false	true	true	function	[object Function]	RTCStatsReport	0	true	
+290	RTCSessionDescription	data	false	true	true	function	[object Function]	RTCSessionDescription	0	true	
+291	RTCSctpTransport	data	false	true	true	function	[object Function]	RTCSctpTransport	0	true	
+292	RTCRtpTransceiver	data	false	true	true	function	[object Function]	RTCRtpTransceiver	0	true	
+293	RTCRtpSender	data	false	true	true	function	[object Function]	RTCRtpSender	0	true	
+294	RTCRtpReceiver	data	false	true	true	function	[object Function]	RTCRtpReceiver	0	true	
+295	RTCPeerConnectionIceEvent	data	false	true	true	function	[object Function]	RTCPeerConnectionIceEvent	1	true	
+296	RTCPeerConnectionIceErrorEvent	data	false	true	true	function	[object Function]	RTCPeerConnectionIceErrorEvent	2	true	
+297	RTCPeerConnection	data	false	true	true	function	[object Function]	RTCPeerConnection	0	true	
+298	RTCIceTransport	data	false	true	true	function	[object Function]	RTCIceTransport	0	true	
+299	RTCIceCandidate	data	false	true	true	function	[object Function]	RTCIceCandidate	0	true	
+300	RTCErrorEvent	data	false	true	true	function	[object Function]	RTCErrorEvent	2	true	
+301	RTCError	data	false	true	true	function	[object Function]	RTCError	1	true	
+302	RTCEncodedVideoFrame	data	false	true	true	function	[object Function]	RTCEncodedVideoFrame	1	true	
+303	RTCEncodedAudioFrame	data	false	true	true	function	[object Function]	RTCEncodedAudioFrame	1	true	
+304	RTCDtlsTransport	data	false	true	true	function	[object Function]	RTCDtlsTransport	0	true	
+305	RTCDataChannelEvent	data	false	true	true	function	[object Function]	RTCDataChannelEvent	2	true	
+306	RTCDTMFToneChangeEvent	data	false	true	true	function	[object Function]	RTCDTMFToneChangeEvent	2	true	
+307	RTCDTMFSender	data	false	true	true	function	[object Function]	RTCDTMFSender	0	true	
+308	RTCCertificate	data	false	true	true	function	[object Function]	RTCCertificate	0	true	
+309	PromiseRejectionEvent	data	false	true	true	function	[object Function]	PromiseRejectionEvent	2	true	
+310	ProgressEvent	data	false	true	true	function	[object Function]	ProgressEvent	1	true	
+311	ProcessingInstruction	data	false	true	true	function	[object Function]	ProcessingInstruction	0	true	
+312	PopStateEvent	data	false	true	true	function	[object Function]	PopStateEvent	1	true	
+313	PointerEvent	data	false	true	true	function	[object Function]	PointerEvent	1	true	
+314	PluginArray	data	false	true	true	function	[object Function]	PluginArray	0	true	
+315	Plugin	data	false	true	true	function	[object Function]	Plugin	0	true	
+316	PictureInPictureWindow	data	false	true	true	function	[object Function]	PictureInPictureWindow	0	true	
+317	PictureInPictureEvent	data	false	true	true	function	[object Function]	PictureInPictureEvent	2	true	
+318	Permissions	data	false	true	true	function	[object Function]	Permissions	0	true	
+319	PermissionStatus	data	false	true	true	function	[object Function]	PermissionStatus	0	true	
+320	PeriodicWave	data	false	true	true	function	[object Function]	PeriodicWave	1	true	
+321	PerformanceTiming	data	false	true	true	function	[object Function]	PerformanceTiming	0	true	
+322	PerformanceServerTiming	data	false	true	true	function	[object Function]	PerformanceServerTiming	0	true	
+323	PerformanceScriptTiming	data	false	true	true	function	[object Function]	PerformanceScriptTiming	0	true	
+324	PerformanceResourceTiming	data	false	true	true	function	[object Function]	PerformanceResourceTiming	0	true	
+325	PerformancePaintTiming	data	false	true	true	function	[object Function]	PerformancePaintTiming	0	true	
+326	PerformanceObserverEntryList	data	false	true	true	function	[object Function]	PerformanceObserverEntryList	0	true	
+327	PerformanceObserver	data	false	true	true	function	[object Function]	PerformanceObserver	1	true	
+328	PerformanceNavigationTiming	data	false	true	true	function	[object Function]	PerformanceNavigationTiming	0	true	
+329	PerformanceNavigation	data	false	true	true	function	[object Function]	PerformanceNavigation	0	true	
+330	PerformanceMeasure	data	false	true	true	function	[object Function]	PerformanceMeasure	0	true	
+331	PerformanceMark	data	false	true	true	function	[object Function]	PerformanceMark	1	true	
+332	PerformanceLongTaskTiming	data	false	true	true	function	[object Function]	PerformanceLongTaskTiming	0	true	
+333	PerformanceLongAnimationFrameTiming	data	false	true	true	function	[object Function]	PerformanceLongAnimationFrameTiming	0	true	
+334	PerformanceEventTiming	data	false	true	true	function	[object Function]	PerformanceEventTiming	0	true	
+335	PerformanceEntry	data	false	true	true	function	[object Function]	PerformanceEntry	0	true	
+336	PerformanceElementTiming	data	false	true	true	function	[object Function]	PerformanceElementTiming	0	true	
+337	Performance	data	false	true	true	function	[object Function]	Performance	0	true	
+338	Path2D	data	false	true	true	function	[object Function]	Path2D	0	true	
+339	PannerNode	data	false	true	true	function	[object Function]	PannerNode	1	true	
+340	PageTransitionEvent	data	false	true	true	function	[object Function]	PageTransitionEvent	1	true	
+341	OverconstrainedError	data	false	true	true	function	[object Function]	OverconstrainedError	1	true	
+342	OscillatorNode	data	false	true	true	function	[object Function]	OscillatorNode	1	true	
+343	OffscreenCanvasRenderingContext2D	data	false	true	true	function	[object Function]	OffscreenCanvasRenderingContext2D	0	true	
+344	OffscreenCanvas	data	false	true	true	function	[object Function]	OffscreenCanvas	2	true	
+345	OfflineAudioContext	data	false	true	true	function	[object Function]	OfflineAudioContext	1	true	
+346	OfflineAudioCompletionEvent	data	false	true	true	function	[object Function]	OfflineAudioCompletionEvent	2	true	
+347	Observable	data	false	true	true	function	[object Function]	Observable	1	true	
+348	NodeList	data	false	true	true	function	[object Function]	NodeList	0	true	
+349	NodeIterator	data	false	true	true	function	[object Function]	NodeIterator	0	true	
+350	NodeFilter	data	false	true	true	function	[object Function]	NodeFilter	0	true	
+351	Node	data	false	true	true	function	[object Function]	Node	0	true	
+352	NetworkInformation	data	false	true	true	function	[object Function]	NetworkInformation	0	true	
+353	NavigatorUAData	data	false	true	true	function	[object Function]	NavigatorUAData	0	true	
+354	Navigator	data	false	true	true	function	[object Function]	Navigator	0	true	
+355	NavigationTransition	data	false	true	true	function	[object Function]	NavigationTransition	0	true	
+356	NavigationPrecommitController	data	false	true	true	function	[object Function]	NavigationPrecommitController	0	true	
+357	NavigationHistoryEntry	data	false	true	true	function	[object Function]	NavigationHistoryEntry	0	true	
+358	NavigationDestination	data	false	true	true	function	[object Function]	NavigationDestination	0	true	
+359	NavigationCurrentEntryChangeEvent	data	false	true	true	function	[object Function]	NavigationCurrentEntryChangeEvent	2	true	
+360	NavigationActivation	data	false	true	true	function	[object Function]	NavigationActivation	0	true	
+361	Navigation	data	false	true	true	function	[object Function]	Navigation	0	true	
+362	NavigateEvent	data	false	true	true	function	[object Function]	NavigateEvent	2	true	
+363	NamedNodeMap	data	false	true	true	function	[object Function]	NamedNodeMap	0	true	
+364	MutationRecord	data	false	true	true	function	[object Function]	MutationRecord	0	true	
+365	MutationObserver	data	false	true	true	function	[object Function]	MutationObserver	1	true	
+366	MouseEvent	data	false	true	true	function	[object Function]	MouseEvent	1	true	
+367	MimeTypeArray	data	false	true	true	function	[object Function]	MimeTypeArray	0	true	
+368	MimeType	data	false	true	true	function	[object Function]	MimeType	0	true	
+369	MessagePort	data	false	true	true	function	[object Function]	MessagePort	0	true	
+370	MessageEvent	data	false	true	true	function	[object Function]	MessageEvent	1	true	
+371	MessageChannel	data	false	true	true	function	[object Function]	MessageChannel	0	true	
+372	MediaStreamTrackVideoStats	data	false	true	true	function	[object Function]	MediaStreamTrackVideoStats	0	true	
+373	MediaStreamTrackProcessor	data	false	true	true	function	[object Function]	MediaStreamTrackProcessor	1	true	
+374	MediaStreamTrackGenerator	data	false	true	true	function	[object Function]	MediaStreamTrackGenerator	1	true	
+375	MediaStreamTrackEvent	data	false	true	true	function	[object Function]	MediaStreamTrackEvent	2	true	
+376	MediaStreamTrackAudioStats	data	false	true	true	function	[object Function]	MediaStreamTrackAudioStats	0	true	
+377	MediaStreamTrack	data	false	true	true	function	[object Function]	MediaStreamTrack	0	true	
+378	MediaStreamEvent	data	false	true	true	function	[object Function]	MediaStreamEvent	1	true	
+379	MediaStreamAudioSourceNode	data	false	true	true	function	[object Function]	MediaStreamAudioSourceNode	2	true	
+380	MediaStreamAudioDestinationNode	data	false	true	true	function	[object Function]	MediaStreamAudioDestinationNode	1	true	
+381	MediaStream	data	false	true	true	function	[object Function]	MediaStream	0	true	
+382	MediaSourceHandle	data	false	true	true	function	[object Function]	MediaSourceHandle	0	true	
+383	MediaSource	data	false	true	true	function	[object Function]	MediaSource	0	true	
+384	MediaRecorder	data	false	true	true	function	[object Function]	MediaRecorder	1	true	
+385	MediaQueryListEvent	data	false	true	true	function	[object Function]	MediaQueryListEvent	1	true	
+386	MediaQueryList	data	false	true	true	function	[object Function]	MediaQueryList	0	true	
+387	MediaList	data	false	true	true	function	[object Function]	MediaList	0	true	
+388	MediaError	data	false	true	true	function	[object Function]	MediaError	0	true	
+389	MediaEncryptedEvent	data	false	true	true	function	[object Function]	MediaEncryptedEvent	1	true	
+390	MediaElementAudioSourceNode	data	false	true	true	function	[object Function]	MediaElementAudioSourceNode	2	true	
+391	MediaCapabilities	data	false	true	true	function	[object Function]	MediaCapabilities	0	true	
+392	MathMLElement	data	false	true	true	function	[object Function]	MathMLElement	0	true	
+393	Location	data	false	true	true	function	[object Function]	Location	0	true	
+394	LayoutShiftAttribution	data	false	true	true	function	[object Function]	LayoutShiftAttribution	0	true	
+395	LayoutShift	data	false	true	true	function	[object Function]	LayoutShift	0	true	
+396	LargestContentfulPaint	data	false	true	true	function	[object Function]	LargestContentfulPaint	0	true	
+397	KeyframeEffect	data	false	true	true	function	[object Function]	KeyframeEffect	1	true	
+398	KeyboardEvent	data	false	true	true	function	[object Function]	KeyboardEvent	1	true	
+399	IntersectionObserverEntry	data	false	true	true	function	[object Function]	IntersectionObserverEntry	0	true	
+400	IntersectionObserver	data	false	true	true	function	[object Function]	IntersectionObserver	1	true	
+401	InterestEvent	data	false	true	true	function	[object Function]	InterestEvent	1	true	
+402	InputEvent	data	false	true	true	function	[object Function]	InputEvent	1	true	
+403	InputDeviceInfo	data	false	true	true	function	[object Function]	InputDeviceInfo	0	true	
+404	InputDeviceCapabilities	data	false	true	true	function	[object Function]	InputDeviceCapabilities	0	true	
+405	Ink	data	false	true	true	function	[object Function]	Ink	0	true	
+406	ImageData	data	false	true	true	function	[object Function]	ImageData	2	true	
+407	ImageBitmapRenderingContext	data	false	true	true	function	[object Function]	ImageBitmapRenderingContext	0	true	
+408	ImageBitmap	data	false	true	true	function	[object Function]	ImageBitmap	0	true	
+409	IdleDeadline	data	false	true	true	function	[object Function]	IdleDeadline	0	true	
+410	IIRFilterNode	data	false	true	true	function	[object Function]	IIRFilterNode	2	true	
+411	IDBVersionChangeEvent	data	false	true	true	function	[object Function]	IDBVersionChangeEvent	1	true	
+412	IDBTransaction	data	false	true	true	function	[object Function]	IDBTransaction	0	true	
+413	IDBRequest	data	false	true	true	function	[object Function]	IDBRequest	0	true	
+414	IDBRecord	data	false	true	true	function	[object Function]	IDBRecord	0	true	
+415	IDBOpenDBRequest	data	false	true	true	function	[object Function]	IDBOpenDBRequest	0	true	
+416	IDBObjectStore	data	false	true	true	function	[object Function]	IDBObjectStore	0	true	
+417	IDBKeyRange	data	false	true	true	function	[object Function]	IDBKeyRange	0	true	
+418	IDBIndex	data	false	true	true	function	[object Function]	IDBIndex	0	true	
+419	IDBFactory	data	false	true	true	function	[object Function]	IDBFactory	0	true	
+420	IDBDatabase	data	false	true	true	function	[object Function]	IDBDatabase	0	true	
+421	IDBCursorWithValue	data	false	true	true	function	[object Function]	IDBCursorWithValue	0	true	
+422	IDBCursor	data	false	true	true	function	[object Function]	IDBCursor	0	true	
+423	History	data	false	true	true	function	[object Function]	History	0	true	
+424	HighlightRegistry	data	false	true	true	function	[object Function]	HighlightRegistry	0	true	
+425	Highlight	data	false	true	true	function	[object Function]	Highlight	0	true	
+426	Headers	data	false	true	true	function	[object Function]	Headers	0	true	
+427	HashChangeEvent	data	false	true	true	function	[object Function]	HashChangeEvent	1	true	
+428	HTMLVideoElement	data	false	true	true	function	[object Function]	HTMLVideoElement	0	true	
+429	HTMLUnknownElement	data	false	true	true	function	[object Function]	HTMLUnknownElement	0	true	
+430	HTMLUListElement	data	false	true	true	function	[object Function]	HTMLUListElement	0	true	
+431	HTMLTrackElement	data	false	true	true	function	[object Function]	HTMLTrackElement	0	true	
+432	HTMLTitleElement	data	false	true	true	function	[object Function]	HTMLTitleElement	0	true	
+433	HTMLTimeElement	data	false	true	true	function	[object Function]	HTMLTimeElement	0	true	
+434	HTMLTextAreaElement	data	false	true	true	function	[object Function]	HTMLTextAreaElement	0	true	
+435	HTMLTemplateElement	data	false	true	true	function	[object Function]	HTMLTemplateElement	0	true	
+436	HTMLTableSectionElement	data	false	true	true	function	[object Function]	HTMLTableSectionElement	0	true	
+437	HTMLTableRowElement	data	false	true	true	function	[object Function]	HTMLTableRowElement	0	true	
+438	HTMLTableElement	data	false	true	true	function	[object Function]	HTMLTableElement	0	true	
+439	HTMLTableColElement	data	false	true	true	function	[object Function]	HTMLTableColElement	0	true	
+440	HTMLTableCellElement	data	false	true	true	function	[object Function]	HTMLTableCellElement	0	true	
+441	HTMLTableCaptionElement	data	false	true	true	function	[object Function]	HTMLTableCaptionElement	0	true	
+442	HTMLStyleElement	data	false	true	true	function	[object Function]	HTMLStyleElement	0	true	
+443	HTMLSpanElement	data	false	true	true	function	[object Function]	HTMLSpanElement	0	true	
+444	HTMLSourceElement	data	false	true	true	function	[object Function]	HTMLSourceElement	0	true	
+445	HTMLSlotElement	data	false	true	true	function	[object Function]	HTMLSlotElement	0	true	
+446	HTMLSelectedContentElement	data	false	true	true	function	[object Function]	HTMLSelectedContentElement	0	true	
+447	HTMLSelectElement	data	false	true	true	function	[object Function]	HTMLSelectElement	0	true	
+448	HTMLScriptElement	data	false	true	true	function	[object Function]	HTMLScriptElement	0	true	
+449	HTMLQuoteElement	data	false	true	true	function	[object Function]	HTMLQuoteElement	0	true	
+450	HTMLProgressElement	data	false	true	true	function	[object Function]	HTMLProgressElement	0	true	
+451	HTMLPreElement	data	false	true	true	function	[object Function]	HTMLPreElement	0	true	
+452	HTMLPictureElement	data	false	true	true	function	[object Function]	HTMLPictureElement	0	true	
+453	HTMLParamElement	data	false	true	true	function	[object Function]	HTMLParamElement	0	true	
+454	HTMLParagraphElement	data	false	true	true	function	[object Function]	HTMLParagraphElement	0	true	
+455	HTMLOutputElement	data	false	true	true	function	[object Function]	HTMLOutputElement	0	true	
+456	HTMLOptionsCollection	data	false	true	true	function	[object Function]	HTMLOptionsCollection	0	true	
+457	HTMLOptionElement	data	false	true	true	function	[object Function]	HTMLOptionElement	0	true	
+458	HTMLOptGroupElement	data	false	true	true	function	[object Function]	HTMLOptGroupElement	0	true	
+459	HTMLObjectElement	data	false	true	true	function	[object Function]	HTMLObjectElement	0	true	
+460	HTMLOListElement	data	false	true	true	function	[object Function]	HTMLOListElement	0	true	
+461	HTMLModElement	data	false	true	true	function	[object Function]	HTMLModElement	0	true	
+462	HTMLMeterElement	data	false	true	true	function	[object Function]	HTMLMeterElement	0	true	
+463	HTMLMetaElement	data	false	true	true	function	[object Function]	HTMLMetaElement	0	true	
+464	HTMLMenuElement	data	false	true	true	function	[object Function]	HTMLMenuElement	0	true	
+465	HTMLMediaElement	data	false	true	true	function	[object Function]	HTMLMediaElement	0	true	
+466	HTMLMarqueeElement	data	false	true	true	function	[object Function]	HTMLMarqueeElement	0	true	
+467	HTMLMapElement	data	false	true	true	function	[object Function]	HTMLMapElement	0	true	
+468	HTMLLinkElement	data	false	true	true	function	[object Function]	HTMLLinkElement	0	true	
+469	HTMLLegendElement	data	false	true	true	function	[object Function]	HTMLLegendElement	0	true	
+470	HTMLLabelElement	data	false	true	true	function	[object Function]	HTMLLabelElement	0	true	
+471	HTMLLIElement	data	false	true	true	function	[object Function]	HTMLLIElement	0	true	
+472	HTMLInputElement	data	false	true	true	function	[object Function]	HTMLInputElement	0	true	
+473	HTMLImageElement	data	false	true	true	function	[object Function]	HTMLImageElement	0	true	
+474	HTMLIFrameElement	data	false	true	true	function	[object Function]	HTMLIFrameElement	0	true	
+475	HTMLHtmlElement	data	false	true	true	function	[object Function]	HTMLHtmlElement	0	true	
+476	HTMLHeadingElement	data	false	true	true	function	[object Function]	HTMLHeadingElement	0	true	
+477	HTMLHeadElement	data	false	true	true	function	[object Function]	HTMLHeadElement	0	true	
+478	HTMLHRElement	data	false	true	true	function	[object Function]	HTMLHRElement	0	true	
+479	HTMLFrameSetElement	data	false	true	true	function	[object Function]	HTMLFrameSetElement	0	true	
+480	HTMLFrameElement	data	false	true	true	function	[object Function]	HTMLFrameElement	0	true	
+481	HTMLFormElement	data	false	true	true	function	[object Function]	HTMLFormElement	0	true	
+482	HTMLFormControlsCollection	data	false	true	true	function	[object Function]	HTMLFormControlsCollection	0	true	
+483	HTMLFontElement	data	false	true	true	function	[object Function]	HTMLFontElement	0	true	
+484	HTMLFieldSetElement	data	false	true	true	function	[object Function]	HTMLFieldSetElement	0	true	
+485	HTMLEmbedElement	data	false	true	true	function	[object Function]	HTMLEmbedElement	0	true	
+486	HTMLElement	data	false	true	true	function	[object Function]	HTMLElement	0	true	
+487	HTMLDocument	data	false	true	true	function	[object Function]	HTMLDocument	0	true	
+488	HTMLDivElement	data	false	true	true	function	[object Function]	HTMLDivElement	0	true	
+489	HTMLDirectoryElement	data	false	true	true	function	[object Function]	HTMLDirectoryElement	0	true	
+490	HTMLDialogElement	data	false	true	true	function	[object Function]	HTMLDialogElement	0	true	
+491	HTMLDetailsElement	data	false	true	true	function	[object Function]	HTMLDetailsElement	0	true	
+492	HTMLDataListElement	data	false	true	true	function	[object Function]	HTMLDataListElement	0	true	
+493	HTMLDataElement	data	false	true	true	function	[object Function]	HTMLDataElement	0	true	
+494	HTMLDListElement	data	false	true	true	function	[object Function]	HTMLDListElement	0	true	
+495	HTMLCollection	data	false	true	true	function	[object Function]	HTMLCollection	0	true	
+496	HTMLCanvasElement	data	false	true	true	function	[object Function]	HTMLCanvasElement	0	true	
+497	HTMLButtonElement	data	false	true	true	function	[object Function]	HTMLButtonElement	0	true	
+498	HTMLBodyElement	data	false	true	true	function	[object Function]	HTMLBodyElement	0	true	
+499	HTMLBaseElement	data	false	true	true	function	[object Function]	HTMLBaseElement	0	true	
+500	HTMLBRElement	data	false	true	true	function	[object Function]	HTMLBRElement	0	true	
+501	HTMLAudioElement	data	false	true	true	function	[object Function]	HTMLAudioElement	0	true	
+502	HTMLAreaElement	data	false	true	true	function	[object Function]	HTMLAreaElement	0	true	
+503	HTMLAnchorElement	data	false	true	true	function	[object Function]	HTMLAnchorElement	0	true	
+504	HTMLAllCollection	data	false	true	true	function	[object Function]	HTMLAllCollection	0	true	
+505	GeolocationPositionError	data	false	true	true	function	[object Function]	GeolocationPositionError	0	true	
+506	GeolocationPosition	data	false	true	true	function	[object Function]	GeolocationPosition	0	true	
+507	GeolocationCoordinates	data	false	true	true	function	[object Function]	GeolocationCoordinates	0	true	
+508	Geolocation	data	false	true	true	function	[object Function]	Geolocation	0	true	
+509	GamepadHapticActuator	data	false	true	true	function	[object Function]	GamepadHapticActuator	0	true	
+510	GamepadEvent	data	false	true	true	function	[object Function]	GamepadEvent	1	true	
+511	GamepadButton	data	false	true	true	function	[object Function]	GamepadButton	0	true	
+512	Gamepad	data	false	true	true	function	[object Function]	Gamepad	0	true	
+513	GainNode	data	false	true	true	function	[object Function]	GainNode	1	true	
+514	FormDataEvent	data	false	true	true	function	[object Function]	FormDataEvent	2	true	
+515	FormData	data	false	true	true	function	[object Function]	FormData	0	true	
+516	FontFaceSetLoadEvent	data	false	true	true	function	[object Function]	FontFaceSetLoadEvent	1	true	
+517	FontFace	data	false	true	true	function	[object Function]	FontFace	2	true	
+518	FocusEvent	data	false	true	true	function	[object Function]	FocusEvent	1	true	
+519	FileReader	data	false	true	true	function	[object Function]	FileReader	0	true	
+520	FileList	data	false	true	true	function	[object Function]	FileList	0	true	
+521	File	data	false	true	true	function	[object Function]	File	2	true	
+522	FeaturePolicy	data	false	true	true	function	[object Function]	FeaturePolicy	0	true	
+523	External	data	false	true	true	function	[object Function]	External	0	true	
+524	EventTarget	data	false	true	true	function	[object Function]	EventTarget	0	true	
+525	EventSource	data	false	true	true	function	[object Function]	EventSource	1	true	
+526	EventCounts	data	false	true	true	function	[object Function]	EventCounts	0	true	
+527	Event	data	false	true	true	function	[object Function]	Event	1	true	
+528	ErrorEvent	data	false	true	true	function	[object Function]	ErrorEvent	1	true	
+529	EncodedVideoChunk	data	false	true	true	function	[object Function]	EncodedVideoChunk	1	true	
+530	EncodedAudioChunk	data	false	true	true	function	[object Function]	EncodedAudioChunk	1	true	
+531	ElementInternals	data	false	true	true	function	[object Function]	ElementInternals	0	true	
+532	Element	data	false	true	true	function	[object Function]	Element	0	true	
+533	EditContext	data	false	true	true	function	[object Function]	EditContext	0	true	
+534	DynamicsCompressorNode	data	false	true	true	function	[object Function]	DynamicsCompressorNode	1	true	
+535	DragEvent	data	false	true	true	function	[object Function]	DragEvent	1	true	
+536	DocumentType	data	false	true	true	function	[object Function]	DocumentType	0	true	
+537	DocumentTimeline	data	false	true	true	function	[object Function]	DocumentTimeline	0	true	
+538	DocumentFragment	data	false	true	true	function	[object Function]	DocumentFragment	0	true	
+539	Document	data	false	true	true	function	[object Function]	Document	0	true	
+540	DelegatedInkTrailPresenter	data	false	true	true	function	[object Function]	DelegatedInkTrailPresenter	0	true	
+541	DelayNode	data	false	true	true	function	[object Function]	DelayNode	1	true	
+542	DecompressionStream	data	false	true	true	function	[object Function]	DecompressionStream	1	true	
+543	DataTransferItemList	data	false	true	true	function	[object Function]	DataTransferItemList	0	true	
+544	DataTransferItem	data	false	true	true	function	[object Function]	DataTransferItem	0	true	
+545	DataTransfer	data	false	true	true	function	[object Function]	DataTransfer	0	true	
+546	DOMTokenList	data	false	true	true	function	[object Function]	DOMTokenList	0	true	
+547	DOMStringMap	data	false	true	true	function	[object Function]	DOMStringMap	0	true	
+548	DOMStringList	data	false	true	true	function	[object Function]	DOMStringList	0	true	
+549	DOMRectReadOnly	data	false	true	true	function	[object Function]	DOMRectReadOnly	0	true	
+550	DOMRectList	data	false	true	true	function	[object Function]	DOMRectList	0	true	
+551	DOMRect	data	false	true	true	function	[object Function]	DOMRect	0	true	
+552	DOMQuad	data	false	true	true	function	[object Function]	DOMQuad	0	true	
+553	DOMPointReadOnly	data	false	true	true	function	[object Function]	DOMPointReadOnly	0	true	
+554	DOMPoint	data	false	true	true	function	[object Function]	DOMPoint	0	true	
+555	DOMParser	data	false	true	true	function	[object Function]	DOMParser	0	true	
+556	DOMMatrixReadOnly	data	false	true	true	function	[object Function]	DOMMatrixReadOnly	0	true	
+557	DOMMatrix	data	false	true	true	function	[object Function]	DOMMatrix	0	true	
+558	DOMImplementation	data	false	true	true	function	[object Function]	DOMImplementation	0	true	
+559	DOMException	data	false	true	true	function	[object Function]	DOMException	0	true	
+560	DOMError	data	false	true	true	function	[object Function]	DOMError	1	true	
+561	CustomStateSet	data	false	true	true	function	[object Function]	CustomStateSet	0	true	
+562	CustomEvent	data	false	true	true	function	[object Function]	CustomEvent	1	true	
+563	CustomElementRegistry	data	false	true	true	function	[object Function]	CustomElementRegistry	0	true	
+564	Crypto	data	false	true	true	function	[object Function]	Crypto	0	true	
+565	CountQueuingStrategy	data	false	true	true	function	[object Function]	CountQueuingStrategy	1	true	
+566	ConvolverNode	data	false	true	true	function	[object Function]	ConvolverNode	1	true	
+567	ContentVisibilityAutoStateChangeEvent	data	false	true	true	function	[object Function]	ContentVisibilityAutoStateChangeEvent	1	true	
+568	ConstantSourceNode	data	false	true	true	function	[object Function]	ConstantSourceNode	1	true	
+569	CompressionStream	data	false	true	true	function	[object Function]	CompressionStream	1	true	
+570	CompositionEvent	data	false	true	true	function	[object Function]	CompositionEvent	1	true	
+571	Comment	data	false	true	true	function	[object Function]	Comment	0	true	
+572	CommandEvent	data	false	true	true	function	[object Function]	CommandEvent	1	true	
+573	CloseWatcher	data	false	true	true	function	[object Function]	CloseWatcher	0	true	
+574	CloseEvent	data	false	true	true	function	[object Function]	CloseEvent	1	true	
+575	ClipboardEvent	data	false	true	true	function	[object Function]	ClipboardEvent	1	true	
+576	CharacterData	data	false	true	true	function	[object Function]	CharacterData	0	true	
+577	CharacterBoundsUpdateEvent	data	false	true	true	function	[object Function]	CharacterBoundsUpdateEvent	1	true	
+578	ChannelSplitterNode	data	false	true	true	function	[object Function]	ChannelSplitterNode	1	true	
+579	ChannelMergerNode	data	false	true	true	function	[object Function]	ChannelMergerNode	1	true	
+580	CaretPosition	data	false	true	true	function	[object Function]	CaretPosition	0	true	
+581	CanvasRenderingContext2D	data	false	true	true	function	[object Function]	CanvasRenderingContext2D	0	true	
+582	CanvasPattern	data	false	true	true	function	[object Function]	CanvasPattern	0	true	
+583	CanvasGradient	data	false	true	true	function	[object Function]	CanvasGradient	0	true	
+584	CanvasCaptureMediaStreamTrack	data	false	true	true	function	[object Function]	CanvasCaptureMediaStreamTrack	0	true	
+585	CSSViewTransitionRule	data	false	true	true	function	[object Function]	CSSViewTransitionRule	0	true	
+586	CSSVariableReferenceValue	data	false	true	true	function	[object Function]	CSSVariableReferenceValue	1	true	
+587	CSSUnparsedValue	data	false	true	true	function	[object Function]	CSSUnparsedValue	1	true	
+588	CSSUnitValue	data	false	true	true	function	[object Function]	CSSUnitValue	2	true	
+589	CSSTranslate	data	false	true	true	function	[object Function]	CSSTranslate	2	true	
+590	CSSTransition	data	false	true	true	function	[object Function]	CSSTransition	0	true	
+591	CSSTransformValue	data	false	true	true	function	[object Function]	CSSTransformValue	1	true	
+592	CSSTransformComponent	data	false	true	true	function	[object Function]	CSSTransformComponent	0	true	
+593	CSSSupportsRule	data	false	true	true	function	[object Function]	CSSSupportsRule	0	true	
+594	CSSStyleValue	data	false	true	true	function	[object Function]	CSSStyleValue	0	true	
+595	CSSStyleSheet	data	false	true	true	function	[object Function]	CSSStyleSheet	0	true	
+596	CSSStyleRule	data	false	true	true	function	[object Function]	CSSStyleRule	0	true	
+597	CSSStyleDeclaration	data	false	true	true	function	[object Function]	CSSStyleDeclaration	0	true	
+598	CSSStartingStyleRule	data	false	true	true	function	[object Function]	CSSStartingStyleRule	0	true	
+599	CSSSkewY	data	false	true	true	function	[object Function]	CSSSkewY	1	true	
+600	CSSSkewX	data	false	true	true	function	[object Function]	CSSSkewX	1	true	
+601	CSSSkew	data	false	true	true	function	[object Function]	CSSSkew	2	true	
+602	CSSScopeRule	data	false	true	true	function	[object Function]	CSSScopeRule	0	true	
+603	CSSScale	data	false	true	true	function	[object Function]	CSSScale	2	true	
+604	CSSRuleList	data	false	true	true	function	[object Function]	CSSRuleList	0	true	
+605	CSSRule	data	false	true	true	function	[object Function]	CSSRule	0	true	
+606	CSSRotate	data	false	true	true	function	[object Function]	CSSRotate	1	true	
+607	CSSPropertyRule	data	false	true	true	function	[object Function]	CSSPropertyRule	0	true	
+608	CSSPositionValue	data	false	true	true	function	[object Function]	CSSPositionValue	2	true	
+609	CSSPositionTryRule	data	false	true	true	function	[object Function]	CSSPositionTryRule	0	true	
+610	CSSPositionTryDescriptors	data	false	true	true	function	[object Function]	CSSPositionTryDescriptors	0	true	
+611	CSSPerspective	data	false	true	true	function	[object Function]	CSSPerspective	1	true	
+612	CSSPageRule	data	false	true	true	function	[object Function]	CSSPageRule	0	true	
+613	CSSNumericValue	data	false	true	true	function	[object Function]	CSSNumericValue	0	true	
+614	CSSNumericArray	data	false	true	true	function	[object Function]	CSSNumericArray	0	true	
+615	CSSNestedDeclarations	data	false	true	true	function	[object Function]	CSSNestedDeclarations	0	true	
+616	CSSNamespaceRule	data	false	true	true	function	[object Function]	CSSNamespaceRule	0	true	
+617	CSSMediaRule	data	false	true	true	function	[object Function]	CSSMediaRule	0	true	
+618	CSSMatrixComponent	data	false	true	true	function	[object Function]	CSSMatrixComponent	1	true	
+619	CSSMathValue	data	false	true	true	function	[object Function]	CSSMathValue	0	true	
+620	CSSMathSum	data	false	true	true	function	[object Function]	CSSMathSum	0	true	
+621	CSSMathProduct	data	false	true	true	function	[object Function]	CSSMathProduct	0	true	
+622	CSSMathNegate	data	false	true	true	function	[object Function]	CSSMathNegate	1	true	
+623	CSSMathMin	data	false	true	true	function	[object Function]	CSSMathMin	0	true	
+624	CSSMathMax	data	false	true	true	function	[object Function]	CSSMathMax	0	true	
+625	CSSMathInvert	data	false	true	true	function	[object Function]	CSSMathInvert	1	true	
+626	CSSMathClamp	data	false	true	true	function	[object Function]	CSSMathClamp	3	true	
+627	CSSMarginRule	data	false	true	true	function	[object Function]	CSSMarginRule	0	true	
+628	CSSLayerStatementRule	data	false	true	true	function	[object Function]	CSSLayerStatementRule	0	true	
+629	CSSLayerBlockRule	data	false	true	true	function	[object Function]	CSSLayerBlockRule	0	true	
+630	CSSKeywordValue	data	false	true	true	function	[object Function]	CSSKeywordValue	1	true	
+631	CSSKeyframesRule	data	false	true	true	function	[object Function]	CSSKeyframesRule	0	true	
+632	CSSKeyframeRule	data	false	true	true	function	[object Function]	CSSKeyframeRule	0	true	
+633	CSSImportRule	data	false	true	true	function	[object Function]	CSSImportRule	0	true	
+634	CSSImageValue	data	false	true	true	function	[object Function]	CSSImageValue	0	true	
+635	CSSGroupingRule	data	false	true	true	function	[object Function]	CSSGroupingRule	0	true	
+636	CSSFontPaletteValuesRule	data	false	true	true	function	[object Function]	CSSFontPaletteValuesRule	0	true	
+637	CSSFontFaceRule	data	false	true	true	function	[object Function]	CSSFontFaceRule	0	true	
+638	CSSCounterStyleRule	data	false	true	true	function	[object Function]	CSSCounterStyleRule	0	true	
+639	CSSContainerRule	data	false	true	true	function	[object Function]	CSSContainerRule	0	true	
+640	CSSConditionRule	data	false	true	true	function	[object Function]	CSSConditionRule	0	true	
+641	CSSAnimation	data	false	true	true	function	[object Function]	CSSAnimation	0	true	
+642	CSS	data	false	true	true	object	[object CSS]				
+643	CSPViolationReportBody	data	false	true	true	function	[object Function]	CSPViolationReportBody	0	true	
+644	CDATASection	data	false	true	true	function	[object Function]	CDATASection	0	true	
+645	ByteLengthQueuingStrategy	data	false	true	true	function	[object Function]	ByteLengthQueuingStrategy	1	true	
+646	BrowserCaptureMediaStreamTrack	data	false	true	true	function	[object Function]	BrowserCaptureMediaStreamTrack	0	true	
+647	BroadcastChannel	data	false	true	true	function	[object Function]	BroadcastChannel	1	true	
+648	BlobEvent	data	false	true	true	function	[object Function]	BlobEvent	2	true	
+649	Blob	data	false	true	true	function	[object Function]	Blob	0	true	
+650	BiquadFilterNode	data	false	true	true	function	[object Function]	BiquadFilterNode	1	true	
+651	BeforeUnloadEvent	data	false	true	true	function	[object Function]	BeforeUnloadEvent	0	true	
+652	BeforeInstallPromptEvent	data	false	true	true	function	[object Function]	BeforeInstallPromptEvent	1	true	
+653	BaseAudioContext	data	false	true	true	function	[object Function]	BaseAudioContext	0	true	
+654	BarProp	data	false	true	true	function	[object Function]	BarProp	0	true	
+655	AudioWorkletNode	data	false	true	true	function	[object Function]	AudioWorkletNode	2	true	
+656	AudioSinkInfo	data	false	true	true	function	[object Function]	AudioSinkInfo	0	true	
+657	AudioScheduledSourceNode	data	false	true	true	function	[object Function]	AudioScheduledSourceNode	0	true	
+658	AudioProcessingEvent	data	false	true	true	function	[object Function]	AudioProcessingEvent	2	true	
+659	AudioParamMap	data	false	true	true	function	[object Function]	AudioParamMap	0	true	
+660	AudioParam	data	false	true	true	function	[object Function]	AudioParam	0	true	
+661	AudioNode	data	false	true	true	function	[object Function]	AudioNode	0	true	
+662	AudioListener	data	false	true	true	function	[object Function]	AudioListener	0	true	
+663	AudioDestinationNode	data	false	true	true	function	[object Function]	AudioDestinationNode	0	true	
+664	AudioData	data	false	true	true	function	[object Function]	AudioData	1	true	
+665	AudioContext	data	false	true	true	function	[object Function]	AudioContext	0	true	
+666	AudioBufferSourceNode	data	false	true	true	function	[object Function]	AudioBufferSourceNode	1	true	
+667	AudioBuffer	data	false	true	true	function	[object Function]	AudioBuffer	1	true	
+668	Attr	data	false	true	true	function	[object Function]	Attr	0	true	
+669	AnimationTimeline	data	false	true	true	function	[object Function]	AnimationTimeline	0	true	
+670	AnimationPlaybackEvent	data	false	true	true	function	[object Function]	AnimationPlaybackEvent	1	true	
+671	AnimationEvent	data	false	true	true	function	[object Function]	AnimationEvent	1	true	
+672	AnimationEffect	data	false	true	true	function	[object Function]	AnimationEffect	0	true	
+673	Animation	data	false	true	true	function	[object Function]	Animation	0	true	
+674	AnalyserNode	data	false	true	true	function	[object Function]	AnalyserNode	1	true	
+675	AbstractRange	data	false	true	true	function	[object Function]	AbstractRange	0	true	
+676	AbortSignal	data	false	true	true	function	[object Function]	AbortSignal	0	true	
+677	AbortController	data	false	true	true	function	[object Function]	AbortController	0	true	
+678	window	accessor	true	false	false	object	[object Window]				
+679	self	accessor	true	true	false	object	[object Window]				
+680	document	accessor	true	false	false	object	[object HTMLDocument]				
+681	name	accessor	true	true	false	string	[object String]				
+682	location	accessor	true	false	false	object	[object Location]				
+683	customElements	accessor	true	true	false	object	[object CustomElementRegistry]				
+684	history	accessor	true	true	false	object	[object History]				
+685	navigation	accessor	true	true	false	object	[object Navigation]				
+686	locationbar	accessor	true	true	false	object	[object BarProp]				
+687	menubar	accessor	true	true	false	object	[object BarProp]				
+688	personalbar	accessor	true	true	false	object	[object BarProp]				
+689	scrollbars	accessor	true	true	false	object	[object BarProp]				
+690	statusbar	accessor	true	true	false	object	[object BarProp]				
+691	toolbar	accessor	true	true	false	object	[object BarProp]				
+692	status	accessor	true	true	false	string	[object String]				
+693	closed	accessor	true	true	false	boolean	[object Boolean]				
+694	frames	accessor	true	true	false	object	[object Window]				
+695	length	accessor	true	true	false	number	[object Number]				
+696	top	accessor	true	false	false	object	[object Window]				
+697	opener	accessor	true	true	false	object	null				
+698	parent	accessor	true	true	false	object	[object Window]				
+699	frameElement	accessor	true	true	false	object	null				
+700	navigator	accessor	true	true	false	object	[object Navigator]				
+701	origin	accessor	true	true	false	string	[object String]				
+702	external	accessor	true	true	false	object	[object External]				
+703	screen	accessor	true	true	false	object	[object Screen]				
+704	innerWidth	accessor	true	true	false	number	[object Number]				
+705	innerHeight	accessor	true	true	false	number	[object Number]				
+706	scrollX	accessor	true	true	false	number	[object Number]				
+707	pageXOffset	accessor	true	true	false	number	[object Number]				
+708	scrollY	accessor	true	true	false	number	[object Number]				
+709	pageYOffset	accessor	true	true	false	number	[object Number]				
+710	visualViewport	accessor	true	true	false	object	[object VisualViewport]				
+711	screenX	accessor	true	true	false	number	[object Number]				
+712	screenY	accessor	true	true	false	number	[object Number]				
+713	outerWidth	accessor	true	true	false	number	[object Number]				
+714	outerHeight	accessor	true	true	false	number	[object Number]				
+715	devicePixelRatio	accessor	true	true	false	number	[object Number]				
+716	event	accessor	true	true	false	undefined	undefined				
+717	clientInformation	accessor	true	true	false	object	[object Navigator]				
+718	offscreenBuffering	accessor	false	true	false	boolean	[object Boolean]				
+719	screenLeft	accessor	true	true	false	number	[object Number]				
+720	screenTop	accessor	true	true	false	number	[object Number]				
+721	styleMedia	accessor	true	true	false	object	[object StyleMedia]				
+722	onsearch	accessor	true	true	false	object	null				
+723	onappinstalled	accessor	true	true	false	object	null				
+724	onbeforeinstallprompt	accessor	true	true	false	object	null				
+725	onabort	accessor	true	true	false	object	null				
+726	onbeforeinput	accessor	true	true	false	object	null				
+727	onbeforematch	accessor	true	true	false	object	null				
+728	onbeforetoggle	accessor	true	true	false	object	null				
+729	onblur	accessor	true	true	false	object	null				
+730	oncancel	accessor	true	true	false	object	null				
+731	oncanplay	accessor	true	true	false	object	null				
+732	oncanplaythrough	accessor	true	true	false	object	null				
+733	onchange	accessor	true	true	false	object	null				
+734	onclick	accessor	true	true	false	object	null				
+735	onclose	accessor	true	true	false	object	null				
+736	oncommand	accessor	true	true	false	object	null				
+737	oncontentvisibilityautostatechange	accessor	true	true	false	object	null				
+738	oncontextlost	accessor	true	true	false	object	null				
+739	oncontextmenu	accessor	true	true	false	object	null				
+740	oncontextrestored	accessor	true	true	false	object	null				
+741	oncuechange	accessor	true	true	false	object	null				
+742	ondblclick	accessor	true	true	false	object	null				
+743	ondrag	accessor	true	true	false	object	null				
+744	ondragend	accessor	true	true	false	object	null				
+745	ondragenter	accessor	true	true	false	object	null				
+746	ondragleave	accessor	true	true	false	object	null				
+747	ondragover	accessor	true	true	false	object	null				
+748	ondragstart	accessor	true	true	false	object	null				
+749	ondrop	accessor	true	true	false	object	null				
+750	ondurationchange	accessor	true	true	false	object	null				
+751	onemptied	accessor	true	true	false	object	null				
+752	onended	accessor	true	true	false	object	null				
+753	onerror	accessor	true	true	false	object	null				
+754	onfocus	accessor	true	true	false	object	null				
+755	onformdata	accessor	true	true	false	object	null				
+756	oninput	accessor	true	true	false	object	null				
+757	oninvalid	accessor	true	true	false	object	null				
+758	onkeydown	accessor	true	true	false	object	null				
+759	onkeypress	accessor	true	true	false	object	null				
+760	onkeyup	accessor	true	true	false	object	null				
+761	onload	accessor	true	true	false	object	null				
+762	onloadeddata	accessor	true	true	false	object	null				
+763	onloadedmetadata	accessor	true	true	false	object	null				
+764	onloadstart	accessor	true	true	false	object	null				
+765	onmousedown	accessor	true	true	false	object	null				
+766	onmouseenter	accessor	true	true	false	object	null				
+767	onmouseleave	accessor	true	true	false	object	null				
+768	onmousemove	accessor	true	true	false	object	null				
+769	onmouseout	accessor	true	true	false	object	null				
+770	onmouseover	accessor	true	true	false	object	null				
+771	onmouseup	accessor	true	true	false	object	null				
+772	onmousewheel	accessor	true	true	false	object	null				
+773	onpause	accessor	true	true	false	object	null				
+774	onplay	accessor	true	true	false	object	null				
+775	onplaying	accessor	true	true	false	object	null				
+776	onprogress	accessor	true	true	false	object	null				
+777	onratechange	accessor	true	true	false	object	null				
+778	onreset	accessor	true	true	false	object	null				
+779	onresize	accessor	true	true	false	object	null				
+780	onscroll	accessor	true	true	false	object	null				
+781	onscrollend	accessor	true	true	false	object	null				
+782	onsecuritypolicyviolation	accessor	true	true	false	object	null				
+783	onseeked	accessor	true	true	false	object	null				
+784	onseeking	accessor	true	true	false	object	null				
+785	onselect	accessor	true	true	false	object	null				
+786	onslotchange	accessor	true	true	false	object	null				
+787	onstalled	accessor	true	true	false	object	null				
+788	onsubmit	accessor	true	true	false	object	null				
+789	onsuspend	accessor	true	true	false	object	null				
+790	ontimeupdate	accessor	true	true	false	object	null				
+791	ontoggle	accessor	true	true	false	object	null				
+792	onvolumechange	accessor	true	true	false	object	null				
+793	onwaiting	accessor	true	true	false	object	null				
+794	onwebkitanimationend	accessor	true	true	false	object	null				
+795	onwebkitanimationiteration	accessor	true	true	false	object	null				
+796	onwebkitanimationstart	accessor	true	true	false	object	null				
+797	onwebkittransitionend	accessor	true	true	false	object	null				
+798	onwheel	accessor	true	true	false	object	null				
+799	onauxclick	accessor	true	true	false	object	null				
+800	ongotpointercapture	accessor	true	true	false	object	null				
+801	onlostpointercapture	accessor	true	true	false	object	null				
+802	onpointerdown	accessor	true	true	false	object	null				
+803	onpointermove	accessor	true	true	false	object	null				
+804	onpointerup	accessor	true	true	false	object	null				
+805	onpointercancel	accessor	true	true	false	object	null				
+806	onpointerover	accessor	true	true	false	object	null				
+807	onpointerout	accessor	true	true	false	object	null				
+808	onpointerenter	accessor	true	true	false	object	null				
+809	onpointerleave	accessor	true	true	false	object	null				
+810	onselectstart	accessor	true	true	false	object	null				
+811	onselectionchange	accessor	true	true	false	object	null				
+812	onanimationcancel	accessor	true	true	false	object	null				
+813	onanimationend	accessor	true	true	false	object	null				
+814	onanimationiteration	accessor	true	true	false	object	null				
+815	onanimationstart	accessor	true	true	false	object	null				
+816	ontransitionrun	accessor	true	true	false	object	null				
+817	ontransitionstart	accessor	true	true	false	object	null				
+818	ontransitionend	accessor	true	true	false	object	null				
+819	ontransitioncancel	accessor	true	true	false	object	null				
+820	onbeforexrselect	accessor	true	true	false	object	null				
+821	onafterprint	accessor	true	true	false	object	null				
+822	onbeforeprint	accessor	true	true	false	object	null				
+823	onbeforeunload	accessor	true	true	false	object	null				
+824	onhashchange	accessor	true	true	false	object	null				
+825	onlanguagechange	accessor	true	true	false	object	null				
+826	onmessage	accessor	true	true	false	object	null				
+827	onmessageerror	accessor	true	true	false	object	null				
+828	onoffline	accessor	true	true	false	object	null				
+829	ononline	accessor	true	true	false	object	null				
+830	onpagehide	accessor	true	true	false	object	null				
+831	onpageshow	accessor	true	true	false	object	null				
+832	onpopstate	accessor	true	true	false	object	null				
+833	onrejectionhandled	accessor	true	true	false	object	null				
+834	onstorage	accessor	true	true	false	object	null				
+835	onunhandledrejection	accessor	true	true	false	object	null				
+836	onunload	accessor	true	true	false	object	null				
+837	isSecureContext	accessor	true	true	false	boolean	[object Boolean]				
+838	crossOriginIsolated	accessor	true	true	false	boolean	[object Boolean]				
+839	scheduler	accessor	true	true	false	object	[object Scheduler]				
+840	performance	accessor	true	true	false	object	[object Performance]				
+841	trustedTypes	accessor	true	true	false	object	[object TrustedTypePolicyFactory]				
+842	crypto	accessor	true	true	false	object	[object Crypto]				
+843	indexedDB	accessor	true	true	false	object	[object IDBFactory]				
+844	localStorage	accessor	true	true	false	object	[object Storage]				
+845	sessionStorage	accessor	true	true	false	object	[object Storage]				
+846	alert	data	true	true	true	function	[object Function]	alert	0	true	
+847	atob	data	true	true	true	function	[object Function]	atob	1	true	
+848	blur	data	true	true	true	function	[object Function]	blur	0	true	
+849	btoa	data	true	true	true	function	[object Function]	btoa	1	true	
+850	cancelAnimationFrame	data	true	true	true	function	[object Function]	cancelAnimationFrame	1	true	
+851	cancelIdleCallback	data	true	true	true	function	[object Function]	cancelIdleCallback	1	true	
+852	captureEvents	data	true	true	true	function	[object Function]	captureEvents	0	true	
+853	clearInterval	data	true	true	true	function	[object Function]	clearInterval	0	true	
+854	clearTimeout	data	true	true	true	function	[object Function]	clearTimeout	0	true	
+855	close	data	true	true	true	function	[object Function]	close	0	true	
+856	confirm	data	true	true	true	function	[object Function]	confirm	0	true	
+857	createImageBitmap	data	true	true	true	function	[object Function]	createImageBitmap	1	true	
+858	fetch	data	true	true	true	function	[object Function]	fetch	1	true	
+859	find	data	true	true	true	function	[object Function]	find	0	true	
+860	focus	data	true	true	true	function	[object Function]	focus	0	true	
+861	getComputedStyle	data	true	true	true	function	[object Function]	getComputedStyle	1	true	
+862	getSelection	data	true	true	true	function	[object Function]	getSelection	0	true	
+863	matchMedia	data	true	true	true	function	[object Function]	matchMedia	1	true	
+864	moveBy	data	true	true	true	function	[object Function]	moveBy	2	true	
+865	moveTo	data	true	true	true	function	[object Function]	moveTo	2	true	
+866	open	data	true	true	true	function	[object Function]	open	0	true	
+867	postMessage	data	true	true	true	function	[object Function]	postMessage	1	true	
+868	print	data	true	true	true	function	[object Function]	print	0	true	
+869	prompt	data	true	true	true	function	[object Function]	prompt	0	true	
+870	queueMicrotask	data	true	true	true	function	[object Function]	queueMicrotask	1	true	
+871	releaseEvents	data	true	true	true	function	[object Function]	releaseEvents	0	true	
+872	reportError	data	true	true	true	function	[object Function]	reportError	1	true	
+873	requestAnimationFrame	data	true	true	true	function	[object Function]	requestAnimationFrame	1	true	
+874	requestIdleCallback	data	true	true	true	function	[object Function]	requestIdleCallback	1	true	
+875	resizeBy	data	true	true	true	function	[object Function]	resizeBy	2	true	
+876	resizeTo	data	true	true	true	function	[object Function]	resizeTo	2	true	
+877	scroll	data	true	true	true	function	[object Function]	scroll	0	true	
+878	scrollBy	data	true	true	true	function	[object Function]	scrollBy	0	true	
+879	scrollTo	data	true	true	true	function	[object Function]	scrollTo	0	true	
+880	setInterval	data	true	true	true	function	[object Function]	setInterval	1	true	
+881	setTimeout	data	true	true	true	function	[object Function]	setTimeout	1	true	
+882	stop	data	true	true	true	function	[object Function]	stop	0	true	
+883	structuredClone	data	true	true	true	function	[object Function]	structuredClone	1	true	
+884	webkitCancelAnimationFrame	data	true	true	true	function	[object Function]	webkitCancelAnimationFrame	1	true	
+885	webkitRequestAnimationFrame	data	true	true	true	function	[object Function]	webkitRequestAnimationFrame	1	true	
+886	Temporal	data	false	true	true	object	[object Temporal]				
+887	SuppressedError	data	false	true	true	function	[object Function]	SuppressedError	3	true	
+888	DisposableStack	data	false	true	true	function	[object Function]	DisposableStack	0	true	
+889	AsyncDisposableStack	data	false	true	true	function	[object Function]	AsyncDisposableStack	0	true	
+890	Float16Array	data	false	true	true	function	[object Function]	Float16Array	3	true	
+891	chrome	data	true	false	true	object	[object Object]				
+892	WebAssembly	data	false	true	true	object	[object WebAssembly]				
+893	crashReport	accessor	true	true	false	object	[object CrashReportContext]				
+894	cookieStore	accessor	true	true	false	object	[object CookieStore]				
+895	ondevicemotion	accessor	true	true	false	object	null				
+896	ondeviceorientation	accessor	true	true	false	object	null				
+897	ondeviceorientationabsolute	accessor	true	true	false	object	null				
+898	onpointerrawupdate	accessor	true	true	false	object	null				
+899	caches	accessor	true	true	false	object	[object CacheStorage]				
+900	documentPictureInPicture	accessor	true	true	false	object	[object DocumentPictureInPicture]				
+901	sharedStorage	accessor	true	true	false	object	[object SharedStorage]				
+902	AbsoluteOrientationSensor	data	false	true	true	function	[object Function]	AbsoluteOrientationSensor	0	true	
+903	Accelerometer	data	false	true	true	function	[object Function]	Accelerometer	0	true	
+904	AudioDecoder	data	false	true	true	function	[object Function]	AudioDecoder	1	true	
+905	AudioEncoder	data	false	true	true	function	[object Function]	AudioEncoder	1	true	
+906	AudioWorklet	data	false	true	true	function	[object Function]	AudioWorklet	0	true	
+907	BatteryManager	data	false	true	true	function	[object Function]	BatteryManager	0	true	
+908	Cache	data	false	true	true	function	[object Function]	Cache	0	true	
+909	CacheStorage	data	false	true	true	function	[object Function]	CacheStorage	0	true	
+910	Clipboard	data	false	true	true	function	[object Function]	Clipboard	0	true	
+911	ClipboardChangeEvent	data	false	true	true	function	[object Function]	ClipboardChangeEvent	0	true	
+912	ClipboardItem	data	false	true	true	function	[object Function]	ClipboardItem	1	true	
+913	CookieChangeEvent	data	false	true	true	function	[object Function]	CookieChangeEvent	1	true	
+914	CookieStore	data	false	true	true	function	[object Function]	CookieStore	0	true	
+915	CookieStoreManager	data	false	true	true	function	[object Function]	CookieStoreManager	0	true	
+916	CreateMonitor	data	false	true	true	function	[object Function]	CreateMonitor	0	true	
+917	Credential	data	false	true	true	function	[object Function]	Credential	0	true	
+918	CredentialsContainer	data	false	true	true	function	[object Function]	CredentialsContainer	0	true	
+919	CryptoKey	data	false	true	true	function	[object Function]	CryptoKey	0	true	
+920	DeviceMotionEvent	data	false	true	true	function	[object Function]	DeviceMotionEvent	1	true	
+921	DeviceMotionEventAcceleration	data	false	true	true	function	[object Function]	DeviceMotionEventAcceleration	0	true	
+922	DeviceMotionEventRotationRate	data	false	true	true	function	[object Function]	DeviceMotionEventRotationRate	0	true	
+923	DeviceOrientationEvent	data	false	true	true	function	[object Function]	DeviceOrientationEvent	1	true	
+924	FederatedCredential	data	false	true	true	function	[object Function]	FederatedCredential	1	true	
+925	GPU	data	false	true	true	function	[object Function]	GPU	0	true	
+926	GPUAdapter	data	false	true	true	function	[object Function]	GPUAdapter	0	true	
+927	GPUAdapterInfo	data	false	true	true	function	[object Function]	GPUAdapterInfo	0	true	
+928	GPUBindGroup	data	false	true	true	function	[object Function]	GPUBindGroup	0	true	
+929	GPUBindGroupLayout	data	false	true	true	function	[object Function]	GPUBindGroupLayout	0	true	
+930	GPUBuffer	data	false	true	true	function	[object Function]	GPUBuffer	0	true	
+931	GPUBufferUsage	data	false	true	true	object	[object GPUBufferUsage]				
+932	GPUCanvasContext	data	false	true	true	function	[object Function]	GPUCanvasContext	0	true	
+933	GPUColorWrite	data	false	true	true	object	[object GPUColorWrite]				
+934	GPUCommandBuffer	data	false	true	true	function	[object Function]	GPUCommandBuffer	0	true	
+935	GPUCommandEncoder	data	false	true	true	function	[object Function]	GPUCommandEncoder	0	true	
+936	GPUCompilationInfo	data	false	true	true	function	[object Function]	GPUCompilationInfo	0	true	
+937	GPUCompilationMessage	data	false	true	true	function	[object Function]	GPUCompilationMessage	0	true	
+938	GPUComputePassEncoder	data	false	true	true	function	[object Function]	GPUComputePassEncoder	0	true	
+939	GPUComputePipeline	data	false	true	true	function	[object Function]	GPUComputePipeline	0	true	
+940	GPUDevice	data	false	true	true	function	[object Function]	GPUDevice	0	true	
+941	GPUDeviceLostInfo	data	false	true	true	function	[object Function]	GPUDeviceLostInfo	0	true	
+942	GPUError	data	false	true	true	function	[object Function]	GPUError	0	true	
+943	GPUExternalTexture	data	false	true	true	function	[object Function]	GPUExternalTexture	0	true	
+944	GPUInternalError	data	false	true	true	function	[object Function]	GPUInternalError	1	true	
+945	GPUMapMode	data	false	true	true	object	[object GPUMapMode]				
+946	GPUOutOfMemoryError	data	false	true	true	function	[object Function]	GPUOutOfMemoryError	1	true	
+947	GPUPipelineError	data	false	true	true	function	[object Function]	GPUPipelineError	1	true	
+948	GPUPipelineLayout	data	false	true	true	function	[object Function]	GPUPipelineLayout	0	true	
+949	GPUQuerySet	data	false	true	true	function	[object Function]	GPUQuerySet	0	true	
+950	GPUQueue	data	false	true	true	function	[object Function]	GPUQueue	0	true	
+951	GPURenderBundle	data	false	true	true	function	[object Function]	GPURenderBundle	0	true	
+952	GPURenderBundleEncoder	data	false	true	true	function	[object Function]	GPURenderBundleEncoder	0	true	
+953	GPURenderPassEncoder	data	false	true	true	function	[object Function]	GPURenderPassEncoder	0	true	
+954	GPURenderPipeline	data	false	true	true	function	[object Function]	GPURenderPipeline	0	true	
+955	GPUSampler	data	false	true	true	function	[object Function]	GPUSampler	0	true	
+956	GPUShaderModule	data	false	true	true	function	[object Function]	GPUShaderModule	0	true	
+957	GPUShaderStage	data	false	true	true	object	[object GPUShaderStage]				
+958	GPUSupportedFeatures	data	false	true	true	function	[object Function]	GPUSupportedFeatures	0	true	
+959	GPUSupportedLimits	data	false	true	true	function	[object Function]	GPUSupportedLimits	0	true	
+960	GPUTexture	data	false	true	true	function	[object Function]	GPUTexture	0	true	
+961	GPUTextureUsage	data	false	true	true	object	[object GPUTextureUsage]				
+962	GPUTextureView	data	false	true	true	function	[object Function]	GPUTextureView	0	true	
+963	GPUUncapturedErrorEvent	data	false	true	true	function	[object Function]	GPUUncapturedErrorEvent	2	true	
+964	GPUValidationError	data	false	true	true	function	[object Function]	GPUValidationError	1	true	
+965	GravitySensor	data	false	true	true	function	[object Function]	GravitySensor	0	true	
+966	Gyroscope	data	false	true	true	function	[object Function]	Gyroscope	0	true	
+967	IdleDetector	data	false	true	true	function	[object Function]	IdleDetector	0	true	
+968	ImageCapture	data	false	true	true	function	[object Function]	ImageCapture	1	true	
+969	ImageDecoder	data	false	true	true	function	[object Function]	ImageDecoder	1	true	
+970	ImageTrack	data	false	true	true	function	[object Function]	ImageTrack	0	true	
+971	ImageTrackList	data	false	true	true	function	[object Function]	ImageTrackList	0	true	
+972	Keyboard	data	false	true	true	function	[object Function]	Keyboard	0	true	
+973	KeyboardLayoutMap	data	false	true	true	function	[object Function]	KeyboardLayoutMap	0	true	
+974	LinearAccelerationSensor	data	false	true	true	function	[object Function]	LinearAccelerationSensor	0	true	
+975	MIDIAccess	data	false	true	true	function	[object Function]	MIDIAccess	0	true	
+976	MIDIConnectionEvent	data	false	true	true	function	[object Function]	MIDIConnectionEvent	1	true	
+977	MIDIInput	data	false	true	true	function	[object Function]	MIDIInput	0	true	
+978	MIDIInputMap	data	false	true	true	function	[object Function]	MIDIInputMap	0	true	
+979	MIDIMessageEvent	data	false	true	true	function	[object Function]	MIDIMessageEvent	1	true	
+980	MIDIOutput	data	false	true	true	function	[object Function]	MIDIOutput	0	true	
+981	MIDIOutputMap	data	false	true	true	function	[object Function]	MIDIOutputMap	0	true	
+982	MIDIPort	data	false	true	true	function	[object Function]	MIDIPort	0	true	
+983	MediaDeviceInfo	data	false	true	true	function	[object Function]	MediaDeviceInfo	0	true	
+984	MediaDevices	data	false	true	true	function	[object Function]	MediaDevices	0	true	
+985	MediaKeyMessageEvent	data	false	true	true	function	[object Function]	MediaKeyMessageEvent	2	true	
+986	MediaKeySession	data	false	true	true	function	[object Function]	MediaKeySession	0	true	
+987	MediaKeyStatusMap	data	false	true	true	function	[object Function]	MediaKeyStatusMap	0	true	
+988	MediaKeySystemAccess	data	false	true	true	function	[object Function]	MediaKeySystemAccess	0	true	
+989	MediaKeys	data	false	true	true	function	[object Function]	MediaKeys	0	true	
+990	NavigationPreloadManager	data	false	true	true	function	[object Function]	NavigationPreloadManager	0	true	
+991	NavigatorManagedData	data	false	true	true	function	[object Function]	NavigatorManagedData	0	true	
+992	OrientationSensor	data	false	true	true	function	[object Function]	OrientationSensor	0	true	
+993	PasswordCredential	data	false	true	true	function	[object Function]	PasswordCredential	1	true	
+994	ProtectedAudience	data	false	true	true	function	[object Function]	ProtectedAudience	0	true	
+995	RelativeOrientationSensor	data	false	true	true	function	[object Function]	RelativeOrientationSensor	0	true	
+996	ScreenDetailed	data	false	true	true	function	[object Function]	ScreenDetailed	0	true	
+997	ScreenDetails	data	false	true	true	function	[object Function]	ScreenDetails	0	true	
+998	Sensor	data	false	true	true	function	[object Function]	Sensor	0	true	
+999	SensorErrorEvent	data	false	true	true	function	[object Function]	SensorErrorEvent	2	true	
+1000	ServiceWorkerRegistration	data	false	true	true	function	[object Function]	ServiceWorkerRegistration	0	true	
+1001	StorageManager	data	false	true	true	function	[object Function]	StorageManager	0	true	
+1002	SubtleCrypto	data	false	true	true	function	[object Function]	SubtleCrypto	0	true	
+1003	VideoDecoder	data	false	true	true	function	[object Function]	VideoDecoder	1	true	
+1004	VideoEncoder	data	false	true	true	function	[object Function]	VideoEncoder	1	true	
+1005	VirtualKeyboard	data	false	true	true	function	[object Function]	VirtualKeyboard	0	true	
+1006	WGSLLanguageFeatures	data	false	true	true	function	[object Function]	WGSLLanguageFeatures	0	true	
+1007	WebTransport	data	false	true	true	function	[object Function]	WebTransport	1	true	
+1008	WebTransportBidirectionalStream	data	false	true	true	function	[object Function]	WebTransportBidirectionalStream	0	true	
+1009	WebTransportDatagramDuplexStream	data	false	true	true	function	[object Function]	WebTransportDatagramDuplexStream	0	true	
+1010	WebTransportError	data	false	true	true	function	[object Function]	WebTransportError	0	true	
+1011	Worklet	data	false	true	true	function	[object Function]	Worklet	0	true	
+1012	XRDOMOverlayState	data	false	true	true	function	[object Function]	XRDOMOverlayState	0	true	
+1013	XRLayer	data	false	true	true	function	[object Function]	XRLayer	0	true	
+1014	XRWebGLBinding	data	false	true	true	function	[object Function]	XRWebGLBinding	2	true	
+1015	AudioPlaybackStats	data	false	true	true	function	[object Function]	AudioPlaybackStats	0	true	
+1016	AuthenticatorAssertionResponse	data	false	true	true	function	[object Function]	AuthenticatorAssertionResponse	0	true	
+1017	AuthenticatorAttestationResponse	data	false	true	true	function	[object Function]	AuthenticatorAttestationResponse	0	true	
+1018	AuthenticatorResponse	data	false	true	true	function	[object Function]	AuthenticatorResponse	0	true	
+1019	PublicKeyCredential	data	false	true	true	function	[object Function]	PublicKeyCredential	0	true	
+1020	Bluetooth	data	false	true	true	function	[object Function]	Bluetooth	0	true	
+1021	BluetoothCharacteristicProperties	data	false	true	true	function	[object Function]	BluetoothCharacteristicProperties	0	true	
+1022	BluetoothDevice	data	false	true	true	function	[object Function]	BluetoothDevice	0	true	
+1023	BluetoothRemoteGATTCharacteristic	data	false	true	true	function	[object Function]	BluetoothRemoteGATTCharacteristic	0	true	
+1024	BluetoothRemoteGATTDescriptor	data	false	true	true	function	[object Function]	BluetoothRemoteGATTDescriptor	0	true	
+1025	BluetoothRemoteGATTServer	data	false	true	true	function	[object Function]	BluetoothRemoteGATTServer	0	true	
+1026	BluetoothRemoteGATTService	data	false	true	true	function	[object Function]	BluetoothRemoteGATTService	0	true	
+1027	CaptureController	data	false	true	true	function	[object Function]	CaptureController	0	true	
+1028	CrashReportContext	data	false	true	true	function	[object Function]	CrashReportContext	0	true	
+1029	DevicePosture	data	false	true	true	function	[object Function]	DevicePosture	0	true	
+1030	DigitalCredential	data	false	true	true	function	[object Function]	DigitalCredential	0	true	
+1031	DocumentPictureInPicture	data	false	true	true	function	[object Function]	DocumentPictureInPicture	0	true	
+1032	EyeDropper	data	false	true	true	function	[object Function]	EyeDropper	0	true	
+1033	FetchLaterResult	data	false	true	true	function	[object Function]	FetchLaterResult	0	true	
+1034	FileSystemDirectoryHandle	data	false	true	true	function	[object Function]	FileSystemDirectoryHandle	0	true	
+1035	FileSystemFileHandle	data	false	true	true	function	[object Function]	FileSystemFileHandle	0	true	
+1036	FileSystemHandle	data	false	true	true	function	[object Function]	FileSystemHandle	0	true	
+1037	FileSystemWritableFileStream	data	false	true	true	function	[object Function]	FileSystemWritableFileStream	0	true	
+1038	FileSystemObserver	data	false	true	true	function	[object Function]	FileSystemObserver	1	true	
+1039	FontData	data	false	true	true	function	[object Function]	FontData	0	true	
+1040	FragmentDirective	data	false	true	true	function	[object Function]	FragmentDirective	0	true	
+1041	HID	data	false	true	true	function	[object Function]	HID	0	true	
+1042	HIDConnectionEvent	data	false	true	true	function	[object Function]	HIDConnectionEvent	2	true	
+1043	HIDDevice	data	false	true	true	function	[object Function]	HIDDevice	0	true	
+1044	HIDInputReportEvent	data	false	true	true	function	[object Function]	HIDInputReportEvent	0	true	
+1045	IdentityCredential	data	false	true	true	function	[object Function]	IdentityCredential	0	true	
+1046	IdentityCredentialError	data	false	true	true	function	[object Function]	IdentityCredentialError	0	true	
+1047	IdentityProvider	data	false	true	true	function	[object Function]	IdentityProvider	0	true	
+1048	NavigatorLogin	data	false	true	true	function	[object Function]	NavigatorLogin	0	true	
+1049	LanguageDetector	data	false	true	true	function	[object Function]	LanguageDetector	0	true	
+1050	Lock	data	false	true	true	function	[object Function]	Lock	0	true	
+1051	LockManager	data	false	true	true	function	[object Function]	LockManager	0	true	
+1052	ServiceWorker	data	false	true	true	function	[object Function]	ServiceWorker	0	true	
+1053	ServiceWorkerContainer	data	false	true	true	function	[object Function]	ServiceWorkerContainer	0	true	
+1054	NotRestoredReasonDetails	data	false	true	true	function	[object Function]	NotRestoredReasonDetails	0	true	
+1055	NotRestoredReasons	data	false	true	true	function	[object Function]	NotRestoredReasons	0	true	
+1056	OTPCredential	data	false	true	true	function	[object Function]	OTPCredential	0	true	
+1057	PaymentAddress	data	false	true	true	function	[object Function]	PaymentAddress	0	true	
+1058	PaymentRequest	data	false	true	true	function	[object Function]	PaymentRequest	1	true	
+1059	PaymentRequestUpdateEvent	data	false	true	true	function	[object Function]	PaymentRequestUpdateEvent	1	true	
+1060	PaymentResponse	data	false	true	true	function	[object Function]	PaymentResponse	0	true	
+1061	PaymentManager	data	false	true	true	function	[object Function]	PaymentManager	0	true	
+1062	PaymentMethodChangeEvent	data	false	true	true	function	[object Function]	PaymentMethodChangeEvent	1	true	
+1063	Presentation	data	false	true	true	function	[object Function]	Presentation	0	true	
+1064	PresentationAvailability	data	false	true	true	function	[object Function]	PresentationAvailability	0	true	
+1065	PresentationConnection	data	false	true	true	function	[object Function]	PresentationConnection	0	true	
+1066	PresentationConnectionAvailableEvent	data	false	true	true	function	[object Function]	PresentationConnectionAvailableEvent	2	true	
+1067	PresentationConnectionCloseEvent	data	false	true	true	function	[object Function]	PresentationConnectionCloseEvent	2	true	
+1068	PresentationConnectionList	data	false	true	true	function	[object Function]	PresentationConnectionList	0	true	
+1069	PresentationReceiver	data	false	true	true	function	[object Function]	PresentationReceiver	0	true	
+1070	PresentationRequest	data	false	true	true	function	[object Function]	PresentationRequest	1	true	
+1071	PressureObserver	data	false	true	true	function	[object Function]	PressureObserver	1	true	
+1072	PressureRecord	data	false	true	true	function	[object Function]	PressureRecord	0	true	
+1073	Serial	data	false	true	true	function	[object Function]	Serial	0	true	
+1074	SerialPort	data	false	true	true	function	[object Function]	SerialPort	0	true	
+1075	SpeechRecognitionPhrase	data	false	true	true	function	[object Function]	SpeechRecognitionPhrase	1	true	
+1076	StorageBucket	data	false	true	true	function	[object Function]	StorageBucket	0	true	
+1077	StorageBucketManager	data	false	true	true	function	[object Function]	StorageBucketManager	0	true	
+1078	Summarizer	data	false	true	true	function	[object Function]	Summarizer	0	true	
+1079	Translator	data	false	true	true	function	[object Function]	Translator	0	true	
+1080	USB	data	false	true	true	function	[object Function]	USB	0	true	
+1081	USBAlternateInterface	data	false	true	true	function	[object Function]	USBAlternateInterface	2	true	
+1082	USBConfiguration	data	false	true	true	function	[object Function]	USBConfiguration	2	true	
+1083	USBConnectionEvent	data	false	true	true	function	[object Function]	USBConnectionEvent	2	true	
+1084	USBDevice	data	false	true	true	function	[object Function]	USBDevice	0	true	
+1085	USBEndpoint	data	false	true	true	function	[object Function]	USBEndpoint	3	true	
+1086	USBInTransferResult	data	false	true	true	function	[object Function]	USBInTransferResult	1	true	
+1087	USBInterface	data	false	true	true	function	[object Function]	USBInterface	2	true	
+1088	USBIsochronousInTransferPacket	data	false	true	true	function	[object Function]	USBIsochronousInTransferPacket	1	true	
+1089	USBIsochronousInTransferResult	data	false	true	true	function	[object Function]	USBIsochronousInTransferResult	1	true	
+1090	USBIsochronousOutTransferPacket	data	false	true	true	function	[object Function]	USBIsochronousOutTransferPacket	1	true	
+1091	USBIsochronousOutTransferResult	data	false	true	true	function	[object Function]	USBIsochronousOutTransferResult	1	true	
+1092	USBOutTransferResult	data	false	true	true	function	[object Function]	USBOutTransferResult	1	true	
+1093	WakeLock	data	false	true	true	function	[object Function]	WakeLock	0	true	
+1094	WakeLockSentinel	data	false	true	true	function	[object Function]	WakeLockSentinel	0	true	
+1095	XRAnchor	data	false	true	true	function	[object Function]	XRAnchor	0	true	
+1096	XRAnchorSet	data	false	true	true	function	[object Function]	XRAnchorSet	0	true	
+1097	XRBoundedReferenceSpace	data	false	true	true	function	[object Function]	XRBoundedReferenceSpace	0	true	
+1098	XRCPUDepthInformation	data	false	true	true	function	[object Function]	XRCPUDepthInformation	0	true	
+1099	XRCamera	data	false	true	true	function	[object Function]	XRCamera	0	true	
+1100	XRDepthInformation	data	false	true	true	function	[object Function]	XRDepthInformation	0	true	
+1101	XRFrame	data	false	true	true	function	[object Function]	XRFrame	0	true	
+1102	XRHand	data	false	true	true	function	[object Function]	XRHand	0	true	
+1103	XRHitTestResult	data	false	true	true	function	[object Function]	XRHitTestResult	0	true	
+1104	XRHitTestSource	data	false	true	true	function	[object Function]	XRHitTestSource	0	true	
+1105	XRInputSource	data	false	true	true	function	[object Function]	XRInputSource	0	true	
+1106	XRInputSourceArray	data	false	true	true	function	[object Function]	XRInputSourceArray	0	true	
+1107	XRInputSourceEvent	data	false	true	true	function	[object Function]	XRInputSourceEvent	2	true	
+1108	XRInputSourcesChangeEvent	data	false	true	true	function	[object Function]	XRInputSourcesChangeEvent	2	true	
+1109	XRJointPose	data	false	true	true	function	[object Function]	XRJointPose	0	true	
+1110	XRJointSpace	data	false	true	true	function	[object Function]	XRJointSpace	0	true	
+1111	XRLightEstimate	data	false	true	true	function	[object Function]	XRLightEstimate	0	true	
+1112	XRLightProbe	data	false	true	true	function	[object Function]	XRLightProbe	0	true	
+1113	XRPose	data	false	true	true	function	[object Function]	XRPose	0	true	
+1114	XRRay	data	false	true	true	function	[object Function]	XRRay	0	true	
+1115	XRReferenceSpace	data	false	true	true	function	[object Function]	XRReferenceSpace	0	true	
+1116	XRReferenceSpaceEvent	data	false	true	true	function	[object Function]	XRReferenceSpaceEvent	2	true	
+1117	XRRenderState	data	false	true	true	function	[object Function]	XRRenderState	0	true	
+1118	XRRigidTransform	data	false	true	true	function	[object Function]	XRRigidTransform	0	true	
+1119	XRSession	data	false	true	true	function	[object Function]	XRSession	0	true	
+1120	XRSessionEvent	data	false	true	true	function	[object Function]	XRSessionEvent	2	true	
+1121	XRSpace	data	false	true	true	function	[object Function]	XRSpace	0	true	
+1122	XRSystem	data	false	true	true	function	[object Function]	XRSystem	0	true	
+1123	XRTransientInputHitTestResult	data	false	true	true	function	[object Function]	XRTransientInputHitTestResult	0	true	
+1124	XRTransientInputHitTestSource	data	false	true	true	function	[object Function]	XRTransientInputHitTestSource	0	true	
+1125	XRView	data	false	true	true	function	[object Function]	XRView	0	true	
+1126	XRViewerPose	data	false	true	true	function	[object Function]	XRViewerPose	0	true	
+1127	XRViewport	data	false	true	true	function	[object Function]	XRViewport	0	true	
+1128	XRWebGLDepthInformation	data	false	true	true	function	[object Function]	XRWebGLDepthInformation	0	true	
+1129	XRWebGLLayer	data	false	true	true	function	[object Function]	XRWebGLLayer	2	true	
+1130	XRCompositionLayer	data	false	true	true	function	[object Function]	XRCompositionLayer	0	true	
+1131	XRProjectionLayer	data	false	true	true	function	[object Function]	XRProjectionLayer	0	true	
+1132	XRCubeLayer	data	false	true	true	function	[object Function]	XRCubeLayer	0	true	
+1133	XRCylinderLayer	data	false	true	true	function	[object Function]	XRCylinderLayer	0	true	
+1134	XREquirectLayer	data	false	true	true	function	[object Function]	XREquirectLayer	0	true	
+1135	XRLayerEvent	data	false	true	true	function	[object Function]	XRLayerEvent	2	true	
+1136	XRQuadLayer	data	false	true	true	function	[object Function]	XRQuadLayer	0	true	
+1137	XRSubImage	data	false	true	true	function	[object Function]	XRSubImage	0	true	
+1138	XRWebGLSubImage	data	false	true	true	function	[object Function]	XRWebGLSubImage	0	true	
+1139	XRPlane	data	false	true	true	function	[object Function]	XRPlane	0	true	
+1140	XRPlaneSet	data	false	true	true	function	[object Function]	XRPlaneSet	0	true	
+1141	XRVisibilityMaskChangeEvent	data	false	true	true	function	[object Function]	XRVisibilityMaskChangeEvent	2	true	
+1142	fetchLater	data	true	true	true	function	[object Function]	fetchLater	1	true	
+1143	getDigitalGoodsService	data	true	true	true	function	[object Function]	getDigitalGoodsService	1	true	
+1144	getScreenDetails	data	true	true	true	function	[object Function]	getScreenDetails	0	true	
+1145	queryLocalFonts	data	true	true	true	function	[object Function]	queryLocalFonts	0	true	
+1146	showDirectoryPicker	data	true	true	true	function	[object Function]	showDirectoryPicker	0	true	
+1147	showOpenFilePicker	data	true	true	true	function	[object Function]	showOpenFilePicker	0	true	
+1148	showSaveFilePicker	data	true	true	true	function	[object Function]	showSaveFilePicker	0	true	
+1149	originAgentCluster	accessor	true	true	false	boolean	[object Boolean]				
+1150	viewport	accessor	true	true	false	object	[object Viewport]				
+1151	onpageswap	accessor	true	true	false	object	null				
+1152	onpagereveal	accessor	true	true	false	object	null				
+1153	credentialless	accessor	true	true	false	boolean	[object Boolean]				
+1154	fence	accessor	true	true	false	object	null				
+1155	launchQueue	accessor	true	true	false	object	[object LaunchQueue]				
+1156	speechSynthesis	accessor	true	true	false	object	[object SpeechSynthesis]				
+1157	onscrollsnapchange	accessor	true	true	false	object	null				
+1158	onscrollsnapchanging	accessor	true	true	false	object	null				
+1159	ongamepadconnected	accessor	true	true	false	object	null				
+1160	ongamepaddisconnected	accessor	true	true	false	object	null				
+1161	AnimationTrigger	data	false	true	true	function	[object Function]	AnimationTrigger	0	true	
+1162	BackgroundFetchManager	data	false	true	true	function	[object Function]	BackgroundFetchManager	0	true	
+1163	BackgroundFetchRecord	data	false	true	true	function	[object Function]	BackgroundFetchRecord	0	true	
+1164	BackgroundFetchRegistration	data	false	true	true	function	[object Function]	BackgroundFetchRegistration	0	true	
+1165	BluetoothUUID	data	false	true	true	function	[object Function]	BluetoothUUID	0	true	
+1166	CSSFontFeatureValuesRule	data	false	true	true	function	[object Function]	CSSFontFeatureValuesRule	0	true	
+1167	CSSFunctionDeclarations	data	false	true	true	function	[object Function]	CSSFunctionDeclarations	0	true	
+1168	CSSFunctionDescriptors	data	false	true	true	function	[object Function]	CSSFunctionDescriptors	0	true	
+1169	CSSFunctionRule	data	false	true	true	function	[object Function]	CSSFunctionRule	0	true	
+1170	CSSPseudoElement	data	false	true	true	function	[object Function]	CSSPseudoElement	0	true	
+1171	ChapterInformation	data	false	true	true	function	[object Function]	ChapterInformation	0	true	
+1172	CropTarget	data	false	true	true	function	[object Function]	CropTarget	0	true	
+1173	DocumentPictureInPictureEvent	data	false	true	true	function	[object Function]	DocumentPictureInPictureEvent	2	true	
+1174	Fence	data	false	true	true	function	[object Function]	Fence	0	true	
+1175	FencedFrameConfig	data	false	true	true	function	[object Function]	FencedFrameConfig	0	true	
+1176	HTMLFencedFrameElement	data	false	true	true	function	[object Function]	HTMLFencedFrameElement	0	true	
+1177	HTMLGeolocationElement	data	false	true	true	function	[object Function]	HTMLGeolocationElement	0	true	
+1178	IntegrityViolationReportBody	data	false	true	true	function	[object Function]	IntegrityViolationReportBody	0	true	
+1179	LaunchParams	data	false	true	true	function	[object Function]	LaunchParams	0	true	
+1180	LaunchQueue	data	false	true	true	function	[object Function]	LaunchQueue	0	true	
+1181	MediaMetadata	data	false	true	true	function	[object Function]	MediaMetadata	0	true	
+1182	MediaSession	data	false	true	true	function	[object Function]	MediaSession	0	true	
+1183	Notification	data	false	true	true	function	[object Function]	Notification	1	true	
+1184	Origin	data	false	true	true	function	[object Function]	Origin	0	true	
+1185	PageRevealEvent	data	false	true	true	function	[object Function]	PageRevealEvent	1	true	
+1186	PageSwapEvent	data	false	true	true	function	[object Function]	PageSwapEvent	1	true	
+1187	PerformanceTimingConfidence	data	false	true	true	function	[object Function]	PerformanceTimingConfidence	0	true	
+1188	PeriodicSyncManager	data	false	true	true	function	[object Function]	PeriodicSyncManager	0	true	
+1189	Profiler	data	false	true	true	function	[object Function]	Profiler	1	true	
+1190	PushManager	data	false	true	true	function	[object Function]	PushManager	0	true	
+1191	PushSubscription	data	false	true	true	function	[object Function]	PushSubscription	0	true	
+1192	PushSubscriptionOptions	data	false	true	true	function	[object Function]	PushSubscriptionOptions	0	true	
+1193	QuotaExceededError	data	false	true	true	function	[object Function]	QuotaExceededError	0	true	
+1194	RTCDataChannel	data	false	true	true	function	[object Function]	RTCDataChannel	0	true	
+1195	RTCRtpScriptTransform	data	false	true	true	function	[object Function]	RTCRtpScriptTransform	1	true	
+1196	RemotePlayback	data	false	true	true	function	[object Function]	RemotePlayback	0	true	
+1197	RestrictionTarget	data	false	true	true	function	[object Function]	RestrictionTarget	0	true	
+1198	Sanitizer	data	false	true	true	function	[object Function]	Sanitizer	0	true	
+1199	SharedStorage	data	false	true	true	function	[object Function]	SharedStorage	0	true	
+1200	SharedStorageWorklet	data	false	true	true	function	[object Function]	SharedStorageWorklet	0	true	
+1201	SharedStorageAppendMethod	data	false	true	true	function	[object Function]	SharedStorageAppendMethod	2	true	
+1202	SharedStorageClearMethod	data	false	true	true	function	[object Function]	SharedStorageClearMethod	0	true	
+1203	SharedStorageDeleteMethod	data	false	true	true	function	[object Function]	SharedStorageDeleteMethod	1	true	
+1204	SharedStorageModifierMethod	data	false	true	true	function	[object Function]	SharedStorageModifierMethod	0	true	
+1205	SharedStorageSetMethod	data	false	true	true	function	[object Function]	SharedStorageSetMethod	2	true	
+1206	SharedWorker	data	false	true	true	function	[object Function]	SharedWorker	1	true	
+1207	SnapEvent	data	false	true	true	function	[object Function]	SnapEvent	0	true	
+1208	SpeechGrammar	data	false	true	true	function	[object Function]	SpeechGrammar	0	true	
+1209	SpeechGrammarList	data	false	true	true	function	[object Function]	SpeechGrammarList	0	true	
+1210	SpeechRecognition	data	false	true	true	function	[object Function]	SpeechRecognition	0	true	
+1211	SpeechRecognitionErrorEvent	data	false	true	true	function	[object Function]	SpeechRecognitionErrorEvent	1	true	
+1212	SpeechRecognitionEvent	data	false	true	true	function	[object Function]	SpeechRecognitionEvent	1	true	
+1213	SpeechSynthesis	data	false	true	true	function	[object Function]	SpeechSynthesis	0	true	
+1214	SpeechSynthesisErrorEvent	data	false	true	true	function	[object Function]	SpeechSynthesisErrorEvent	2	true	
+1215	SpeechSynthesisEvent	data	false	true	true	function	[object Function]	SpeechSynthesisEvent	2	true	
+1216	SpeechSynthesisUtterance	data	false	true	true	function	[object Function]	SpeechSynthesisUtterance	0	true	
+1217	SpeechSynthesisVoice	data	false	true	true	function	[object Function]	SpeechSynthesisVoice	0	true	
+1218	TimelineTrigger	data	false	true	true	function	[object Function]	TimelineTrigger	0	true	
+1219	TimelineTriggerRange	data	false	true	true	function	[object Function]	TimelineTriggerRange	0	true	
+1220	TimelineTriggerRangeList	data	false	true	true	function	[object Function]	TimelineTriggerRangeList	0	true	
+1221	Viewport	data	false	true	true	function	[object Function]	Viewport	0	true	
+1222	WebSocketError	data	false	true	true	function	[object Function]	WebSocketError	0	true	
+1223	WebSocketStream	data	false	true	true	function	[object Function]	WebSocketStream	1	true	
+1224	XSLTProcessor	data	false	true	true	function	[object Function]	XSLTProcessor	0	true	
+1225	webkitSpeechGrammar	data	false	true	true	function	[object Function]	SpeechGrammar	0	true	
+1226	webkitSpeechGrammarList	data	false	true	true	function	[object Function]	SpeechGrammarList	0	true	
+1227	webkitSpeechRecognition	data	false	true	true	function	[object Function]	SpeechRecognition	0	true	
+1228	webkitSpeechRecognitionError	data	false	true	true	function	[object Function]	SpeechRecognitionErrorEvent	1	true	
+1229	webkitSpeechRecognitionEvent	data	false	true	true	function	[object Function]	SpeechRecognitionEvent	1	true	
+1230	webkitRequestFileSystem	data	true	true	true	function	[object Function]	webkitRequestFileSystem	3	true	
+1231	webkitResolveLocalFileSystemURL	data	true	true	true	function	[object Function]	webkitResolveLocalFileSystemURL	2	true	

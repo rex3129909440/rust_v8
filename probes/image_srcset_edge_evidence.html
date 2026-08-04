@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<body></body>
+<script>
+(async () => {
+  const image = new Image();
+  image.src = "image_edge_asset.svg";
+  image.srcset =
+    "image_edge_asset.svg 1x, image_edge_asset_2x.svg 2x";
+  const immediate = [
+    image.complete,
+    image.currentSrc,
+    image.naturalWidth,
+    image.naturalHeight,
+  ];
+  await image.decode();
+  const detached = [image.width, image.height];
+  document.body.appendChild(image);
+  document.body.textContent = JSON.stringify({
+    devicePixelRatio,
+    immediate,
+    final: [
+      image.complete,
+      image.src,
+      image.currentSrc,
+      image.naturalWidth,
+      image.naturalHeight,
+      image.width,
+      image.height,
+    ],
+    detached,
+  });
+})();
+</script>

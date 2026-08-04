@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<body></body>
+<script>
+(async () => {
+  const output = {};
+  const empty = new Image();
+  output.empty = {
+    complete: empty.complete,
+    currentSrc: empty.currentSrc,
+    naturalWidth: empty.naturalWidth,
+    naturalHeight: empty.naturalHeight,
+  };
+  try {
+    await empty.decode();
+    output.emptyDecode = "resolved";
+  } catch (error) {
+    output.emptyDecode = [error.name, error.message];
+  }
+
+  const valid = new Image();
+  const validEvents = [];
+  valid.addEventListener("load", () => validEvents.push("load"));
+  valid.addEventListener("error", () => validEvents.push("error"));
+  valid.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='11'/%3E";
+  output.validImmediate = {
+    complete: valid.complete,
+    currentSrc: valid.currentSrc,
+    naturalWidth: valid.naturalWidth,
+    naturalHeight: valid.naturalHeight,
+  };
+  try {
+    await valid.decode().then(() => validEvents.push("decode"));
+    output.validDecode = "resolved";
+  } catch (error) {
+    output.validDecode = [error.name, error.message];
+  }
+  await new Promise(resolve => setTimeout(resolve, 0));
+  output.validFinal = {
+    complete: valid.complete,
+    currentSrc: valid.currentSrc,
+    naturalWidth: valid.naturalWidth,
+    naturalHeight: valid.naturalHeight,
+    events: validEvents,
+  };
+
+  const broken = new Image();
+  const brokenEvents = [];
+  broken.addEventListener("load", () => brokenEvents.push("load"));
+  broken.addEventListener("error", () => brokenEvents.push("error"));
+  broken.src = "data:image/png;base64,AAAA";
+  output.brokenImmediate = {
+    complete: broken.complete,
+    currentSrc: broken.currentSrc,
+    naturalWidth: broken.naturalWidth,
+    naturalHeight: broken.naturalHeight,
+  };
+  try {
+    await broken.decode().catch(error => {
+      brokenEvents.push("decode");
+      throw error;
+    });
+    output.brokenDecode = "resolved";
+  } catch (error) {
+    output.brokenDecode = [error.name, error.message];
+  }
+  await new Promise(resolve => setTimeout(resolve, 0));
+  output.brokenFinal = {
+    complete: broken.complete,
+    currentSrc: broken.currentSrc,
+    naturalWidth: broken.naturalWidth,
+    naturalHeight: broken.naturalHeight,
+    events: brokenEvents,
+  };
+  output.dataResourceEntries = performance.getEntriesByType("resource")
+    .filter(entry => entry.initiatorType === "img")
+    .length;
+  document.body.textContent = JSON.stringify(output);
+})();
+</script>

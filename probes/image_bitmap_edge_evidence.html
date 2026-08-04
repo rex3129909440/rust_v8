@@ -1,0 +1,98 @@
+<!doctype html>
+<meta charset="utf-8">
+<body></body>
+<script>
+(async () => {
+  const output = {};
+  try {
+  const capture = async (name, operation) => {
+    try {
+      const promise = operation();
+      output[name + "Immediate"] =
+        Object.prototype.toString.call(promise);
+      const value = await promise;
+      output[name] = value instanceof ImageBitmap
+        ? [value.width, value.height]
+        : "resolved";
+    } catch (error) {
+      output[name] = [error.name, error.message];
+    }
+  };
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 2;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ff0000";
+  context.fillRect(0, 0, 1, 2);
+  context.fillStyle = "#00ff00";
+  context.fillRect(1, 0, 1, 2);
+
+  const bitmap = await createImageBitmap(canvas);
+  const copy = document.createElement("canvas");
+  copy.width = 2;
+  copy.height = 2;
+  copy.getContext("2d").drawImage(bitmap, 0, 0);
+  output.canvasBitmap = {
+    dimensions: [bitmap.width, bitmap.height],
+    pixels: Array.from(copy.getContext("2d").getImageData(0, 0, 2, 1).data),
+  };
+
+  const cropped = await createImageBitmap(canvas, 1, 0, 1, 2, {
+    resizeWidth: 2,
+    resizeHeight: 1,
+    resizeQuality: "pixelated",
+  });
+  const cropCopy = document.createElement("canvas");
+  cropCopy.width = 2;
+  cropCopy.height = 1;
+  cropCopy.getContext("2d").drawImage(cropped, 0, 0);
+  output.cropped = {
+    dimensions: [cropped.width, cropped.height],
+    pixels: Array.from(cropCopy.getContext("2d").getImageData(0, 0, 2, 1).data),
+  };
+
+  bitmap.close();
+  output.closed = [bitmap.width, bitmap.height];
+  try {
+    await createImageBitmap(bitmap);
+    output.closedClone = "resolved";
+  } catch (error) {
+    output.closedClone = [error.name, error.message];
+  }
+  await capture("invalidSource", () => createImageBitmap({}));
+  await capture("zeroCrop", () => createImageBitmap(canvas, 0, 0, 0, 1));
+  await capture("zeroResize", () =>
+    createImageBitmap(canvas, {resizeWidth: 0}));
+  await capture("widthResize", () =>
+    createImageBitmap(canvas, {resizeWidth: 4}));
+  await capture("heightResize", () =>
+    createImageBitmap(canvas, {resizeHeight: 4}));
+
+  const offscreen = new OffscreenCanvas(2, 1);
+  const offscreenContext = offscreen.getContext("2d");
+  offscreenContext.fillStyle = "#0000ff";
+  offscreenContext.fillRect(0, 0, 2, 1);
+  const transferred = offscreen.transferToImageBitmap();
+  output.transfer = {
+    bitmap: [transferred.width, transferred.height],
+    canvasPixels: Array.from(offscreenContext.getImageData(0, 0, 1, 1).data),
+  };
+
+  const image = new Image();
+  image.src =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='11'/%3E";
+  await image.decode();
+  const imageBitmap = await createImageBitmap(image);
+  output.imageBitmap = [imageBitmap.width, imageBitmap.height];
+
+  const blob = new Blob([
+    "<svg xmlns='http://www.w3.org/2000/svg' width='3' height='4'/>"
+  ], {type: "image/svg+xml"});
+  const blobBitmap = await createImageBitmap(blob);
+  output.blobBitmap = [blobBitmap.width, blobBitmap.height];
+  } catch (error) {
+    output.failure = [error.name, error.message, error.stack];
+  }
+  document.body.textContent = JSON.stringify(output);
+})();
+</script>

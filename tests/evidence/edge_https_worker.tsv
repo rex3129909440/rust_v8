@@ -1,0 +1,719 @@
+section	depth	tag	name	value
+global	0		Object	function
+global	0		Function	function
+global	0		Array	function
+global	0		Number	function
+global	0		parseFloat	function
+global	0		parseInt	function
+global	0		Infinity	number
+global	0		NaN	number
+global	0		undefined	undefined
+global	0		Boolean	function
+global	0		String	function
+global	0		Symbol	function
+global	0		Date	function
+global	0		Promise	function
+global	0		RegExp	function
+global	0		Error	function
+global	0		AggregateError	function
+global	0		EvalError	function
+global	0		RangeError	function
+global	0		ReferenceError	function
+global	0		SyntaxError	function
+global	0		TypeError	function
+global	0		URIError	function
+global	0		globalThis	object
+global	0		JSON	object
+global	0		Math	object
+global	0		Intl	object
+global	0		ArrayBuffer	function
+global	0		Atomics	object
+global	0		Uint8Array	function
+global	0		Int8Array	function
+global	0		Uint16Array	function
+global	0		Int16Array	function
+global	0		Uint32Array	function
+global	0		Int32Array	function
+global	0		BigUint64Array	function
+global	0		BigInt64Array	function
+global	0		Uint8ClampedArray	function
+global	0		Float32Array	function
+global	0		Float64Array	function
+global	0		DataView	function
+global	0		Map	function
+global	0		BigInt	function
+global	0		Set	function
+global	0		Iterator	function
+global	0		WeakMap	function
+global	0		WeakSet	function
+global	0		Proxy	function
+global	0		Reflect	object
+global	0		FinalizationRegistry	function
+global	0		WeakRef	function
+global	0		decodeURI	function
+global	0		decodeURIComponent	function
+global	0		encodeURI	function
+global	0		encodeURIComponent	function
+global	0		escape	function
+global	0		unescape	function
+global	0		eval	function
+global	0		isFinite	function
+global	0		isNaN	function
+global	0		console	object
+global	0		WebSocketStream	function
+global	0		WebSocketError	function
+global	0		RestrictionTarget	function
+global	0		RTCTransformEvent	function
+global	0		RTCRtpScriptTransformer	function
+global	0		RTCDataChannel	function
+global	0		QuotaExceededError	function
+global	0		PushSubscriptionOptions	function
+global	0		PushSubscription	function
+global	0		PushManager	function
+global	0		PeriodicSyncManager	function
+global	0		Origin	function
+global	0		Notification	function
+global	0		CropTarget	function
+global	0		BackgroundFetchRegistration	function
+global	0		BackgroundFetchRecord	function
+global	0		BackgroundFetchManager	function
+global	0		XMLHttpRequestUpload	function
+global	0		XMLHttpRequestEventTarget	function
+global	0		XMLHttpRequest	function
+global	0		WritableStreamDefaultWriter	function
+global	0		WritableStreamDefaultController	function
+global	0		WritableStream	function
+global	0		WorkerNavigator	function
+global	0		WorkerLocation	function
+global	0		WorkerGlobalScope	function
+global	0		Worker	function
+global	0		WebSocket	function
+global	0		WebGLVertexArrayObject	function
+global	0		WebGLUniformLocation	function
+global	0		WebGLTransformFeedback	function
+global	0		WebGLTexture	function
+global	0		WebGLSync	function
+global	0		WebGLShaderPrecisionFormat	function
+global	0		WebGLShader	function
+global	0		WebGLSampler	function
+global	0		WebGLRenderingContext	function
+global	0		WebGLRenderbuffer	function
+global	0		WebGLQuery	function
+global	0		WebGLProgram	function
+global	0		WebGLObject	function
+global	0		WebGLFramebuffer	function
+global	0		WebGLContextEvent	function
+global	0		WebGLBuffer	function
+global	0		WebGLActiveInfo	function
+global	0		WebGL2RenderingContext	function
+global	0		VideoFrame	function
+global	0		VideoColorSpace	function
+global	0		UserActivation	function
+global	0		URLSearchParams	function
+global	0		URLPattern	function
+global	0		URL	function
+global	0		TrustedTypePolicyFactory	function
+global	0		TrustedTypePolicy	function
+global	0		TrustedScriptURL	function
+global	0		TrustedScript	function
+global	0		TrustedHTML	function
+global	0		TransformStreamDefaultController	function
+global	0		TransformStream	function
+global	0		TextMetrics	function
+global	0		TextEncoderStream	function
+global	0		TextEncoder	function
+global	0		TextDecoderStream	function
+global	0		TextDecoder	function
+global	0		TaskSignal	function
+global	0		TaskPriorityChangeEvent	function
+global	0		TaskController	function
+global	0		SyncManager	function
+global	0		Subscriber	function
+global	0		SourceBufferList	function
+global	0		SourceBuffer	function
+global	0		SecurityPolicyViolationEvent	function
+global	0		Scheduler	function
+global	0		Response	function
+global	0		Request	function
+global	0		ReportingObserver	function
+global	0		ReportBody	function
+global	0		ReadableStreamDefaultReader	function
+global	0		ReadableStreamDefaultController	function
+global	0		ReadableStreamBYOBRequest	function
+global	0		ReadableStreamBYOBReader	function
+global	0		ReadableStream	function
+global	0		ReadableByteStreamController	function
+global	0		RTCEncodedVideoFrame	function
+global	0		RTCEncodedAudioFrame	function
+global	0		PromiseRejectionEvent	function
+global	0		ProgressEvent	function
+global	0		Permissions	function
+global	0		PermissionStatus	function
+global	0		PerformanceServerTiming	function
+global	0		PerformanceResourceTiming	function
+global	0		PerformanceObserverEntryList	function
+global	0		PerformanceObserver	function
+global	0		PerformanceMeasure	function
+global	0		PerformanceMark	function
+global	0		PerformanceEntry	function
+global	0		Performance	function
+global	0		Path2D	function
+global	0		OffscreenCanvasRenderingContext2D	function
+global	0		OffscreenCanvas	function
+global	0		Observable	function
+global	0		NetworkInformation	function
+global	0		NavigatorUAData	function
+global	0		MessagePort	function
+global	0		MessageEvent	function
+global	0		MessageChannel	function
+global	0		MediaSourceHandle	function
+global	0		MediaSource	function
+global	0		MediaCapabilities	function
+global	0		ImageData	function
+global	0		ImageBitmapRenderingContext	function
+global	0		ImageBitmap	function
+global	0		IDBVersionChangeEvent	function
+global	0		IDBTransaction	function
+global	0		IDBRequest	function
+global	0		IDBRecord	function
+global	0		IDBOpenDBRequest	function
+global	0		IDBObjectStore	function
+global	0		IDBKeyRange	function
+global	0		IDBIndex	function
+global	0		IDBFactory	function
+global	0		IDBDatabase	function
+global	0		IDBCursorWithValue	function
+global	0		IDBCursor	function
+global	0		Headers	function
+global	0		FormData	function
+global	0		FontFace	function
+global	0		FileReaderSync	function
+global	0		FileReader	function
+global	0		FileList	function
+global	0		File	function
+global	0		EventTarget	function
+global	0		EventSource	function
+global	0		Event	function
+global	0		ErrorEvent	function
+global	0		EncodedVideoChunk	function
+global	0		EncodedAudioChunk	function
+global	0		DedicatedWorkerGlobalScope	function
+global	0		DecompressionStream	function
+global	0		DOMStringList	function
+global	0		DOMRectReadOnly	function
+global	0		DOMRect	function
+global	0		DOMQuad	function
+global	0		DOMPointReadOnly	function
+global	0		DOMPoint	function
+global	0		DOMMatrixReadOnly	function
+global	0		DOMMatrix	function
+global	0		DOMException	function
+global	0		CustomEvent	function
+global	0		Crypto	function
+global	0		CountQueuingStrategy	function
+global	0		CompressionStream	function
+global	0		CloseEvent	function
+global	0		CanvasPattern	function
+global	0		CanvasGradient	function
+global	0		CSSSkewY	function
+global	0		CSSSkewX	function
+global	0		ByteLengthQueuingStrategy	function
+global	0		BroadcastChannel	function
+global	0		Blob	function
+global	0		AudioData	function
+global	0		AbortSignal	function
+global	0		AbortController	function
+global	0		name	string
+global	0		onmessage	object
+global	0		onmessageerror	object
+global	0		cancelAnimationFrame	function
+global	0		close	function
+global	0		postMessage	function
+global	0		requestAnimationFrame	function
+global	0		onrtctransform	object
+global	0		webkitRequestFileSystem	function
+global	0		webkitRequestFileSystemSync	function
+global	0		webkitResolveLocalFileSystemSyncURL	function
+global	0		webkitResolveLocalFileSystemURL	function
+global	0		Temporal	object
+global	0		SuppressedError	function
+global	0		DisposableStack	function
+global	0		AsyncDisposableStack	function
+global	0		Float16Array	function
+global	0		WebAssembly	object
+global	0		AudioDecoder	function
+global	0		AudioEncoder	function
+global	0		Cache	function
+global	0		CacheStorage	function
+global	0		CreateMonitor	function
+global	0		CryptoKey	function
+global	0		FileSystemSyncAccessHandle	function
+global	0		GPU	function
+global	0		GPUAdapter	function
+global	0		GPUAdapterInfo	function
+global	0		GPUBindGroup	function
+global	0		GPUBindGroupLayout	function
+global	0		GPUBuffer	function
+global	0		GPUBufferUsage	object
+global	0		GPUCanvasContext	function
+global	0		GPUColorWrite	object
+global	0		GPUCommandBuffer	function
+global	0		GPUCommandEncoder	function
+global	0		GPUCompilationInfo	function
+global	0		GPUCompilationMessage	function
+global	0		GPUComputePassEncoder	function
+global	0		GPUComputePipeline	function
+global	0		GPUDevice	function
+global	0		GPUDeviceLostInfo	function
+global	0		GPUError	function
+global	0		GPUExternalTexture	function
+global	0		GPUInternalError	function
+global	0		GPUMapMode	object
+global	0		GPUOutOfMemoryError	function
+global	0		GPUPipelineError	function
+global	0		GPUPipelineLayout	function
+global	0		GPUQuerySet	function
+global	0		GPUQueue	function
+global	0		GPURenderBundle	function
+global	0		GPURenderBundleEncoder	function
+global	0		GPURenderPassEncoder	function
+global	0		GPURenderPipeline	function
+global	0		GPUSampler	function
+global	0		GPUShaderModule	function
+global	0		GPUShaderStage	object
+global	0		GPUSupportedFeatures	function
+global	0		GPUSupportedLimits	function
+global	0		GPUTexture	function
+global	0		GPUTextureUsage	object
+global	0		GPUTextureView	function
+global	0		GPUUncapturedErrorEvent	function
+global	0		GPUValidationError	function
+global	0		IdleDetector	function
+global	0		ImageDecoder	function
+global	0		ImageTrack	function
+global	0		ImageTrackList	function
+global	0		NavigationPreloadManager	function
+global	0		ServiceWorkerRegistration	function
+global	0		StorageManager	function
+global	0		SubtleCrypto	function
+global	0		VideoDecoder	function
+global	0		VideoEncoder	function
+global	0		WGSLLanguageFeatures	function
+global	0		WebTransport	function
+global	0		WebTransportBidirectionalStream	function
+global	0		WebTransportDatagramDuplexStream	function
+global	0		WebTransportError	function
+global	0		FileSystemDirectoryHandle	function
+global	0		FileSystemFileHandle	function
+global	0		FileSystemHandle	function
+global	0		FileSystemWritableFileStream	function
+global	0		FileSystemObserver	function
+global	0		HID	function
+global	0		HIDConnectionEvent	function
+global	0		HIDDevice	function
+global	0		HIDInputReportEvent	function
+global	0		Lock	function
+global	0		LockManager	function
+global	0		PressureObserver	function
+global	0		PressureRecord	function
+global	0		Serial	function
+global	0		SerialPort	function
+global	0		StorageBucket	function
+global	0		StorageBucketManager	function
+global	0		USB	function
+global	0		USBAlternateInterface	function
+global	0		USBConfiguration	function
+global	0		USBConnectionEvent	function
+global	0		USBDevice	function
+global	0		USBEndpoint	function
+global	0		USBInTransferResult	function
+global	0		USBInterface	function
+global	0		USBIsochronousInTransferPacket	function
+global	0		USBIsochronousInTransferResult	function
+global	0		USBIsochronousOutTransferPacket	function
+global	0		USBIsochronousOutTransferResult	function
+global	0		USBOutTransferResult	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Object	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Function	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Number	function
+prototype	0	[object DedicatedWorkerGlobalScope]	parseFloat	function
+prototype	0	[object DedicatedWorkerGlobalScope]	parseInt	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Infinity	number
+prototype	0	[object DedicatedWorkerGlobalScope]	NaN	number
+prototype	0	[object DedicatedWorkerGlobalScope]	undefined	undefined
+prototype	0	[object DedicatedWorkerGlobalScope]	Boolean	function
+prototype	0	[object DedicatedWorkerGlobalScope]	String	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Symbol	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Date	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Promise	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RegExp	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Error	function
+prototype	0	[object DedicatedWorkerGlobalScope]	AggregateError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	EvalError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RangeError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReferenceError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	SyntaxError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TypeError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	URIError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	globalThis	object
+prototype	0	[object DedicatedWorkerGlobalScope]	JSON	object
+prototype	0	[object DedicatedWorkerGlobalScope]	Math	object
+prototype	0	[object DedicatedWorkerGlobalScope]	Intl	object
+prototype	0	[object DedicatedWorkerGlobalScope]	ArrayBuffer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Atomics	object
+prototype	0	[object DedicatedWorkerGlobalScope]	Uint8Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Int8Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Uint16Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Int16Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Uint32Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Int32Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	BigUint64Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	BigInt64Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Uint8ClampedArray	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Float32Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Float64Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DataView	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Map	function
+prototype	0	[object DedicatedWorkerGlobalScope]	BigInt	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Set	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Iterator	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WeakMap	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WeakSet	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Proxy	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Reflect	object
+prototype	0	[object DedicatedWorkerGlobalScope]	FinalizationRegistry	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WeakRef	function
+prototype	0	[object DedicatedWorkerGlobalScope]	decodeURI	function
+prototype	0	[object DedicatedWorkerGlobalScope]	decodeURIComponent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	encodeURI	function
+prototype	0	[object DedicatedWorkerGlobalScope]	encodeURIComponent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	escape	function
+prototype	0	[object DedicatedWorkerGlobalScope]	unescape	function
+prototype	0	[object DedicatedWorkerGlobalScope]	eval	function
+prototype	0	[object DedicatedWorkerGlobalScope]	isFinite	function
+prototype	0	[object DedicatedWorkerGlobalScope]	isNaN	function
+prototype	0	[object DedicatedWorkerGlobalScope]	console	object
+prototype	0	[object DedicatedWorkerGlobalScope]	WebSocketStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebSocketError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RestrictionTarget	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RTCTransformEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RTCRtpScriptTransformer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RTCDataChannel	function
+prototype	0	[object DedicatedWorkerGlobalScope]	QuotaExceededError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PushSubscriptionOptions	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PushSubscription	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PushManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PeriodicSyncManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Origin	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Notification	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CropTarget	function
+prototype	0	[object DedicatedWorkerGlobalScope]	BackgroundFetchRegistration	function
+prototype	0	[object DedicatedWorkerGlobalScope]	BackgroundFetchRecord	function
+prototype	0	[object DedicatedWorkerGlobalScope]	BackgroundFetchManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	XMLHttpRequestUpload	function
+prototype	0	[object DedicatedWorkerGlobalScope]	XMLHttpRequestEventTarget	function
+prototype	0	[object DedicatedWorkerGlobalScope]	XMLHttpRequest	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WritableStreamDefaultWriter	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WritableStreamDefaultController	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WritableStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WorkerNavigator	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WorkerLocation	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WorkerGlobalScope	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Worker	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebSocket	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLVertexArrayObject	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLUniformLocation	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLTransformFeedback	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLTexture	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLSync	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLShaderPrecisionFormat	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLShader	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLSampler	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLRenderingContext	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLRenderbuffer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLQuery	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLProgram	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLObject	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLFramebuffer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLContextEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLBuffer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGLActiveInfo	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebGL2RenderingContext	function
+prototype	0	[object DedicatedWorkerGlobalScope]	VideoFrame	function
+prototype	0	[object DedicatedWorkerGlobalScope]	VideoColorSpace	function
+prototype	0	[object DedicatedWorkerGlobalScope]	UserActivation	function
+prototype	0	[object DedicatedWorkerGlobalScope]	URLSearchParams	function
+prototype	0	[object DedicatedWorkerGlobalScope]	URLPattern	function
+prototype	0	[object DedicatedWorkerGlobalScope]	URL	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TrustedTypePolicyFactory	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TrustedTypePolicy	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TrustedScriptURL	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TrustedScript	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TrustedHTML	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TransformStreamDefaultController	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TransformStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TextMetrics	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TextEncoderStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TextEncoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TextDecoderStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TextDecoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TaskSignal	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TaskPriorityChangeEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	TaskController	function
+prototype	0	[object DedicatedWorkerGlobalScope]	SyncManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Subscriber	function
+prototype	0	[object DedicatedWorkerGlobalScope]	SourceBufferList	function
+prototype	0	[object DedicatedWorkerGlobalScope]	SourceBuffer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	SecurityPolicyViolationEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Scheduler	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Response	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Request	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReportingObserver	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReportBody	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReadableStreamDefaultReader	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReadableStreamDefaultController	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReadableStreamBYOBRequest	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReadableStreamBYOBReader	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReadableStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ReadableByteStreamController	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RTCEncodedVideoFrame	function
+prototype	0	[object DedicatedWorkerGlobalScope]	RTCEncodedAudioFrame	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PromiseRejectionEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ProgressEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Permissions	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PermissionStatus	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PerformanceServerTiming	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PerformanceResourceTiming	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PerformanceObserverEntryList	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PerformanceObserver	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PerformanceMeasure	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PerformanceMark	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PerformanceEntry	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Performance	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Path2D	function
+prototype	0	[object DedicatedWorkerGlobalScope]	OffscreenCanvasRenderingContext2D	function
+prototype	0	[object DedicatedWorkerGlobalScope]	OffscreenCanvas	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Observable	function
+prototype	0	[object DedicatedWorkerGlobalScope]	NetworkInformation	function
+prototype	0	[object DedicatedWorkerGlobalScope]	NavigatorUAData	function
+prototype	0	[object DedicatedWorkerGlobalScope]	MessagePort	function
+prototype	0	[object DedicatedWorkerGlobalScope]	MessageEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	MessageChannel	function
+prototype	0	[object DedicatedWorkerGlobalScope]	MediaSourceHandle	function
+prototype	0	[object DedicatedWorkerGlobalScope]	MediaSource	function
+prototype	0	[object DedicatedWorkerGlobalScope]	MediaCapabilities	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ImageData	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ImageBitmapRenderingContext	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ImageBitmap	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBVersionChangeEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBTransaction	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBRequest	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBRecord	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBOpenDBRequest	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBObjectStore	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBKeyRange	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBIndex	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBFactory	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBDatabase	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBCursorWithValue	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IDBCursor	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Headers	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FormData	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FontFace	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileReaderSync	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileReader	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileList	function
+prototype	0	[object DedicatedWorkerGlobalScope]	File	function
+prototype	0	[object DedicatedWorkerGlobalScope]	EventTarget	function
+prototype	0	[object DedicatedWorkerGlobalScope]	EventSource	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Event	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ErrorEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	EncodedVideoChunk	function
+prototype	0	[object DedicatedWorkerGlobalScope]	EncodedAudioChunk	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DedicatedWorkerGlobalScope	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DecompressionStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMStringList	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMRectReadOnly	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMRect	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMQuad	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMPointReadOnly	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMPoint	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMMatrixReadOnly	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMMatrix	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DOMException	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CustomEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Crypto	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CountQueuingStrategy	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CompressionStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CloseEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CanvasPattern	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CanvasGradient	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CSSSkewY	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CSSSkewX	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ByteLengthQueuingStrategy	function
+prototype	0	[object DedicatedWorkerGlobalScope]	BroadcastChannel	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Blob	function
+prototype	0	[object DedicatedWorkerGlobalScope]	AudioData	function
+prototype	0	[object DedicatedWorkerGlobalScope]	AbortSignal	function
+prototype	0	[object DedicatedWorkerGlobalScope]	AbortController	function
+prototype	0	[object DedicatedWorkerGlobalScope]	name	function
+prototype	0	[object DedicatedWorkerGlobalScope]	onmessage	function
+prototype	0	[object DedicatedWorkerGlobalScope]	onmessageerror	function
+prototype	0	[object DedicatedWorkerGlobalScope]	cancelAnimationFrame	function
+prototype	0	[object DedicatedWorkerGlobalScope]	close	function
+prototype	0	[object DedicatedWorkerGlobalScope]	postMessage	function
+prototype	0	[object DedicatedWorkerGlobalScope]	requestAnimationFrame	function
+prototype	0	[object DedicatedWorkerGlobalScope]	onrtctransform	function
+prototype	0	[object DedicatedWorkerGlobalScope]	webkitRequestFileSystem	function
+prototype	0	[object DedicatedWorkerGlobalScope]	webkitRequestFileSystemSync	function
+prototype	0	[object DedicatedWorkerGlobalScope]	webkitResolveLocalFileSystemSyncURL	function
+prototype	0	[object DedicatedWorkerGlobalScope]	webkitResolveLocalFileSystemURL	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Temporal	object
+prototype	0	[object DedicatedWorkerGlobalScope]	SuppressedError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	DisposableStack	function
+prototype	0	[object DedicatedWorkerGlobalScope]	AsyncDisposableStack	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Float16Array	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebAssembly	object
+prototype	0	[object DedicatedWorkerGlobalScope]	AudioDecoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	AudioEncoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Cache	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CacheStorage	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CreateMonitor	function
+prototype	0	[object DedicatedWorkerGlobalScope]	CryptoKey	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileSystemSyncAccessHandle	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPU	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUAdapter	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUAdapterInfo	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUBindGroup	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUBindGroupLayout	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUBuffer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUBufferUsage	object
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUCanvasContext	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUColorWrite	object
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUCommandBuffer	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUCommandEncoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUCompilationInfo	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUCompilationMessage	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUComputePassEncoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUComputePipeline	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUDevice	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUDeviceLostInfo	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUExternalTexture	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUInternalError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUMapMode	object
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUOutOfMemoryError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUPipelineError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUPipelineLayout	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUQuerySet	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUQueue	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPURenderBundle	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPURenderBundleEncoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPURenderPassEncoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPURenderPipeline	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUSampler	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUShaderModule	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUShaderStage	object
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUSupportedFeatures	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUSupportedLimits	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUTexture	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUTextureUsage	object
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUTextureView	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUUncapturedErrorEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	GPUValidationError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	IdleDetector	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ImageDecoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ImageTrack	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ImageTrackList	function
+prototype	0	[object DedicatedWorkerGlobalScope]	NavigationPreloadManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	ServiceWorkerRegistration	function
+prototype	0	[object DedicatedWorkerGlobalScope]	StorageManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	SubtleCrypto	function
+prototype	0	[object DedicatedWorkerGlobalScope]	VideoDecoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	VideoEncoder	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WGSLLanguageFeatures	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebTransport	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebTransportBidirectionalStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebTransportDatagramDuplexStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	WebTransportError	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileSystemDirectoryHandle	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileSystemFileHandle	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileSystemHandle	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileSystemWritableFileStream	function
+prototype	0	[object DedicatedWorkerGlobalScope]	FileSystemObserver	function
+prototype	0	[object DedicatedWorkerGlobalScope]	HID	function
+prototype	0	[object DedicatedWorkerGlobalScope]	HIDConnectionEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	HIDDevice	function
+prototype	0	[object DedicatedWorkerGlobalScope]	HIDInputReportEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Lock	function
+prototype	0	[object DedicatedWorkerGlobalScope]	LockManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PressureObserver	function
+prototype	0	[object DedicatedWorkerGlobalScope]	PressureRecord	function
+prototype	0	[object DedicatedWorkerGlobalScope]	Serial	function
+prototype	0	[object DedicatedWorkerGlobalScope]	SerialPort	function
+prototype	0	[object DedicatedWorkerGlobalScope]	StorageBucket	function
+prototype	0	[object DedicatedWorkerGlobalScope]	StorageBucketManager	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USB	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBAlternateInterface	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBConfiguration	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBConnectionEvent	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBDevice	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBEndpoint	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBInTransferResult	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBInterface	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBIsochronousInTransferPacket	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBIsochronousInTransferResult	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBIsochronousOutTransferPacket	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBIsochronousOutTransferResult	function
+prototype	0	[object DedicatedWorkerGlobalScope]	USBOutTransferResult	function
+prototype	1	[object DedicatedWorkerGlobalScope]	TEMPORARY	number
+prototype	1	[object DedicatedWorkerGlobalScope]	PERSISTENT	number
+prototype	1	[object DedicatedWorkerGlobalScope]	constructor	function
+prototype	2	[object WorkerGlobalScope]	self	function
+prototype	2	[object WorkerGlobalScope]	location	function
+prototype	2	[object WorkerGlobalScope]	onerror	function
+prototype	2	[object WorkerGlobalScope]	onlanguagechange	function
+prototype	2	[object WorkerGlobalScope]	navigator	function
+prototype	2	[object WorkerGlobalScope]	onrejectionhandled	function
+prototype	2	[object WorkerGlobalScope]	onunhandledrejection	function
+prototype	2	[object WorkerGlobalScope]	origin	function
+prototype	2	[object WorkerGlobalScope]	performance	function
+prototype	2	[object WorkerGlobalScope]	trustedTypes	function
+prototype	2	[object WorkerGlobalScope]	crypto	function
+prototype	2	[object WorkerGlobalScope]	indexedDB	function
+prototype	2	[object WorkerGlobalScope]	fonts	function
+prototype	2	[object WorkerGlobalScope]	createImageBitmap	function
+prototype	2	[object WorkerGlobalScope]	fetch	function
+prototype	2	[object WorkerGlobalScope]	importScripts	function
+prototype	2	[object WorkerGlobalScope]	constructor	function
+prototype	2	[object WorkerGlobalScope]	isSecureContext	function
+prototype	2	[object WorkerGlobalScope]	crossOriginIsolated	function
+prototype	2	[object WorkerGlobalScope]	scheduler	function
+prototype	2	[object WorkerGlobalScope]	caches	function
+prototype	2	[object WorkerGlobalScope]	atob	function
+prototype	2	[object WorkerGlobalScope]	btoa	function
+prototype	2	[object WorkerGlobalScope]	queueMicrotask	function
+prototype	2	[object WorkerGlobalScope]	reportError	function
+prototype	2	[object WorkerGlobalScope]	structuredClone	function
+prototype	2	[object WorkerGlobalScope]	clearInterval	function
+prototype	2	[object WorkerGlobalScope]	clearTimeout	function
+prototype	2	[object WorkerGlobalScope]	setInterval	function
+prototype	2	[object WorkerGlobalScope]	setTimeout	function
+prototype	3	[object EventTarget]	addEventListener	function
+prototype	3	[object EventTarget]	dispatchEvent	function
+prototype	3	[object EventTarget]	removeEventListener	function
+prototype	3	[object EventTarget]	when	function
+prototype	3	[object EventTarget]	constructor	function
+prototype	4	[object Object]	constructor	function
+prototype	4	[object Object]	__defineGetter__	function
+prototype	4	[object Object]	__defineSetter__	function
+prototype	4	[object Object]	hasOwnProperty	function
+prototype	4	[object Object]	__lookupGetter__	function
+prototype	4	[object Object]	__lookupSetter__	function
+prototype	4	[object Object]	isPrototypeOf	function
+prototype	4	[object Object]	propertyIsEnumerable	function
+prototype	4	[object Object]	toString	function
+prototype	4	[object Object]	valueOf	function
+prototype	4	[object Object]	__proto__	function
+prototype	4	[object Object]	toLocaleString	function
