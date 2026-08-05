@@ -86,10 +86,10 @@ remain available only for custom Rust hosts.
 Install the published package with:
 
 ```powershell
-python -m pip install rexisohe-sandbox
+python -m pip install rexiaohe-sandbox
 ```
 
-The PyPI distribution name is `rexisohe-sandbox`; the Python import package is
+The PyPI distribution name is `rexiaohe-sandbox`; the Python import package is
 `edge_sandbox`:
 
 The Python binding accepts nested dataclasses and writes each field through the

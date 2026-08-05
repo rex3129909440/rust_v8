@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 PACKAGE = ROOT / "examples"
 NATIVE = PACKAGE / "_native"
 METADATA = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["package"]
-PYPI_DISTRIBUTION = "rexisohe-sandbox"
+PYPI_DISTRIBUTION = "rexiaohe-sandbox"
 
 
 class BinaryDistribution(Distribution):
