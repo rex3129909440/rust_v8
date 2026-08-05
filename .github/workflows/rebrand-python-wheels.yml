@@ -1,0 +1,167 @@
+name: rebrand and publish Python wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful build Python wheels run ID
+        required: true
+        type: string
+      source_distribution:
+        description: Existing distribution name
+        required: true
+        default: rexisohe-sandbox
+        type: string
+      target_distribution:
+        description: New distribution name
+        required: true
+        default: rexiaohe-sandbox
+        type: string
+      version:
+        description: Wheel version
+        required: true
+        default: 0.1.0
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  rebrand-and-publish:
+    name: publish rebranded wheels to PyPI
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/rexiaohe-sandbox
+    env:
+      SOURCE_DISTRIBUTION: ${{ inputs.source_distribution }}
+      TARGET_DISTRIBUTION: ${{ inputs.target_distribution }}
+      WHEEL_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Download previously verified wheels
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          pattern: edge-sandbox-*
+          path: source-dist
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install packaging tools
+        run: python -m pip install --upgrade twine wheel
+
+      - name: Rebrand wheel metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir unpacked dist
+          shopt -s nullglob
+          source_wheels=(source-dist/*.whl)
+          if [[ ${#source_wheels[@]} -ne 4 ]]; then
+            echo "expected four source wheels, found ${#source_wheels[@]}" >&2
+            exit 1
+          fi
+          index=0
+          for wheel in "${source_wheels[@]}"; do
+            destination="unpacked/$index"
+            mkdir "$destination"
+            python -m wheel unpack "$wheel" --dest "$destination"
+            index=$((index + 1))
+          done
+
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          source = os.environ["SOURCE_DISTRIBUTION"]
+          target = os.environ["TARGET_DISTRIBUTION"]
+          version = os.environ["WHEEL_VERSION"]
+          target_normalized = target.replace("-", "_")
+
+          roots = sorted(path for path in Path("unpacked").glob("*/*") if path.is_dir())
+          if len(roots) != 4:
+              raise SystemExit(f"expected four unpacked wheels, found {len(roots)}")
+
+          for root in roots:
+              dist_infos = list(root.glob("*.dist-info"))
+              if len(dist_infos) != 1:
+                  raise SystemExit(f"expected one dist-info directory in {root}")
+              old_dist_info = dist_infos[0]
+              metadata_path = old_dist_info / "METADATA"
+              metadata = metadata_path.read_text(encoding="utf-8")
+              source_name = f"Name: {source}"
+              if source_name not in metadata:
+                  raise SystemExit(f"{metadata_path} does not describe {source}")
+              metadata = metadata.replace(source_name, f"Name: {target}", 1)
+              metadata = metadata.replace(source, target)
+              metadata_path.write_text(metadata, encoding="utf-8", newline="\n")
+              new_dist_info = root / f"{target_normalized}-{version}.dist-info"
+              old_dist_info.rename(new_dist_info)
+          PY
+
+          for root in unpacked/*/*; do
+            python -m wheel pack "$root" --dest-dir dist
+          done
+
+      - name: Verify rebranded wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m twine check dist/*.whl
+          python - <<'PY'
+          import email
+          import hashlib
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          target = os.environ["TARGET_DISTRIBUTION"]
+          target_normalized = target.replace("-", "_")
+
+          def platform_tag(path: Path) -> str:
+              return path.name.split("-py3-none-", 1)[1]
+
+          def native_payload(path: Path) -> bytes:
+              with ZipFile(path) as archive:
+                  native = [
+                      name for name in archive.namelist()
+                      if name.startswith("edge_sandbox/_native/") and not name.endswith("/")
+                  ]
+                  if len(native) != 1:
+                      raise SystemExit(f"expected one native library in {path}")
+                  return archive.read(native[0])
+
+          sources = {platform_tag(path): path for path in Path("source-dist").glob("*.whl")}
+          targets = {platform_tag(path): path for path in Path("dist").glob("*.whl")}
+          if len(sources) != 4 or sources.keys() != targets.keys():
+              raise SystemExit("source and target platform sets do not match")
+
+          for tag, target_path in targets.items():
+              if not target_path.name.startswith(f"{target_normalized}-"):
+                  raise SystemExit(f"incorrect target wheel name: {target_path.name}")
+              with ZipFile(target_path) as archive:
+                  metadata_name = next(
+                      name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+                  )
+                  metadata = email.message_from_bytes(archive.read(metadata_name))
+                  if metadata["Name"] != target:
+                      raise SystemExit(f"incorrect project name in {target_path.name}")
+              source_hash = hashlib.sha256(native_payload(sources[tag])).digest()
+              target_hash = hashlib.sha256(native_payload(target_path)).digest()
+              if source_hash != target_hash:
+                  raise SystemExit(f"native library changed while repacking {tag}")
+              print(f"verified {target_path.name}: native library unchanged")
+          PY
+
+      - name: Publish wheels
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          password: ${{ secrets.PYPI_API_TOKEN }}
