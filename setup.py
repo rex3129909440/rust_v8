@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 PACKAGE = ROOT / "examples"
 NATIVE = PACKAGE / "_native"
 METADATA = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["package"]
+PYPI_DISTRIBUTION = "rexisohe-sandbox"
 
 
 class BinaryDistribution(Distribution):
@@ -68,12 +69,17 @@ class PlatformWheel(_bdist_wheel):
 
 
 setup(
-    name="edge-sandbox",
+    name=PYPI_DISTRIBUTION,
     version=METADATA["version"],
     description=METADATA["description"],
     long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     license=METADATA["license"],
+    url="https://github.com/heshengqing/rust_v8",
+    project_urls={
+        "Source": "https://github.com/heshengqing/rust_v8",
+        "Issues": "https://github.com/heshengqing/rust_v8/issues",
+    },
     python_requires=">=3.11",
     packages=["edge_sandbox"],
     package_dir={"edge_sandbox": "examples"},

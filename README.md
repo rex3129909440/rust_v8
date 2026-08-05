@@ -83,6 +83,15 @@ remain available only for custom Rust hosts.
 
 ## Typed Python profile
 
+Install the published package with:
+
+```powershell
+python -m pip install rexisohe-sandbox
+```
+
+The PyPI distribution name is `rexisohe-sandbox`; the Python import package is
+`edge_sandbox`:
+
 The Python binding accepts nested dataclasses and writes each field through the
 native typed profile builder. Profile configuration is never serialized as
 JSON. Omitted values keep the fixed Chrome 150 defaults, and the complete
@@ -99,7 +108,7 @@ deterministic clock/random seed. Structured inventories use dedicated native
 append functions; they are not JSON strings or generic API shells.
 
 ```python
-from examples.edge_profile import (
+from edge_sandbox.edge_profile import (
     EdgeProfile,
     LocaleProfile,
     NavigatorProfile,
@@ -107,7 +116,7 @@ from examples.edge_profile import (
     WebAudioProfile,
     WindowProfile,
 )
-from examples.run_sandbox import EdgeSandbox
+from edge_sandbox import EdgeSandbox
 
 profile = EdgeProfile(
     locale=LocaleProfile(
@@ -161,7 +170,7 @@ transferred to the isolated worker with the bounded binary protocol; no option
 is encoded as a JSON string.
 
 ```python
-from examples.edge_runtime_options import (
+from edge_sandbox.edge_runtime_options import (
     DeterministicExecution,
     EdgeRunOptions,
     IframeHook,
@@ -169,7 +178,7 @@ from examples.edge_runtime_options import (
     PageInit,
     SandboxLimits,
 )
-from examples.run_sandbox import EdgeSandbox
+from edge_sandbox import EdgeSandbox
 
 options = EdgeRunOptions(
     page=PageInit(
@@ -221,8 +230,7 @@ the sandbox creates no Proxy object. `protectPrototypeFunction(prototype,
 propertyName)` protects a function after it has already been assigned.
 
 ```python
-from examples.edge_runtime_options import EdgeRunOptions, IframeHook
-from examples.run_sandbox import EdgeSandbox
+from edge_sandbox import EdgeRunOptions, EdgeSandbox, IframeHook
 
 iframe_xhr_hook = IframeHook(
     name="xhr-hook",
@@ -295,8 +303,8 @@ is reused only when its fingerprint and runtime options exactly match the next
 task.
 
 ```python
-from examples.edge_profile import EdgeProfile, NavigatorProfile
-from examples.edge_sandbox_pool import EdgeSandboxPool
+from edge_sandbox.edge_profile import EdgeProfile, NavigatorProfile
+from edge_sandbox import EdgeSandboxPool
 
 profiles = (
     EdgeProfile(navigator=NavigatorProfile(user_agent="Pool-UA-A")),
@@ -341,7 +349,7 @@ Linux forks directly into the loaded shared object.
 ## Run from Python
 
 ```python
-from examples.run_sandbox import EdgeSandbox
+from edge_sandbox import EdgeSandbox
 
 with EdgeSandbox() as sandbox:
     print(sandbox.evaluate("Object.getOwnPropertyNames(window).length"))
@@ -388,6 +396,9 @@ The binding uses `ctypes` over the stable C ABI, so the wheels use a
 The shared library is stored inside `edge_sandbox/_native` and is discovered
 automatically after `pip install`; source-tree execution continues to search
 `target/release` and `target/debug`.
+
+When running an uninstalled checkout directly, the equivalent development-only
+import is `from examples.run_sandbox import EdgeSandbox`.
 
 See `docs/GITHUB_ACTIONS_WHEELS_ZH.md` for the build matrix, manual/tag
 triggers, installation example, Linux compatibility policy, and binary-size
