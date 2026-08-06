@@ -87,12 +87,49 @@ jobs:
               raise SystemExit(f"expected one wheel, found {wheels!r}")
           check_call([executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", wheels[0]])
 
-          from edge_sandbox import EdgeSandbox
+          from edge_sandbox import (
+              EdgeSandbox,
+              EdgeSandboxPool,
+              create_country_profile_details,
+          )
+          from edge_sandbox.country_profiles import DEFAULT_MAC_USER_AGENT
+          from edge_sandbox.edge_profile import EdgeProfile, NavigatorProfile
+
+          windows_profile = create_country_profile_details("HK", seed=1)
+          mac_profile = create_country_profile_details(
+              "HK", DEFAULT_MAC_USER_AGENT, seed=2
+          )
+          if windows_profile.platform != "windows" or mac_profile.platform != "macos":
+              raise SystemExit("packaged country profiles selected wrong platforms")
 
           with EdgeSandbox() as sandbox:
+              original_pid = sandbox.process_id()
               result = sandbox.evaluate("1 + 1", source_url="ci://wheel-smoke.js")
+              sandbox.reinitialize_profile(
+                  EdgeProfile(
+                      navigator=NavigatorProfile(user_agent="CI-Reinitialized-UA")
+                  )
+              )
+              if sandbox.process_id() != original_pid:
+                  raise SystemExit("profile reinitialization replaced the worker PID")
+              if sandbox.evaluate("navigator.userAgent") != "CI-Reinitialized-UA":
+                  raise SystemExit("reinitialized profile did not reach the worker")
           if result != "2":
               raise SystemExit(f"unexpected sandbox result: {result!r}")
+          with EdgeSandboxPool(
+              workers=1,
+              timeout_ms=10_000,
+              one_shot_workers=True,
+              prewarm=True,
+          ) as pool:
+              initial_pid = pool.worker_process_ids[0]
+              task = pool.submit("6 * 7", profile=EdgeProfile())
+              if task.result() != "42":
+                  raise SystemExit("one-shot pool returned an unexpected value")
+              if pool.completed_worker_process_id(task.task_id) != initial_pid:
+                  raise SystemExit("one-shot task did not use the prewarmed PID")
+              if initial_pid in pool.worker_process_ids:
+                  raise SystemExit("one-shot PID was not replaced")
           print(f"wheel smoke test passed: {result}")
 
       - name: Upload wheel
@@ -154,12 +191,49 @@ jobs:
           /opt/python/cp311-cp311/bin/python -m pip install \
             --force-reinstall --no-deps wheelhouse/*.whl
           /opt/python/cp311-cp311/bin/python - <<'PY'
-          from edge_sandbox import EdgeSandbox
+          from edge_sandbox import (
+              EdgeSandbox,
+              EdgeSandboxPool,
+              create_country_profile_details,
+          )
+          from edge_sandbox.country_profiles import DEFAULT_MAC_USER_AGENT
+          from edge_sandbox.edge_profile import EdgeProfile, NavigatorProfile
+
+          windows_profile = create_country_profile_details("HK", seed=1)
+          mac_profile = create_country_profile_details(
+              "HK", DEFAULT_MAC_USER_AGENT, seed=2
+          )
+          if windows_profile.platform != "windows" or mac_profile.platform != "macos":
+              raise SystemExit("packaged country profiles selected wrong platforms")
 
           with EdgeSandbox() as sandbox:
+              original_pid = sandbox.process_id()
               result = sandbox.evaluate("1 + 1", source_url="ci://wheel-smoke.js")
+              sandbox.reinitialize_profile(
+                  EdgeProfile(
+                      navigator=NavigatorProfile(user_agent="CI-Reinitialized-UA")
+                  )
+              )
+              if sandbox.process_id() != original_pid:
+                  raise SystemExit("profile reinitialization replaced the worker PID")
+              if sandbox.evaluate("navigator.userAgent") != "CI-Reinitialized-UA":
+                  raise SystemExit("reinitialized profile did not reach the worker")
           if result != "2":
               raise SystemExit(f"unexpected sandbox result: {result!r}")
+          with EdgeSandboxPool(
+              workers=1,
+              timeout_ms=10_000,
+              one_shot_workers=True,
+              prewarm=True,
+          ) as pool:
+              initial_pid = pool.worker_process_ids[0]
+              task = pool.submit("6 * 7", profile=EdgeProfile())
+              if task.result() != "42":
+                  raise SystemExit("one-shot pool returned an unexpected value")
+              if pool.completed_worker_process_id(task.task_id) != initial_pid:
+                  raise SystemExit("one-shot task did not use the prewarmed PID")
+              if initial_pid in pool.worker_process_ids:
+                  raise SystemExit("one-shot PID was not replaced")
           print(f"wheel smoke test passed: {result}")
           PY
 

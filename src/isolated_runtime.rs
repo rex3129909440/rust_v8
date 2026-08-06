@@ -20,6 +20,7 @@ const TRACE_EXPORT_BATCH_SIZE: u64 = 8_192;
 #[derive(Debug, Deserialize, Serialize)]
 enum WorkerCommand {
     Initialize(Box<crate::EdgeRuntimeOptions>),
+    Reinitialize(Box<crate::EdgeRuntimeOptions>),
     Evaluate {
         source: String,
         source_url: Option<String>,
@@ -49,6 +50,7 @@ enum WorkerResponse {
 
 struct ControllerState {
     process: Option<WorkerProcess>,
+    options: crate::EdgeRuntimeOptions,
     trace_enabled: bool,
     trace_exclusions: Vec<String>,
 }
@@ -61,7 +63,6 @@ struct ControllerState {
 /// without taking down the embedding process.
 pub struct IsolatedEdgeRuntime {
     launcher: WorkerLauncher,
-    options: crate::EdgeRuntimeOptions,
     state: Mutex<ControllerState>,
 }
 
@@ -92,9 +93,9 @@ impl IsolatedEdgeRuntime {
         let process = WorkerProcess::spawn(&launcher, options.clone())?;
         Ok(Self {
             launcher,
-            options,
             state: Mutex::new(ControllerState {
                 process: Some(process),
+                options,
                 trace_enabled: false,
                 trace_exclusions: Vec::new(),
             }),
@@ -120,9 +121,9 @@ impl IsolatedEdgeRuntime {
         let process = WorkerProcess::spawn(&launcher, options.clone())?;
         Ok(Self {
             launcher,
-            options,
             state: Mutex::new(ControllerState {
                 process: Some(process),
+                options,
                 trace_enabled: false,
                 trace_exclusions: Vec::new(),
             }),
@@ -149,7 +150,8 @@ impl IsolatedEdgeRuntime {
         source: &str,
         source_url: Option<&str>,
     ) -> Result<crate::Evaluation, String> {
-        if self
+        let mut state = self.lock_state()?;
+        if state
             .options
             .limits
             .max_source_bytes
@@ -157,13 +159,14 @@ impl IsolatedEdgeRuntime {
         {
             return Err("JavaScript source exceeded max_source_bytes".to_owned());
         }
-        let deadline = self
+        let deadline = state
             .options
             .limits
             .timeout
             .unwrap_or(Duration::from_secs(30))
             .saturating_add(EVALUATION_GRACE);
-        match self.request(
+        match self.request_locked(
+            &mut state,
             WorkerCommand::Evaluate {
                 source: source.to_owned(),
                 source_url: source_url.map(str::to_owned),
@@ -173,6 +176,66 @@ impl IsolatedEdgeRuntime {
             WorkerResponse::Evaluation(result) => result,
             _ => Err(self.protocol_failure("evaluation")),
         }
+    }
+
+    /// Rebuilds the V8 runtime inside the existing worker process.
+    ///
+    /// The worker PID and IPC channels stay stable. The old isolate and all of
+    /// its JavaScript state are dropped only after the replacement runtime has
+    /// been constructed successfully from the new typed options.
+    pub fn reinitialize(&self, mut options: crate::EdgeRuntimeOptions) -> Result<(), String> {
+        options.limits.apply_isolated_defaults();
+        options.validate()?;
+        let mut state = self.lock_state()?;
+        self.ensure_process(&mut state)?;
+        let resident_limit = options.limits.max_resident_bytes;
+        let response = state.process.as_mut().expect("worker was ensured").request(
+            WorkerCommand::Reinitialize(Box::new(options.clone())),
+            STARTUP_TIMEOUT,
+            resident_limit,
+        );
+        match response {
+            Ok(WorkerResponse::Initialized(Ok(()))) => {
+                state.options = options;
+                if let Err(message) = self.restore_trace_state(&mut state) {
+                    if let Some(mut process) = state.process.take() {
+                        process.terminate();
+                    }
+                    Err(message)
+                } else {
+                    Ok(())
+                }
+            }
+            Ok(WorkerResponse::Initialized(Err(message))) => {
+                if let Some(mut process) = state.process.take() {
+                    process.terminate();
+                }
+                Err(format!(
+                    "cannot reinitialize isolated Edge worker: {message}"
+                ))
+            }
+            Ok(_) => {
+                if let Some(mut process) = state.process.take() {
+                    process.terminate();
+                }
+                Err("isolated worker returned an invalid reinitialization response".to_owned())
+            }
+            Err(message) => {
+                if let Some(mut process) = state.process.take() {
+                    process.terminate();
+                }
+                Err(message)
+            }
+        }
+    }
+
+    /// Rebuilds the current worker isolate with a new fingerprint while
+    /// preserving the worker's page, hook, replay and resource-limit options.
+    pub fn reinitialize_profile(&self, fingerprint: crate::EdgeFingerprint) -> Result<(), String> {
+        fingerprint.validate()?;
+        let mut options = self.lock_state()?.options.clone();
+        options.fingerprint = fingerprint;
+        self.reinitialize(options)
     }
 
     pub fn enable_native_trace(&self) -> Result<(), String> {
@@ -344,7 +407,7 @@ impl IsolatedEdgeRuntime {
         let result = state.process.as_mut().expect("worker was ensured").request(
             command,
             deadline,
-            self.options.limits.max_resident_bytes,
+            state.options.limits.max_resident_bytes,
         );
         if result.is_err()
             && let Some(mut process) = state.process.take()
@@ -358,12 +421,28 @@ impl IsolatedEdgeRuntime {
         if state.process.is_some() {
             return Ok(());
         }
-        let mut process = WorkerProcess::spawn(&self.launcher, self.options.clone())?;
+        let process = WorkerProcess::spawn(&self.launcher, state.options.clone())?;
+        state.process = Some(process);
+        if let Err(message) = self.restore_trace_state(state) {
+            if let Some(mut process) = state.process.take() {
+                process.terminate();
+            }
+            Err(message)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn restore_trace_state(&self, state: &mut ControllerState) -> Result<(), String> {
+        let process = state
+            .process
+            .as_mut()
+            .ok_or_else(|| "isolated worker is unavailable".to_owned())?;
         if !state.trace_exclusions.is_empty() {
             match process.request(
                 WorkerCommand::SetNativeTraceExclusions(state.trace_exclusions.clone()),
                 CONTROL_TIMEOUT,
-                self.options.limits.max_resident_bytes,
+                state.options.limits.max_resident_bytes,
             ) {
                 Ok(WorkerResponse::Unit(Ok(()))) => {}
                 Ok(WorkerResponse::Unit(Err(message))) => {
@@ -386,7 +465,7 @@ impl IsolatedEdgeRuntime {
             match process.request(
                 WorkerCommand::EnableProxyTrace,
                 CONTROL_TIMEOUT,
-                self.options.limits.max_resident_bytes,
+                state.options.limits.max_resident_bytes,
             ) {
                 Ok(WorkerResponse::Unit(Ok(()))) => {}
                 Ok(WorkerResponse::Unit(Err(message))) => {
@@ -405,7 +484,6 @@ impl IsolatedEdgeRuntime {
                 }
             }
         }
-        state.process = Some(process);
         Ok(())
     }
 
@@ -1030,7 +1108,32 @@ fn run_isolated_worker_protocol(
                         return Err(format!("cannot read isolated worker command: {message}"));
                     }
                 };
-                let (response, shutdown) = execute_worker_command(&mut runtime, command);
+                let (response, shutdown) = match command {
+                    WorkerCommand::Reinitialize(options) => {
+                        // V8 enters an OwnedIsolate when it is created and
+                        // requires strict reverse-order destruction. Drop the
+                        // old runtime before constructing its replacement.
+                        drop(runtime);
+                        runtime = match crate::EdgeRuntime::with_options(*options) {
+                            Ok(replacement) => replacement,
+                            Err(message) => {
+                                write_frame(
+                                    &mut output,
+                                    &WorkerResponse::Initialized(Err(message)),
+                                    MAX_IPC_FRAME_BYTES,
+                                )
+                                .map_err(|error| {
+                                    format!(
+                                        "cannot report isolated worker reinitialization failure: {error}"
+                                    )
+                                })?;
+                                return Ok(());
+                            }
+                        };
+                        (WorkerResponse::Initialized(Ok(())), false)
+                    }
+                    command => execute_worker_command(&mut runtime, command),
+                };
                 write_frame(&mut output, &response, MAX_IPC_FRAME_BYTES)
                     .map_err(|error| format!("cannot write isolated worker response: {error}"))?;
                 if shutdown {
@@ -1090,6 +1193,12 @@ fn execute_worker_command(
     match command {
         WorkerCommand::Initialize(_) => (
             WorkerResponse::Unit(Err("isolated worker was already initialized".to_owned())),
+            false,
+        ),
+        WorkerCommand::Reinitialize(_) => (
+            WorkerResponse::Unit(Err(
+                "isolated worker reinitialization must be handled by the protocol loop".to_owned(),
+            )),
             false,
         ),
         WorkerCommand::Evaluate { source, source_url } => (

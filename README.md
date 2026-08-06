@@ -89,6 +89,12 @@ Install the published package with:
 python -m pip install rexiaohe-sandbox
 ```
 
+Install the optional local FastAPI test service with:
+
+```powershell
+python -m pip install "rexiaohe-sandbox[api]"
+```
+
 The PyPI distribution name is `rexiaohe-sandbox`; the Python import package is
 `edge_sandbox`:
 
@@ -331,6 +337,72 @@ requests closes its idle worker (or marks a currently busy reused worker for
 closure as soon as that task finishes). A timed-out or failed evaluation always
 discards its worker immediately, releasing the V8 heap and DOM state; the pool
 creates a clean replacement for later work.
+
+For single-use JavaScript workloads, enable the prewarmed one-shot mode. The
+pool starts its fixed process capacity before accepting work. Each process is
+loaded with one task's fresh profile, executes exactly one JavaScript source,
+is destroyed, and is replaced before another task is served:
+
+```python
+with EdgeSandboxPool(
+    workers=10,
+    timeout_ms=30_000,
+    default_options=options,
+    one_shot_workers=True,
+    prewarm=True,
+) as sandbox:
+    task = sandbox.submit(fresh_javascript, profile=fresh_profile)
+    value = task.result()
+    used_pid = sandbox.completed_worker_process_id(task.task_id)
+```
+
+## Local FastAPI Worker test service
+
+The optional API is intended for local concurrency and resource measurements.
+Start it programmatically; Uvicorn must use one controller process because the
+native pool already owns the Worker processes:
+
+```python
+from edge_sandbox.worker_api import serve_local
+
+serve_local(
+    host="127.0.0.1",
+    port=8765,
+    maximum_workers=10,
+    default_timeout_ms=30_000,
+)
+```
+
+`POST /v1/evaluate` accepts exactly one fresh JavaScript task. `scriptId`,
+`countryCode`, `userAgent`, `proxy`, and `javascript` are required. A
+`scriptId` is consumed once for the service lifetime; replay returns HTTP 409.
+The proxy is caller-owned task metadata—the offline sandbox does not open an
+external network connection with it.
+
+```python
+import uuid
+import httpx
+
+response = httpx.post(
+    "http://127.0.0.1:8765/v1/evaluate",
+    json={
+        "scriptId": uuid.uuid4().hex,
+        "javascript": fresh_javascript,
+        "sourceUrl": "https://sandbox.test/fresh.js",
+        "countryCode": "US",
+        "userAgent": user_agent,
+        "proxy": proxy,
+    },
+    timeout=60,
+)
+result = response.json()
+print(result["worker_process_id"], result["tl_requests"])
+```
+
+`GET /health` returns the prewarmed Worker PIDs. The PID returned by an
+evaluation disappears after that response and a different replacement PID is
+added to the health set. `POST /v1/evaluate/batch` provides the same behavior
+for a typed list of distinct single-use jobs.
 
 ## Build and verify
 

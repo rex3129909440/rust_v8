@@ -26,7 +26,7 @@ from edge_profile import EdgeProfile, LocalFontProfile, PermissionsProfile  # no
 from run_sandbox import EdgeSandbox  # noqa: E402
 
 
-LIBRARY = PROJECT_ROOT / "dist" / "windows-x64" / "edge_sandbox.dll"
+LIBRARY = PROJECT_ROOT / "target" / "debug" / "edge_sandbox.dll"
 
 
 REALM_PROBE = r'''(async () => {

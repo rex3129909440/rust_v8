@@ -6,8 +6,12 @@ import tomllib
 from pathlib import Path
 
 from setuptools import Distribution, setup
-from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
 from setuptools.command.build_py import build_py as _build_py
+
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
+except ImportError:  # setuptools < 70.1 in local/offline build environments.
+    from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 
 ROOT = Path(__file__).resolve().parent
@@ -27,6 +31,7 @@ class BinaryDistribution(Distribution):
 class BuildPythonWithNativeLibrary(_build_py):
     _PACKAGE_MODULES = {
         "__init__",
+        "country_profile",
         "edge_profile",
         "edge_runtime_options",
         "edge_sandbox_pool",
@@ -36,7 +41,11 @@ class BuildPythonWithNativeLibrary(_build_py):
 
     def find_package_modules(self, package: str, package_dir: str):
         modules = super().find_package_modules(package, package_dir)
-        return [module for module in modules if module[1] in self._PACKAGE_MODULES]
+        if package == "edge_sandbox":
+            return [module for module in modules if module[1] in self._PACKAGE_MODULES]
+        if package == "edge_sandbox.country_profiles":
+            return [module for module in modules if module[1] in {"__init__", "get_random_fp"}]
+        return modules
 
     def run(self) -> None:
         libraries = tuple(NATIVE.glob("edge_sandbox.dll"))
@@ -81,8 +90,19 @@ setup(
         "Issues": "https://github.com/heshengqing/rust_v8/issues",
     },
     python_requires=">=3.11",
-    packages=["edge_sandbox"],
-    package_dir={"edge_sandbox": "examples"},
+    install_requires=[
+        "tzdata>=2025.2; platform_system == 'Windows'",
+    ],
+    packages=[
+        "edge_sandbox",
+        "edge_sandbox.country_profiles",
+        "edge_sandbox.country_profiles.fp",
+    ],
+    package_dir={
+        "edge_sandbox": "examples",
+        "edge_sandbox.country_profiles": "demo",
+        "edge_sandbox.country_profiles.fp": "demo/fp",
+    },
     package_data={
         "edge_sandbox": [
             "_native/edge_sandbox.dll",
@@ -91,6 +111,15 @@ setup(
         ]
     },
     include_package_data=False,
+    extras_require={
+        "api": [
+            "curl-cffi>=0.13,<1",
+            "fastapi>=0.115,<1",
+            "httpx>=0.28,<1",
+            "PyExecJS>=1.5.1,<2",
+            "uvicorn>=0.34,<1",
+        ]
+    },
     zip_safe=False,
     distclass=BinaryDistribution,
     cmdclass={"bdist_wheel": PlatformWheel, "build_py": BuildPythonWithNativeLibrary},

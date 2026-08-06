@@ -951,6 +951,19 @@ class EdgeSandbox:
         ]
         library.edge_sandbox_create_self_hosted_with_profile.restype = ctypes.c_void_p
 
+        library.edge_sandbox_reinitialize_with_profile.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            buffer_pointer,
+        ]
+        library.edge_sandbox_reinitialize_with_profile.restype = ctypes.c_bool
+        library.edge_sandbox_process_id.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint32),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_process_id.restype = ctypes.c_bool
+
         library.edge_sandbox_destroy.argtypes = [ctypes.c_void_p]
         library.edge_sandbox_destroy.restype = None
 
@@ -3279,6 +3292,38 @@ class EdgeSandbox:
         if self._handle is None:
             raise SandboxExecutionError("沙箱已经关闭")
         return self._handle
+
+    def reinitialize_profile(self, profile: EdgeProfile) -> None:
+        """Load a fresh profile/isolate without replacing the Worker PID."""
+
+        profile_handle = self._create_profile_builder(profile)
+        error = _NativeBuffer()
+        try:
+            succeeded = self._library.edge_sandbox_reinitialize_with_profile(
+                self._require_handle(),
+                profile_handle,
+                ctypes.byref(error),
+            )
+        finally:
+            self._library.edge_sandbox_profile_destroy(profile_handle)
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+
+    def process_id(self) -> int:
+        """Return the stable PID of this sandbox's isolated Worker."""
+
+        process_id = ctypes.c_uint32()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_process_id(
+            self._require_handle(),
+            ctypes.byref(process_id),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return int(process_id.value)
 
     def _consume_buffer(self, buffer: _NativeBuffer) -> str:
         return self._consume_binary_buffer(buffer).decode("utf-8")

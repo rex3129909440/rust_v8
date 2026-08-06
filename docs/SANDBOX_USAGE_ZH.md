@@ -1109,14 +1109,13 @@ Windows 使用 Job Object 限制 Worker 为单进程并配置 kill-on-close。Li
 
 ## 24. 性能和复用
 
-单实例复用会省去重复创建 V8 和 Worker 的开销，但保留 Window/DOM/Cookie 等状态。Pool 会在配置相同的任务之间复用空闲 Worker。
+单实例复用会省去重复创建 V8 和 Worker 的开销，但保留 Window/DOM/Cookie 等状态。一次性模式使用预热进程：任务开始前在同一 PID 中加载新的 profile 和 V8 isolate，只执行一份 JavaScript，完成后立即关闭该进程并补充新的空白 Worker。
 
 当前机器上的参考测试曾得到：
 
 - Python 创建单 Worker：约几十毫秒。
 - 小型脚本执行和请求读取：通常小于数毫秒。
-- 10 份 `ips.js` 黑盒任务：10 个独立 Worker 并发约 2.5 秒完成。
-- 每个任务响应后提取请求并关闭 Worker：约 9–18ms。
+- 2026-08-06 Release DLL 复测 10 份 `ips.js` 黑盒任务：10/10 成功，10 个 `/tl` 均导出，总墙钟 3.753 秒。
 
 这些数字只用于说明架构能够并行，不是跨机器性能承诺。脚本复杂度、CPU 核数、内存压力、Debug/Release 和指纹配置都会改变结果。
 
@@ -1140,6 +1139,8 @@ py -3 -m unittest tests/python_pool_smoke.py tests/ips_pool_blackbox.py -v
 py -3 -m unittest tests/python_mac_profile_smoke.py -v
 ```
 
+本地 FastAPI 黑盒计时入口为 `demo/ips_api_blackbox.py`。它不解析 `ips.js`，每个任务分别读取一次文件、创建唯一 `scriptId` 和独立 profile，并在 API 外部汇总 HTTP wall/min/mean/median/P95/max。
+
 `tests/ips_pool_blackbox.py` 将 `demo/ips.js` 作为不透明输入，以 10 个线程和 10 个隔离 Worker 并发执行；每个 task 响应后立即提取 `/tl` 请求并关闭对应 Worker，最后断言 Worker 数为 0。
 
 ## 26. 示例索引
@@ -1151,6 +1152,10 @@ py -3 -m unittest tests/python_mac_profile_smoke.py -v
 | `examples/edge_runtime_options.py` | 页面、回放、确定性和限制配置 |
 | `examples/run_typed_page.py` | HTML、DOM 和离线 fetch 示例 |
 | `examples/edge_sandbox_pool.py` | 多 Worker 并发池 |
+| `demo/sandbox_worker_api.py` | 预热一次性 Worker 的通用本地 FastAPI 服务 |
+| `demo/wizzair.py` | 内部异步执行业务和沙箱 Worker 的业务 FastAPI 服务 |
+| `demo/wizzair_api_client.py` | 并发本地 API 客户端 |
+| `demo/ips_api_blackbox.py` | `ips.js` 不透明输入、PID 与分阶段计时报告 |
 | `examples/mac_edge_profile.py` | Apple Silicon Mac Edge 150 指纹 preset |
 | `demo/mac_call_edge_sandbox.py` | 使用 Mac preset 调用沙箱 |
 | `tests/python_pool_smoke.py` | 不同指纹、超时和释放回归 |
@@ -1167,7 +1172,7 @@ py -3 -m unittest tests/python_mac_profile_smoke.py -v
 - NetworkReplay 提供响应；Network Capture 导出请求，两者方向不同。
 - 请求 Capture 当前结构化覆盖 XHR/fetch，不是通用抓包器。
 - Native Trace 用于 API 行为审计，不应用于普通请求导出。
-- 同一个 Worker 的完整指纹在创建时固定；每任务不同指纹使用 Pool。
+- 普通复用模式的 Worker 指纹固定；一次性预热模式会在执行前重建 isolate 并加载该任务的独立 profile。
 - 多 Worker 适合互不相关脚本；共享同一 Window/DOM 的逻辑必须串行。
 - Worker 进程关闭后 V8/DOM 内存释放，但已导出的 Python 请求副本需要调用 `clear_network_requests()` 或释放 Pool 对象才能回收。
 

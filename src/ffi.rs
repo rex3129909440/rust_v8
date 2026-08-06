@@ -3488,6 +3488,85 @@ pub unsafe extern "C" fn edge_sandbox_destroy(handle: *mut EdgeSandboxHandle) {
     }
 }
 
+/// Rebuilds the V8 isolate inside an existing worker process with a new typed
+/// fingerprint. The worker PID and IPC channels remain unchanged. All prior
+/// JavaScript globals, tasks, requests, stdout and trace entries are discarded.
+///
+/// # Safety
+///
+/// `handle` and `profile` must be live pointers created by this ABI and
+/// `error_out` must be null or point to a writable buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_reinitialize_with_profile(
+    handle: *mut EdgeSandboxHandle,
+    profile: *const EdgeSandboxProfile,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        // SAFETY: guaranteed by this function's FFI contract.
+        let fingerprint = unsafe { profile_ref(profile)? }.fingerprint.clone();
+        handle.runtime.reinitialize_profile(fingerprint)
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Returns the operating-system PID of the isolated Worker process.
+///
+/// # Safety
+///
+/// `handle` must be live and both output pointers must be writable when non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_process_id(
+    handle: *mut EdgeSandboxHandle,
+    process_id_out: *mut u32,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if process_id_out.is_null() {
+            return Err("worker process-id output pointer is null".to_owned());
+        }
+        let process_id = handle.runtime.process_id()?;
+        // SAFETY: non-null writable output is guaranteed by the contract.
+        unsafe { *process_id_out = process_id };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
 /// Evaluates UTF-8 JavaScript and returns its display value as owned UTF-8.
 ///
 /// # Safety

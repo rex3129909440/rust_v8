@@ -24,6 +24,7 @@ except ImportError:
 class PooledNetworkRequest:
     task_id: int
     worker_id: int
+    worker_process_id: int
     sequence: int
     source: str
     method: str
@@ -42,6 +43,12 @@ class SandboxTask:
     def result(self, timeout: float | None = None) -> str:
         return self._future.result(timeout=timeout)
 
+    @property
+    def future(self) -> Future[str]:
+        """Underlying completion handle for completion-order coordination."""
+
+        return self._future
+
     def done(self) -> bool:
         return self._future.done()
 
@@ -58,6 +65,7 @@ class SandboxTask:
 @dataclass(slots=True)
 class _PoolWorker:
     worker_id: int
+    process_id: int
     sandbox: EdgeSandbox
     profile: EdgeProfile | None
     options: EdgeRunOptions
@@ -69,8 +77,9 @@ class EdgeSandboxPool:
     """One Python facade over multiple process-isolated V8 workers.
 
     Each worker executes only one top-level evaluation at a time. Independent
-    tasks execute concurrently across workers. A worker is reused only when
-    the next task has exactly the same typed fingerprint and runtime options.
+    tasks execute concurrently across workers. In ``one_shot_workers`` mode,
+    every prewarmed process accepts one fresh profile and one JavaScript task,
+    is destroyed, and is synchronously replaced before another task is served.
     """
 
     def __init__(
@@ -83,6 +92,8 @@ class EdgeSandboxPool:
         worker: Path | None = None,
         default_profile: EdgeProfile | None = None,
         default_options: EdgeRunOptions | None = None,
+        one_shot_workers: bool = False,
+        prewarm: bool = False,
     ) -> None:
         if workers < 1:
             raise ValueError("workers must be at least 1")
@@ -94,6 +105,7 @@ class EdgeSandboxPool:
         self._close_after_requests = close_worker_after_network_requests
         self._default_profile = default_profile
         self._default_options = default_options or EdgeRunOptions()
+        self._one_shot_workers = one_shot_workers
         self._condition = Condition()
         self._workers: list[_PoolWorker] = []
         self._creating_workers = 0
@@ -102,11 +114,15 @@ class EdgeSandboxPool:
         self._task_ids = count(1)
         self._requests: list[PooledNetworkRequest] = []
         self._completed_worker_by_task: dict[int, int] = {}
+        self._completed_process_by_task: dict[int, int] = {}
         self._collected_tasks: set[int] = set()
         self._executor = ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix="edge-sandbox",
         )
+        self._one_shot_options = self._effective_options(None, None)
+        if prewarm:
+            self.prewarm()
 
     @property
     def maximum_workers(self) -> int:
@@ -117,10 +133,34 @@ class EdgeSandboxPool:
         with self._condition:
             return len(self._workers) + self._creating_workers
 
+    @property
+    def worker_process_ids(self) -> tuple[int, ...]:
+        with self._condition:
+            return tuple(worker.process_id for worker in self._workers)
+
+    def prewarm(self) -> None:
+        """Create all configured Worker processes before accepting tasks."""
+
+        try:
+            while True:
+                with self._condition:
+                    if self._closed:
+                        raise RuntimeError("edge sandbox pool is closed")
+                    if (
+                        len(self._workers) + self._creating_workers
+                        >= self._maximum_workers
+                    ):
+                        return
+                self._spawn_blank_worker()
+        except BaseException:
+            self.close()
+            raise
+
     def submit(
         self,
         source: str,
         *,
+        source_url: str | None = None,
         profile: EdgeProfile | None = None,
         options: EdgeRunOptions | None = None,
         timeout_ms: int | None = None,
@@ -129,6 +169,11 @@ class EdgeSandboxPool:
             raise TypeError("source must be a string")
         effective_profile = profile if profile is not None else self._default_profile
         effective_options = self._effective_options(options, timeout_ms)
+        if self._one_shot_workers and effective_options != self._one_shot_options:
+            raise ValueError(
+                "one-shot Worker tasks must use the pool's fixed runtime options; "
+                "configure timeout and limits when creating the pool"
+            )
         with self._condition:
             if self._closed:
                 raise RuntimeError("edge sandbox pool is closed")
@@ -137,6 +182,7 @@ class EdgeSandboxPool:
             self._run_task,
             task_id,
             source,
+            source_url,
             effective_profile,
             effective_options,
         )
@@ -146,12 +192,14 @@ class EdgeSandboxPool:
         self,
         source: str,
         *,
+        source_url: str | None = None,
         profile: EdgeProfile | None = None,
         options: EdgeRunOptions | None = None,
         timeout_ms: int | None = None,
     ) -> str:
         return self.submit(
             source,
+            source_url=source_url,
             profile=profile,
             options=options,
             timeout_ms=timeout_ms,
@@ -161,6 +209,7 @@ class EdgeSandboxPool:
         self,
         sources: Sequence[str],
         *,
+        source_urls: Sequence[str | None] | None = None,
         profiles: Sequence[EdgeProfile | None] | None = None,
         options: EdgeRunOptions | None = None,
         timeout_ms: int | None = None,
@@ -171,14 +220,27 @@ class EdgeSandboxPool:
         )
         if len(profile_values) != len(source_values):
             raise ValueError("profiles must have the same length as sources")
+        source_url_values = (
+            (None,) * len(source_values)
+            if source_urls is None
+            else tuple(source_urls)
+        )
+        if len(source_url_values) != len(source_values):
+            raise ValueError("source_urls must have the same length as sources")
         tasks = tuple(
             self.submit(
                 source,
+                source_url=source_url,
                 profile=profile,
                 options=options,
                 timeout_ms=timeout_ms,
             )
-            for source, profile in zip(source_values, profile_values, strict=True)
+            for source, source_url, profile in zip(
+                source_values,
+                source_url_values,
+                profile_values,
+                strict=True,
+            )
         )
         return tuple(task.result() for task in tasks)
 
@@ -218,17 +280,31 @@ class EdgeSandboxPool:
             worker.sandbox.close()
         return selected
 
+    def completed_worker_id(self, task_id: int) -> int | None:
+        """Return the native Worker id recorded for a completed task."""
+
+        with self._condition:
+            return self._completed_worker_by_task.get(task_id)
+
+    def completed_worker_process_id(self, task_id: int) -> int | None:
+        """Return the OS PID of the one Worker that executed a task."""
+
+        with self._condition:
+            return self._completed_process_by_task.get(task_id)
+
     def clear_network_requests(self, task_id: int | None = None) -> None:
         with self._condition:
             if task_id is None:
                 self._requests.clear()
                 self._completed_worker_by_task.clear()
+                self._completed_process_by_task.clear()
                 self._collected_tasks.clear()
             else:
                 self._requests = [
                     request for request in self._requests if request.task_id != task_id
                 ]
                 self._completed_worker_by_task.pop(task_id, None)
+                self._completed_process_by_task.pop(task_id, None)
                 self._collected_tasks.discard(task_id)
 
     def close(self) -> None:
@@ -268,6 +344,7 @@ class EdgeSandboxPool:
         self,
         task_id: int,
         source: str,
+        source_url: str | None,
         profile: EdgeProfile | None,
         options: EdgeRunOptions,
     ) -> str:
@@ -275,10 +352,15 @@ class EdgeSandboxPool:
         discard = False
         try:
             worker.sandbox.clear_network_requests()
-            value = worker.sandbox.evaluate(source)
+            value = worker.sandbox.evaluate(source, source_url=source_url)
             captured = worker.sandbox.network_requests()
             worker.sandbox.clear_network_requests()
-            self._store_requests(task_id, worker.worker_id, captured)
+            self._store_requests(
+                task_id,
+                worker.worker_id,
+                worker.process_id,
+                captured,
+            )
             return value
         except BaseException:
             # Timeouts and native failures must release the process and its V8
@@ -292,12 +374,14 @@ class EdgeSandboxPool:
         self,
         task_id: int,
         worker_id: int,
+        worker_process_id: int,
         requests: tuple[CapturedNetworkRequest, ...],
     ) -> None:
         pooled = [
             PooledNetworkRequest(
                 task_id=task_id,
                 worker_id=worker_id,
+                worker_process_id=worker_process_id,
                 sequence=request.sequence,
                 source=request.source,
                 method=request.method,
@@ -310,12 +394,15 @@ class EdgeSandboxPool:
         with self._condition:
             self._requests.extend(pooled)
             self._completed_worker_by_task[task_id] = worker_id
+            self._completed_process_by_task[task_id] = worker_process_id
 
     def _acquire_worker(
         self,
         profile: EdgeProfile | None,
         options: EdgeRunOptions,
     ) -> _PoolWorker:
+        if self._one_shot_workers:
+            return self._acquire_one_shot_worker(profile)
         retired: _PoolWorker | None = None
         while True:
             with self._condition:
@@ -358,7 +445,91 @@ class EdgeSandboxPool:
                 self._creating_workers -= 1
                 self._condition.notify_all()
             raise
-        created = _PoolWorker(worker_id, sandbox, profile, options)
+        created = _PoolWorker(
+            worker_id,
+            sandbox.process_id(),
+            sandbox,
+            profile,
+            options,
+        )
+        with self._condition:
+            self._creating_workers -= 1
+            if self._closed:
+                close_created = True
+            else:
+                close_created = False
+                self._workers.append(created)
+            self._condition.notify_all()
+        if close_created:
+            created.sandbox.close()
+            raise RuntimeError("edge sandbox pool is closed")
+        return created
+
+    def _acquire_one_shot_worker(
+        self,
+        profile: EdgeProfile | None,
+    ) -> _PoolWorker:
+        while True:
+            spawn_missing = False
+            with self._condition:
+                if self._closed:
+                    raise RuntimeError("edge sandbox pool is closed")
+                available = next(
+                    (worker for worker in self._workers if not worker.busy),
+                    None,
+                )
+                if available is not None:
+                    available.busy = True
+                    break
+                if (
+                    len(self._workers) + self._creating_workers
+                    < self._maximum_workers
+                ):
+                    spawn_missing = True
+                else:
+                    self._condition.wait()
+            if spawn_missing:
+                self._spawn_blank_worker()
+
+        try:
+            available.sandbox.reinitialize_profile(profile or EdgeProfile())
+            available.profile = profile
+            return available
+        except BaseException:
+            with self._condition:
+                if available in self._workers:
+                    self._workers.remove(available)
+                self._condition.notify_all()
+            available.sandbox.close()
+            self._spawn_blank_worker()
+            raise
+
+    def _spawn_blank_worker(self) -> _PoolWorker:
+        with self._condition:
+            if self._closed:
+                raise RuntimeError("edge sandbox pool is closed")
+            self._creating_workers += 1
+            worker_id = next(self._worker_ids)
+        try:
+            sandbox = EdgeSandbox(
+                library=self._library_path,
+                worker=self._worker_path,
+                profile=self._default_profile,
+                options=self._one_shot_options,
+            )
+            created = _PoolWorker(
+                worker_id=worker_id,
+                process_id=sandbox.process_id(),
+                sandbox=sandbox,
+                profile=None,
+                options=self._one_shot_options,
+                busy=False,
+            )
+        except BaseException:
+            with self._condition:
+                self._creating_workers -= 1
+                self._condition.notify_all()
+            raise
         with self._condition:
             self._creating_workers -= 1
             if self._closed:
@@ -373,6 +544,16 @@ class EdgeSandboxPool:
         return created
 
     def _release_worker(self, worker: _PoolWorker, discard: bool) -> None:
+        if self._one_shot_workers:
+            with self._condition:
+                if worker in self._workers:
+                    self._workers.remove(worker)
+                should_replace = not self._closed
+                self._condition.notify_all()
+            worker.sandbox.close()
+            if should_replace:
+                self._spawn_blank_worker()
+            return
         close_worker = False
         with self._condition:
             worker.busy = False
