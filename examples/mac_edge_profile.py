@@ -114,7 +114,8 @@ _WINDOWS_TIME_ZONE_TO_IANA = {
     "Central Europe Standard Time": "Europe/Budapest",
     "Romance Standard Time": "Europe/Paris",
     "GMT Standard Time": "Europe/London",
-    "UTC": "Etc/UTC",
+    # Chromium/V8 canonicalizes the Windows UTC zone to the IANA primary ID.
+    "UTC": "UTC",
     "Eastern Standard Time": "America/New_York",
     "Central Standard Time": "America/Chicago",
     "Mountain Standard Time": "America/Denver",
