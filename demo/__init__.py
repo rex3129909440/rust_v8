@@ -10,6 +10,7 @@ from __future__ import annotations
 from importlib import import_module
 
 __all__ = [
+    "DEFAULT_ANDROID_EDGE_USER_AGENT",
     "DEFAULT_MAC_USER_AGENT",
     "DEFAULT_WINDOWS_USER_AGENT",
     "FingerprintVerification",

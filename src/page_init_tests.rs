@@ -81,6 +81,57 @@ fn typed_page_init_materializes_a_connected_html5_document() {
 }
 
 #[test]
+fn parser_inserted_scripts_run_after_window_globals_are_installed() {
+    let mut runtime = EdgeRuntime::with_options(EdgeRuntimeOptions {
+        page: Some(PageInit {
+            url: "https://scripts.example.test/globals".to_owned(),
+            html: r#"<!doctype html><script>
+              window.pageGlobalEvidence = [
+                navigator.toString(),
+                navigator.platform,
+                typeof MediaRecorder,
+                typeof matchMedia,
+                document.body.tagName
+              ].join("|");
+            </script>"#
+                .to_owned(),
+            ..PageInit::default()
+        }),
+        ..EdgeRuntimeOptions::default()
+    })
+    .expect("script page");
+    assert_eq!(
+        text(&mut runtime, "pageGlobalEvidence"),
+        "[object Navigator]|Win32|function|function|BODY"
+    );
+}
+
+#[test]
+fn layout_uses_unserialized_css_lengths_before_exposing_computed_style() {
+    let mut runtime = page_runtime();
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const values = ["1.01in", "1.0078in", "1.0054in"];
+              return values.map(value => {
+                const element = document.createElement("div");
+                element.style.width = value;
+                document.body.appendChild(element);
+                return [
+                  element.getBoundingClientRect().width,
+                  getComputedStyle(element).width
+                ].join(",");
+              }).join("|");
+            })()
+            "#,
+        ),
+        "96.953125,96.9531px|96.734375,96.7344px|96.515625,96.5156px"
+    );
+}
+
+#[test]
 fn page_cookie_scope_uses_the_configured_host_and_request_path() {
     let mut runtime = page_runtime();
     assert_eq!(

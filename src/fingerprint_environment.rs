@@ -1130,6 +1130,54 @@ pub(crate) fn media_type_matches(patterns: &[String], media_type: &str) -> bool 
     })
 }
 
+fn canonical_media_type(value: &str) -> String {
+    let mut parts = value.split(';');
+    let base = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
+    let mut normalized = base;
+    for parameter in parts {
+        let parameter = parameter.trim().to_ascii_lowercase();
+        if parameter.is_empty() {
+            continue;
+        }
+        normalized.push(';');
+        if let Some((name, value)) = parameter.split_once('=') {
+            normalized.push_str(name.trim());
+            normalized.push('=');
+            let value = value.trim().trim_matches('"');
+            if name.trim() == "codecs" {
+                normalized.push_str(
+                    &value
+                        .split(',')
+                        .map(str::trim)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            } else {
+                normalized.push_str(value);
+            }
+        } else {
+            normalized.push_str(&parameter);
+        }
+    }
+    normalized
+}
+
+/// Match capability records without treating a bare MIME type as support for
+/// every codec parameter. Chromium reports the base container and individual
+/// codec combinations independently for MediaSource and MediaRecorder.
+pub(crate) fn media_capability_matches(patterns: &[String], media_type: &str) -> bool {
+    let candidate = canonical_media_type(media_type);
+    patterns.iter().any(|pattern| {
+        let pattern = canonical_media_type(pattern);
+        if pattern == "*" || pattern == candidate {
+            return true;
+        }
+        pattern
+            .strip_suffix('*')
+            .is_some_and(|prefix| candidate.starts_with(prefix))
+    })
+}
+
 fn validate_string_list(
     name: &str,
     values: &[String],

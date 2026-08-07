@@ -20,6 +20,7 @@ Modeling notes:
 from __future__ import annotations
 
 import random
+from functools import lru_cache
 from typing import Iterable
 
 
@@ -64,7 +65,6 @@ PC_SCREEN_SIZE_ROWS: tuple[tuple[str, int, int, float, int, tuple[str, ...]], ..
     ("pc_1728x1117_2x_mac", 1728, 1117, 2.0, 22, ("mac", "hidpi")),
     ("pc_1800x1169_2x_mac", 1800, 1169, 2.0, 6, ("mac", "hidpi")),
     ("pc_1920x1080_1x_desktop", 1920, 1080, 1.0, 95, ("desktop", "windows")),
-    ("pc_1920x1080_1p25_windows", 1920, 1080, 1.25, 28, ("windows", "scaled")),
     ("pc_1920x1080_1p5_qhd_scaled", 1920, 1080, 1.5, 10, ("windows", "scaled", "qhd")),
     ("pc_1920x1080_2x_4k_scaled", 1920, 1080, 2.0, 24, ("windows", "scaled", "4k")),
     ("pc_1920x1200_1x_desktop", 1920, 1200, 1.0, 28, ("desktop", "productivity")),
@@ -137,13 +137,20 @@ PC_SCREEN_SIZE_ROWS: tuple[tuple[str, int, int, float, int, tuple[str, ...]], ..
 )
 
 
-def _maximized_pc_window_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+def _maximized_pc_window_rect(
+    screen_width: int,
+    screen_height: int,
+    tags: tuple[str, ...],
+) -> tuple[int, int, int, int]:
     # Windows-style maximized browser model:
     # - outerHeight loses taskbar area
     # - innerHeight additionally loses browser tabs/address/bookmark bars
     # - width stays screen-wide for maximized windows
     outer_width = screen_width
-    outer_height = max(480, screen_height - 40)
+    # Windows 11's default taskbar is 48 CSS pixels. Keep the older 40-pixel
+    # geometry only for rows explicitly representing legacy systems.
+    taskbar_height = 40 if "legacy" in tags else 48
+    outer_height = max(480, screen_height - taskbar_height)
     inner_width = outer_width
     inner_height = max(360, outer_height - 88)
     return inner_width, inner_height, outer_width, outer_height
@@ -151,12 +158,20 @@ def _maximized_pc_window_rect(screen_width: int, screen_height: int) -> tuple[in
 
 def build_pc_screen_profile(row: tuple[str, int, int, float, int, tuple[str, ...]]) -> dict[str, object]:
     profile_id, width, height, dpr, weight, tags = row
-    inner_width, inner_height, outer_width, outer_height = _maximized_pc_window_rect(width, height)
+    inner_width, inner_height, outer_width, outer_height = _maximized_pc_window_rect(
+        width,
+        height,
+        tags,
+    )
+    taskbar_height = height - outer_height
     return {
         "id": profile_id,
         "deviceClass": "pc",
         "weight": weight,
         "tags": tags,
+        "physicalWidth": int(round(width * dpr)),
+        "physicalHeight": int(round(height * dpr)),
+        "taskbarCssHeight": taskbar_height,
         "window": {
             "innerWidth": inner_width,
             "innerHeight": inner_height,
@@ -204,14 +219,14 @@ PC_SCREEN_PROFILES: tuple[dict[str, object], ...] = tuple(
 # Common browser-exposed CSS screen sizes receive a distribution boost while
 # the complete legacy, HiDPI, and ultrawide tail remains selectable.
 _COMMON_SCREEN_SIZE_BOOSTS: dict[tuple[int, int], int] = {
-    (1920, 1080): 6,
+    (1920, 1080): 10,
     (2560, 1440): 5,
     (1536, 864): 4,
-    (1366, 768): 4,
-    (1280, 720): 3,
-    (1920, 1200): 3,
-    (2560, 1600): 3,
-    (3840, 2160): 3,
+    (1366, 768): 3,
+    (1280, 720): 2,
+    (1920, 1200): 2,
+    (2560, 1600): 2,
+    (3840, 2160): 2,
     (1600, 900): 2,
     (1440, 900): 2,
     (3440, 1440): 2,
@@ -229,6 +244,7 @@ def get_pc_screen_profile_weight(profile: dict[str, object]) -> int:
     )
 
 
+@lru_cache(maxsize=8)
 def get_pc_screen_profiles(tag: str | None = None) -> tuple[dict[str, object], ...]:
     tag_key = str(tag or "").strip().lower()
     if not tag_key:
@@ -277,7 +293,7 @@ def choose_pc_screen_profile_for_hardware(
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
-def get_compatible_pc_screen_profiles_for_device(
+def _compute_compatible_pc_screen_profiles_for_device(
     hardware_profile: dict[str, object] | None,
     tag: str | None = "windows",
     gpu_profile: dict[str, object] | None = None,
@@ -367,6 +383,39 @@ def get_compatible_pc_screen_profiles_for_device(
         )
 
     return candidates
+
+
+_DEVICE_SCREEN_COMPATIBILITY_CACHE: dict[
+    tuple[str, str, str, str, str],
+    tuple[dict[str, object], ...],
+] = {}
+
+
+def get_compatible_pc_screen_profiles_for_device(
+    hardware_profile: dict[str, object] | None,
+    tag: str | None = "windows",
+    gpu_profile: dict[str, object] | None = None,
+) -> tuple[dict[str, object], ...]:
+    """Return a cached screen pool for one hardware/GPU family."""
+
+    hardware = hardware_profile or {}
+    gpu = gpu_profile or {}
+    cache_key = (
+        str(hardware.get("id", "")),
+        str(gpu.get("baseProfileId", gpu.get("id", ""))),
+        str(gpu.get("tier", "")),
+        str(gpu.get("model", "")),
+        str(tag or "").lower(),
+    )
+    cached = _DEVICE_SCREEN_COMPATIBILITY_CACHE.get(cache_key)
+    if cached is None:
+        cached = _compute_compatible_pc_screen_profiles_for_device(
+            hardware_profile,
+            tag=tag,
+            gpu_profile=gpu_profile,
+        )
+        _DEVICE_SCREEN_COMPATIBILITY_CACHE[cache_key] = cached
+    return cached
 
 
 def build_pc_screen_patch(profile: dict[str, object]) -> dict[str, object]:

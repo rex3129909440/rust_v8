@@ -1074,7 +1074,7 @@ pub(crate) fn layout_unit(value: f64) -> f64 {
     if value.is_nan() {
         0.0
     } else {
-        (value.clamp(-MAX, MAX) * 64.0).round() / 64.0
+        (value.clamp(-MAX, MAX) * 64.0).floor() / 64.0
     }
 }
 
@@ -2280,6 +2280,30 @@ mod tests {
         assert_eq!(
             normalize_property_value("width", value).as_deref(),
             Some("calc(100075px)")
+        );
+    }
+
+    #[test]
+    fn positive_css_lengths_use_blink_layout_unit_flooring() {
+        assert_eq!(
+            resolve_length("1.0078in", EvaluationContext::constants_only()),
+            Some(96.734375)
+        );
+        assert_eq!(
+            resolve_length("1.0104in", EvaluationContext::constants_only()),
+            Some(96.984375)
+        );
+        assert_eq!(
+            resolve_length("1.0050in", EvaluationContext::constants_only()),
+            Some(96.46875)
+        );
+        assert_eq!(
+            resolve_length("1.0052in", EvaluationContext::constants_only()),
+            Some(96.484375)
+        );
+        assert_eq!(
+            resolve_length("1.0053in", EvaluationContext::constants_only()),
+            Some(96.5)
         );
     }
 

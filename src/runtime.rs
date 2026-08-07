@@ -117,6 +117,7 @@ impl EdgeRuntime {
             crate::locale_runtime::install(context_scope)?;
             crate::determinism::install(context_scope)?;
             crate::iframe_hook::install_for_root(context_scope)?;
+            crate::web::document_global::execute_parser_inserted_scripts(context_scope);
             (v8::Global::new(context_scope, context), late_intrinsics)
         };
         {

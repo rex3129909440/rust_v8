@@ -159,6 +159,35 @@ fn environment_options() -> EdgeRuntimeOptions {
 }
 
 #[test]
+fn media_capability_matching_keeps_container_and_codec_support_separate() {
+    let patterns = vec![
+        "video/webm".to_owned(),
+        "video/webm;codecs=vp8*".to_owned(),
+        "video/mp4;codecs=avc1.*".to_owned(),
+    ];
+    assert!(crate::fingerprint_environment::media_capability_matches(
+        &patterns,
+        "video/webm"
+    ));
+    assert!(crate::fingerprint_environment::media_capability_matches(
+        &patterns,
+        "video/webm; codecs=\"vp8\""
+    ));
+    assert!(crate::fingerprint_environment::media_capability_matches(
+        &patterns,
+        "video/mp4; codecs=\"avc1.64003E, opus\""
+    ));
+    assert!(!crate::fingerprint_environment::media_capability_matches(
+        &patterns,
+        "video/webm;codecs=daala"
+    ));
+    assert!(!crate::fingerprint_environment::media_capability_matches(
+        &patterns,
+        "video/webm;codecs=h264"
+    ));
+}
+
+#[test]
 fn prompt_permissions_do_not_disclose_profiled_devices_location_or_fonts() {
     let mut options = EdgeRuntimeOptions::default();
     options.fingerprint.permissions.camera = "prompt".to_owned();

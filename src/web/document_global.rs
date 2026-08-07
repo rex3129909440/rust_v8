@@ -36,8 +36,17 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
         .ok_or_else(|| "document global state was not prepared".to_owned())?
         .document = Some(stored_document);
     install_existing(scope)?;
-    super::html_script_element::execute_parser_inserted_tree(scope, document);
     Ok(())
+}
+
+pub(crate) fn execute_parser_inserted_scripts(scope: &mut v8::PinScope<'_, '_>) {
+    let document = scope
+        .get_slot::<DocumentGlobalStore>()
+        .and_then(|store| store.document.as_ref())
+        .map(|document| v8::Local::new(scope, document));
+    if let Some(document) = document {
+        super::html_script_element::execute_parser_inserted_tree(scope, document);
+    }
 }
 
 pub(crate) fn install_existing(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {

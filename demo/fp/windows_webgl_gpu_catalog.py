@@ -20,7 +20,14 @@ of a captured webgl_gpu template.
 from __future__ import annotations
 
 import random
+from bisect import bisect_right
+from itertools import accumulate
 from typing import Iterable, Sequence
+
+try:
+    from .windows_pci_device_catalog import WINDOWS_GPU_DEVICE_VARIANTS
+except ImportError:  # Support running this catalog directly from demo/fp.
+    from windows_pci_device_catalog import WINDOWS_GPU_DEVICE_VARIANTS
 
 
 WINDOWS_ANGLE_BACKEND = "Direct3D11 vs_5_0 ps_5_0, D3D11"
@@ -424,25 +431,47 @@ def build_angle_renderer(driver_vendor: str, model: str, device_marker: str = ""
     return f"ANGLE ({driver_vendor}, {model}{marker} {WINDOWS_ANGLE_BACKEND})"
 
 
-def build_windows_webgl_gpu_candidate(row: tuple[str, str, str, str, str, str]) -> dict[str, object]:
-    item_id, driver_vendor, architecture, tier, model, device_marker = row
+def build_windows_webgl_gpu_candidate(
+    row: tuple[str, str, str, str, str, str],
+    device_variant: tuple[str, str, str],
+    *,
+    variant_index: int,
+    expose_device_id: bool,
+    variant_count: int,
+) -> dict[str, object]:
+    item_id, driver_vendor, architecture, tier, model, _legacy_marker = row
+    device_id, evidence_name, webgpu_architecture = device_variant
+    canonical_device_id = f"0x{int(device_id, 16):08X}"
+    device_marker = canonical_device_id if expose_device_id else ""
+    if variant_index == 0 and expose_device_id:
+        candidate_id = item_id
+    else:
+        renderer_shape = "id" if expose_device_id else "noid"
+        candidate_id = f"{item_id}__pci_{device_id.lower()}_{renderer_shape}"
     adapter_vendor = WEBGPU_ADAPTER_VENDOR_BY_DRIVER_VENDOR[driver_vendor]
     unmasked_vendor = WEBGL_UNMASKED_VENDOR_BY_DRIVER_VENDOR[driver_vendor]
     renderer = build_angle_renderer(driver_vendor, model, device_marker)
     return {
-        "id": item_id,
+        "id": candidate_id,
+        "baseProfileId": item_id,
         "os": "windows",
         "backend": "angle-d3d11",
         "driverVendor": driver_vendor,
         "vendor": adapter_vendor,
         "architecture": architecture,
+        "webgpuArchitecture": webgpu_architecture,
         "tier": tier,
         "model": model,
         "deviceMarker": device_marker,
+        "deviceId": canonical_device_id,
+        "rendererDeviceIdExposed": expose_device_id,
+        "rendererVariantWeight": 0.75 if expose_device_id else 0.25,
+        "deviceIdVariantCount": variant_count,
+        "evidenceName": evidence_name,
         "gpu": {
             "adapter": {
                 "vendor": adapter_vendor,
-                "architecture": architecture,
+                "architecture": webgpu_architecture,
                 "device": "",
                 "description": "",
             }
@@ -455,11 +484,23 @@ def build_windows_webgl_gpu_candidate(row: tuple[str, str, str, str, str, str]) 
 
 
 WINDOWS_WEBGL_GPU_CANDIDATES: tuple[dict[str, object], ...] = tuple(
-    build_windows_webgl_gpu_candidate(row) for row in WINDOWS_GPU_MODEL_ROWS
+    build_windows_webgl_gpu_candidate(
+        row,
+        device_variant,
+        variant_index=variant_index,
+        expose_device_id=expose_device_id,
+        variant_count=len(WINDOWS_GPU_DEVICE_VARIANTS[row[0]]),
+    )
+    for row in WINDOWS_GPU_MODEL_ROWS
+    if row[0] in WINDOWS_GPU_DEVICE_VARIANTS
+    for variant_index, device_variant in enumerate(
+        WINDOWS_GPU_DEVICE_VARIANTS[row[0]]
+    )
+    for expose_device_id in (True, False)
 )
 
 
-def get_windows_webgl_gpu_candidate_weight(candidate: dict[str, object]) -> int:
+def get_windows_webgl_gpu_candidate_weight(candidate: dict[str, object]) -> float:
     """Return a PC-realistic sampling weight without changing the candidate."""
     tier = str(candidate.get("tier", "") or "").lower()
     driver_vendor = str(candidate.get("driverVendor", "") or "")
@@ -472,7 +513,12 @@ def get_windows_webgl_gpu_candidate_weight(candidate: dict[str, object]) -> int:
         if needle in model:
             weight = int(weight * multiplier)
             break
-    return max(1, weight)
+    # Several real PCI IDs can map to the same browser-visible adapter name.
+    # Divide the base model's probability among those variants so generic
+    # Intel/AMD rows do not dominate merely because they have more IDs.
+    variant_count = max(1, int(candidate.get("deviceIdVariantCount", 1)))
+    renderer_weight = float(candidate.get("rendererVariantWeight", 1.0))
+    return max(0.01, float(weight) * renderer_weight / variant_count)
 
 
 def choose_weighted_windows_webgl_gpu_candidate(
@@ -481,8 +527,29 @@ def choose_weighted_windows_webgl_gpu_candidate(
 ) -> dict[str, object]:
     if not candidates:
         raise ValueError("no Windows WebGL GPU candidates available")
-    weights = [get_windows_webgl_gpu_candidate_weight(item) for item in candidates]
-    return rng.choices(tuple(candidates), weights=weights, k=1)[0]
+    # Candidate catalogs are immutable, long-lived tuples. Build their
+    # cumulative table once, then select in O(log n) instead of recalculating
+    # 1,300+ weights on every profile request.
+    cache_key = id(candidates)
+    cached = _WEIGHTED_POOL_CACHE.get(cache_key)
+    if cached is None or cached[0] is not candidates:
+        cumulative = tuple(
+            accumulate(
+                get_windows_webgl_gpu_candidate_weight(item)
+                for item in candidates
+            )
+        )
+        cached = (candidates, cumulative)
+        _WEIGHTED_POOL_CACHE[cache_key] = cached
+    cumulative = cached[1]
+    selected = bisect_right(cumulative, rng.random() * cumulative[-1])
+    return candidates[min(selected, len(candidates) - 1)]
+
+
+_WEIGHTED_POOL_CACHE: dict[
+    int,
+    tuple[Sequence[dict[str, object]], tuple[float, ...]],
+] = {}
 
 
 def get_windows_webgl_gpu_candidates(

@@ -362,7 +362,7 @@ fn add_source_buffer(
         return;
     }
     let media_type = crate::webidl::value_to_string(scope, arguments.get(0));
-    if !crate::fingerprint_environment::media_type_matches(
+    if !crate::fingerprint_environment::media_capability_matches(
         &crate::fingerprint::edge(scope).media.media_source_types,
         &media_type,
     ) {
@@ -482,7 +482,7 @@ fn is_type_supported(
     result.set(
         v8::Boolean::new(
             scope,
-            crate::fingerprint_environment::media_type_matches(configured, &media_type),
+            crate::fingerprint_environment::media_capability_matches(configured, &media_type),
         )
         .into(),
     );

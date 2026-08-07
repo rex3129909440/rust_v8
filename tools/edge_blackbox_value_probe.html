@@ -1,0 +1,164 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Edge sandbox value evidence</title>
+<pre id="output">pending</pre>
+<script>
+"use strict";
+
+const lines = [];
+const record = (name, value) => {
+  let rendered;
+  try {
+    rendered = String(value);
+  } catch (error) {
+    rendered = `${error.name}: ${error.message}`;
+  }
+  lines.push(`${name}=${encodeURIComponent(rendered)}`);
+};
+const capture = (name, callback) => {
+  try {
+    record(name, callback());
+  } catch (error) {
+    record(name, `${error.name}: ${error.message}`);
+  }
+};
+
+capture("navigator.toString", () => navigator.toString());
+capture("window.toString", () => window.toString());
+capture("navigator.objectTag", () => Object.prototype.toString.call(navigator));
+capture("mimeTypes.objectTag", () => Object.prototype.toString.call(navigator.mimeTypes));
+capture("mimeTypes.constructor", () => navigator.mimeTypes.constructor.name);
+capture("mimeTypes.constructorType", () => typeof navigator.mimeTypes.constructor);
+capture("mimeTypes.extendsInstance", () => {
+  try {
+    class Derived extends navigator.mimeTypes {}
+    return "accepted";
+  } catch (error) {
+    return `${error.name}: ${error.message}`;
+  }
+});
+capture("mimeTypes.extendsConstructor", () => {
+  try {
+    class Derived extends MimeTypeArray {}
+    return "accepted";
+  } catch (error) {
+    return `${error.name}: ${error.message}`;
+  }
+});
+capture("connection.effectiveType", () => navigator.connection.effectiveType);
+capture("connection.rtt", () => navigator.connection.rtt);
+capture("connection.downlink", () => navigator.connection.downlink);
+capture("connection.saveData", () => navigator.connection.saveData);
+capture("audio.sampleRate", () => {
+  const context = new AudioContext();
+  const value = context.sampleRate;
+  context.close();
+  return value;
+});
+capture("audio.baseLatency", () => {
+  const context = new AudioContext();
+  const value = context.baseLatency;
+  context.close();
+  return value;
+});
+capture("audio.outputLatency", () => {
+  const context = new AudioContext();
+  const value = context.outputLatency;
+  context.close();
+  return value;
+});
+
+const mediaTypes = [
+  "video/webm",
+  "audio/webm",
+  "video/webm;codecs=vp8",
+  "video/webm;codecs=daala",
+  "video/webm;codecs=h264",
+  "audio/webm;codecs=opus",
+  "video/mp4",
+  "video/mp4;codecs=avc1.64003E,mp4a.40.2",
+  "video/mp4;codecs=avc1.64003E,opus",
+  "video/mp4;codecs=avc3.64003E,mp4a.40.2",
+  "video/mp4;codecs=avc3.64003E,opus",
+  "video/mp4;codecs=hvc1.1.6.L186.B0,mp4a.40.2",
+  "video/mp4;codecs=hvc1.1.6.L186.B0,opus",
+  "video/mp4;codecs=hev1.1.6.L186.B0,mp4a.40.2",
+  "video/mp4;codecs=hev1.1.6.L186.B0,opus",
+  "video/mp4;codecs=av01.0.19M.08,mp4a.40.2",
+  "video/mp4;codecs=av01.0.19M.08,opus"
+];
+for (const type of mediaTypes) {
+  capture(`MediaRecorder.isTypeSupported:${type}`, () =>
+    typeof MediaRecorder === "function" && MediaRecorder.isTypeSupported(type)
+  );
+  capture(`MediaSource.isTypeSupported:${type}`, () =>
+    typeof MediaSource === "function" && MediaSource.isTypeSupported(type)
+  );
+}
+
+const absoluteUnits = [
+  "1.03in",
+  "2.6162cm",
+  "74.16pt",
+  "1.01in",
+  "1.0078in",
+  "1.0104in",
+  "1.0521in",
+  "0.9948in",
+  "1.0050in",
+  "1.0051in",
+  "1.0052in",
+  "1.0053in",
+  "1.0054in",
+  "1in"
+];
+const unitHost = document.createElement("div");
+unitHost.style.cssText = "position:fixed;left:-99999px;top:0;width:0;height:0;visibility:hidden;pointer-events:none;contain:layout style size";
+for (const unit of absoluteUnits) {
+  const element = document.createElement("div");
+  element.style.cssText = `position:absolute;width:${unit};height:${unit}`;
+  unitHost.appendChild(element);
+}
+document.body.appendChild(unitHost);
+Array.from(unitHost.children).forEach((element, index) => {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  record(
+    `absoluteUnit:${absoluteUnits[index]}`,
+    `${rect.width},${rect.height},${element.offsetWidth},${element.offsetHeight},${style.width},${style.height}`
+  );
+});
+
+for (const type of [
+  "text", "search", "checkbox", "radio", "range", "color", "date",
+  "time", "datetime-local", "month", "week", "image", "button", "submit",
+  "reset", "file", "hidden"
+]) {
+  const input = document.createElement("input");
+  input.type = type;
+  document.body.appendChild(input);
+  const rect = input.getBoundingClientRect();
+  record(
+    `inputRect:${type}`,
+    `${rect.width}x${rect.height}:${input.clientWidth}x${input.clientHeight}`
+  );
+}
+
+(async () => {
+  if (navigator.keyboard && typeof navigator.keyboard.getLayoutMap === "function") {
+    try {
+      const layout = await navigator.keyboard.getLayoutMap();
+      record("keyboard.size", layout.size);
+      record(
+        "keyboard.entries",
+        Array.from(layout.entries(), ([code, value]) => `${code}:${value}`).join("|")
+      );
+    } catch (error) {
+      record("keyboard.error", `${error.name}: ${error.message}`);
+    }
+  } else {
+    record("keyboard.available", false);
+  }
+  document.getElementById("output").textContent = lines.join("\n");
+})();
+</script>

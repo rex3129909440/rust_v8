@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+from collections import defaultdict
 import unittest
 
 from demo.get_random_fp import get_random_fp_details
@@ -12,6 +14,7 @@ from demo.fp.screen_profile_catalog import (
     get_compatible_pc_screen_profiles_for_device,
 )
 from demo.fp.windows_webgl_gpu_catalog import WINDOWS_WEBGL_GPU_CANDIDATES
+from demo.fp.windows_pci_device_catalog import WINDOWS_GPU_DEVICE_VARIANTS
 from examples.windows_edge_profile import windows_edge_150_profile
 
 
@@ -20,6 +23,68 @@ def _tags(profile: dict[str, object]) -> set[str]:
 
 
 class WindowsProfileCatalogTests(unittest.TestCase):
+    def test_windows_gpu_ids_and_renderer_shapes_are_evidence_linked(self) -> None:
+        self.assertGreaterEqual(len(WINDOWS_GPU_DEVICE_VARIANTS), 260)
+        self.assertGreaterEqual(
+            sum(len(items) for items in WINDOWS_GPU_DEVICE_VARIANTS.values()),
+            600,
+        )
+        self.assertGreaterEqual(len(WINDOWS_WEBGL_GPU_CANDIDATES), 1_200)
+        self.assertNotIn(
+            "0x00002A01",
+            {
+                str(item.get("deviceId", ""))
+                for item in WINDOWS_WEBGL_GPU_CANDIDATES
+            },
+        )
+
+        renderer_shapes_by_device: dict[
+            tuple[str, str],
+            list[dict[str, object]],
+        ] = defaultdict(list)
+        for gpu in WINDOWS_WEBGL_GPU_CANDIDATES:
+            device_id = str(gpu.get("deviceId", ""))
+            renderer = str(gpu["webgl"]["unmaskedRenderer"])
+            renderer_shapes_by_device[
+                (str(gpu.get("baseProfileId", "")), device_id)
+            ].append(gpu)
+            self.assertRegex(device_id, r"^0x[0-9A-F]{8}$")
+            self.assertTrue(str(gpu.get("evidenceName", "")))
+            self.assertTrue(str(gpu.get("webgpuArchitecture", "")))
+            if bool(gpu.get("rendererDeviceIdExposed")):
+                self.assertIn(f"({device_id})", renderer)
+            else:
+                self.assertNotIn(f"({device_id})", renderer)
+
+        # Every evidence-backed device ID—not only RTX 5060—must expose both
+        # ANGLE renderer shapes while retaining the same internal device ID.
+        self.assertEqual(
+            len(renderer_shapes_by_device),
+            sum(len(items) for items in WINDOWS_GPU_DEVICE_VARIANTS.values()),
+        )
+        for device_key, shapes in renderer_shapes_by_device.items():
+            self.assertEqual(len(shapes), 2, device_key)
+            self.assertEqual(
+                {bool(item["rendererDeviceIdExposed"]) for item in shapes},
+                {False, True},
+                device_key,
+            )
+
+        rtx_5060 = [
+            item
+            for item in WINDOWS_WEBGL_GPU_CANDIDATES
+            if item.get("baseProfileId") == "win_nvidia_rtx_5060"
+        ]
+        self.assertEqual(len(rtx_5060), 4)
+        self.assertEqual(
+            {str(item["deviceId"]) for item in rtx_5060},
+            {"0x00002D05", "0x00002F06"},
+        )
+        self.assertEqual(
+            {bool(item["rendererDeviceIdExposed"]) for item in rtx_5060},
+            {False, True},
+        )
+
     def test_windows_baseline_does_not_inherit_mac_surface_values(self) -> None:
         profile = windows_edge_150_profile()
 
@@ -33,7 +98,25 @@ class WindowsProfileCatalogTests(unittest.TestCase):
         self.assertEqual(profile.webgpu.max_vertex_attributes, 16)
         self.assertEqual(profile.webgpu.max_color_attachment_bytes_per_sample, 32)
         self.assertEqual(profile.webgpu.max_compute_invocations_per_workgroup, 256)
-        self.assertEqual(len(profile.media.media_recorder_types), 5)
+        self.assertEqual(len(profile.media.media_recorder_types), 15)
+        self.assertIn("video/webm;codecs=vp8*", profile.media.media_recorder_types)
+        self.assertNotIn("video/webm;codecs=daala*", profile.media.media_recorder_types)
+
+    def test_windows_11_screen_and_memory_catalog_invariants(self) -> None:
+        screen_by_id = {str(item["id"]): item for item in PC_SCREEN_PROFILES}
+        self.assertNotIn("pc_1920x1080_1p25_windows", screen_by_id)
+        full_hd = screen_by_id["pc_1920x1080_1x_desktop"]
+        self.assertEqual(full_hd["screen"]["availHeight"], 1_032)
+        self.assertEqual(full_hd["taskbarCssHeight"], 48)
+        self.assertEqual(full_hd["physicalWidth"], 1_920)
+        self.assertEqual(full_hd["physicalHeight"], 1_080)
+
+        physical_memory_values = {
+            int(item["physicalRamHintGb"])
+            for item in PC_NAVIGATOR_HARDWARE_PROFILES
+        }
+        self.assertIn(12, physical_memory_values)
+        self.assertIn(96, physical_memory_values)
 
     def test_every_physical_windows_gpu_has_a_large_compatible_space(self) -> None:
         possible_combinations = 0
@@ -109,6 +192,9 @@ class WindowsProfileCatalogTests(unittest.TestCase):
         screen_ids: set[str] = set()
         combinations: set[tuple[str, str, str]] = set()
         dpr_values: set[float] = set()
+        logical_processors: Counter[int] = Counter()
+        physical_memory: Counter[int] = Counter()
+        screen_sizes: Counter[tuple[int, int]] = Counter()
 
         for seed in range(2_000):
             fingerprint = get_random_fp_details("US", seed=seed)
@@ -124,6 +210,11 @@ class WindowsProfileCatalogTests(unittest.TestCase):
                 )
             )
             dpr_values.add(float(profile.screen.device_pixel_ratio))
+            logical_processors[int(profile.navigator.hardware_concurrency)] += 1
+            physical_memory[int(fingerprint.physical_memory_gb)] += 1
+            screen_sizes[
+                (int(profile.screen.width), int(profile.screen.height))
+            ] += 1
 
             self.assertEqual(profile.window.inner_width, 0.0)
             self.assertEqual(profile.window.inner_height, 0.0)
@@ -135,13 +226,37 @@ class WindowsProfileCatalogTests(unittest.TestCase):
             self.assertEqual(profile.webgpu.max_vertex_attributes, 16)
             self.assertEqual(profile.webgpu.max_color_attachment_bytes_per_sample, 32)
             self.assertEqual(profile.webgpu.max_compute_invocations_per_workgroup, 256)
-            self.assertEqual(len(profile.media.media_recorder_types), 5)
+            self.assertEqual(len(profile.media.media_recorder_types), 15)
+            self.assertIn(
+                "video/mp4;codecs=av01.*",
+                profile.media.media_recorder_types,
+            )
 
         self.assertGreaterEqual(len(gpu_ids), 200)
         self.assertGreaterEqual(len(hardware_ids), 70)
         self.assertGreaterEqual(len(screen_ids), 65)
         self.assertGreaterEqual(len(combinations), 1_700)
         self.assertGreaterEqual(len(dpr_values), 6)
+
+        # GPU catalog growth must not flatten the independently weighted CPU,
+        # RAM, and display distributions. Mainstream states remain dominant;
+        # workstation-size values stay available only as a low-probability tail.
+        self.assertGreaterEqual(logical_processors[6] + logical_processors[8], 900)
+        self.assertGreaterEqual(physical_memory[16] + physical_memory[32], 1_350)
+        self.assertLess(sum(count for ram, count in physical_memory.items() if ram >= 96), 30)
+        self.assertGreaterEqual(
+            sum(
+                screen_sizes[size]
+                for size in (
+                    (1920, 1080),
+                    (1536, 864),
+                    (2560, 1440),
+                    (1366, 768),
+                    (1280, 720),
+                )
+            ),
+            1_350,
+        )
 
 
 if __name__ == "__main__":

@@ -139,7 +139,7 @@ fn construct(
     let mime_type = options
         .and_then(|options| string_property(scope, options, "mimeType"))
         .unwrap_or_default();
-    if !crate::fingerprint_environment::media_type_matches(
+    if !crate::fingerprint_environment::media_capability_matches(
         &crate::fingerprint::edge(scope).media.media_recorder_types,
         &mime_type,
     ) {
@@ -585,7 +585,7 @@ fn is_type_supported(
     result.set(
         v8::Boolean::new(
             scope,
-            crate::fingerprint_environment::media_type_matches(configured, &media_type),
+            crate::fingerprint_environment::media_capability_matches(configured, &media_type),
         )
         .into(),
     );

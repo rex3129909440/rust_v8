@@ -409,6 +409,12 @@ fn property_length(
     element: v8::Local<'_, v8::Object>,
     name: &str,
 ) -> Option<f64> {
+    if let Some(source) =
+        super::get_computed_style_global::cascaded_property_source(scope, element, name)
+        && let Some(length) = resolve_length(scope, element, name, &source)
+    {
+        return Some(length);
+    }
     resolve_length(scope, element, name, &property(scope, element, name))
 }
 

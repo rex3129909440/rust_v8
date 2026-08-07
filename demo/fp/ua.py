@@ -71,7 +71,9 @@ def has_specific_full_version(value: Any) -> bool:
 def parse_ua(ua_string: str) -> Dict[str, Any]:
     ua = str(ua_string or "")
     chrome_match = re.search(r"\b(?:Chrome|Chromium)/([\d.]+)", ua)
-    edge_match = re.search(r"\bEdg/([\d.]+)", ua)
+    # Desktop Edge uses Edg/, while Android Edge uses EdgA/. Both contribute
+    # the Microsoft Edge UA-CH brand and full-version fields.
+    edge_match = re.search(r"\b(?:Edg|EdgA)/([\d.]+)", ua)
     full_chrome_version = chrome_match.group(1) if chrome_match else "143.0.0.0"
     chrome_major_int = clamp_supported_chromium_major(str(full_chrome_version).split(".")[0])
     chrome_major = str(chrome_major_int)

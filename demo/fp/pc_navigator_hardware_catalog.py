@@ -52,7 +52,9 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     # combinations; keeping these as independent evidence-backed rows creates
     # a large valid space without inventing arbitrary cross-products.
     ("pc_desktop_6c_16g_notouch_mainstream", 6, 8, 0, 16, 34, ("desktop", "mainstream", "office", "notouch")),
+    ("pc_desktop_6c_12g_notouch_office", 6, 8, 0, 12, 8, ("desktop", "office", "mainstream", "notouch")),
     ("pc_desktop_8c_16g_notouch_mainstream", 8, 8, 0, 16, 82, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_8c_12g_notouch_mainstream", 8, 8, 0, 12, 12, ("desktop", "mainstream", "notouch")),
     ("pc_desktop_8c_32g_notouch_mainstream", 8, 8, 0, 32, 70, ("desktop", "mainstream", "gaming", "notouch")),
     ("pc_desktop_10c_16g_notouch_mainstream", 10, 8, 0, 16, 40, ("desktop", "mainstream", "gaming", "notouch")),
     ("pc_desktop_10c_32g_notouch_performance", 10, 8, 0, 32, 34, ("desktop", "performance", "gaming", "notouch")),
@@ -75,6 +77,7 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     ("pc_desktop_24c_32g_notouch_performance", 24, 8, 0, 32, 28, ("desktop", "performance", "gaming", "notouch")),
     ("pc_desktop_24c_48g_notouch_performance", 24, 8, 0, 48, 4, ("desktop", "performance", "gaming", "notouch")),
     ("pc_desktop_24c_64g_notouch_performance", 24, 8, 0, 64, 8, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_24c_96g_notouch_performance", 24, 8, 0, 96, 2, ("desktop", "performance", "gaming", "notouch")),
     ("pc_desktop_28c_32g_notouch_performance", 28, 8, 0, 32, 8, ("desktop", "performance", "gaming", "notouch")),
     ("pc_desktop_28c_64g_notouch_performance", 28, 8, 0, 64, 4, ("desktop", "performance", "gaming", "notouch")),
     ("pc_desktop_32c_32g_notouch_performance", 32, 8, 0, 32, 8, ("desktop", "performance", "gaming", "notouch")),
@@ -87,6 +90,7 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     ("pc_laptop_4c_8g_notouch_lowend", 4, 8, 0, 8, 14, ("laptop", "lowend", "notouch")),
     ("pc_laptop_6c_8g_notouch_office", 6, 8, 0, 8, 18, ("laptop", "office", "notouch")),
     ("pc_laptop_8c_8g_notouch_mainstream", 8, 8, 0, 8, 28, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_8c_12g_notouch_mainstream", 8, 8, 0, 12, 10, ("laptop", "mainstream", "notouch")),
     ("pc_laptop_8c_16g_notouch_mainstream", 8, 8, 0, 16, 42, ("laptop", "mainstream", "notouch")),
     ("pc_laptop_10c_8g_notouch_mainstream", 10, 8, 0, 8, 18, ("laptop", "mainstream", "notouch")),
     ("pc_laptop_10c_16g_notouch_mainstream", 10, 8, 0, 16, 36, ("laptop", "mainstream", "notouch")),
@@ -99,6 +103,7 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     ("pc_laptop_16c_24g_notouch_mainstream", 16, 8, 0, 24, 10, ("laptop", "mainstream", "notouch")),
     ("pc_laptop_16c_32g_notouch_performance", 16, 8, 0, 32, 30, ("laptop", "performance", "notouch")),
     ("pc_laptop_16c_64g_notouch_performance", 16, 8, 0, 64, 5, ("laptop", "performance", "notouch")),
+    ("pc_laptop_16c_96g_notouch_performance", 16, 8, 0, 96, 1, ("laptop", "performance", "notouch")),
     ("pc_laptop_20c_16g_notouch_performance", 20, 8, 0, 16, 15, ("laptop", "performance", "notouch")),
     ("pc_laptop_20c_32g_notouch_performance", 20, 8, 0, 32, 26, ("laptop", "performance", "notouch")),
     ("pc_laptop_20c_64g_notouch_performance", 20, 8, 0, 64, 5, ("laptop", "performance", "notouch")),
@@ -148,6 +153,8 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     ("pc_workstation_16c_64g_notouch", 16, 8, 0, 64, 8, ("workstation", "notouch")),
     ("pc_workstation_24c_32g_notouch", 24, 8, 0, 32, 7, ("workstation", "notouch")),
     ("pc_workstation_24c_64g_notouch", 24, 8, 0, 64, 8, ("workstation", "notouch")),
+    ("pc_workstation_24c_96g_notouch", 24, 8, 0, 96, 4, ("workstation", "notouch")),
+    ("pc_workstation_32c_96g_notouch", 32, 8, 0, 96, 3, ("workstation", "notouch")),
 
     # Windows touch laptops / 2-in-1 / Surface-like PCs.
     ("pc_4c_8g_touch5_convertible", 4, 8, 5, 8, 16, ("touch", "convertible", "surface")),
@@ -218,12 +225,12 @@ PC_NAVIGATOR_HARDWARE_PROFILES: tuple[dict[str, object], ...] = tuple(
 # Relative weights follow the broad shape of Steam's Windows survey. Rare
 # workstation and mixed-memory states stay in the catalog with low weights.
 _LOGICAL_PROCESSOR_WEIGHTS = {
-    1: 1, 2: 3, 4: 44, 6: 100, 8: 98, 10: 25, 12: 18, 14: 17,
+    1: 1, 2: 3, 4: 47, 6: 99, 8: 100, 10: 27, 12: 18, 14: 17,
     16: 20, 18: 2, 20: 8, 22: 1, 24: 10, 28: 1, 32: 3,
 }
 _PHYSICAL_MEMORY_WEIGHTS = {
-    1: 1, 2: 1, 4: 4, 8: 20, 12: 6, 16: 100, 24: 8, 28: 2,
-    32: 93, 48: 3, 60: 2, 64: 10, 128: 2, 192: 1, 256: 1,
+    1: 1, 2: 1, 4: 4, 8: 19, 12: 4, 16: 100, 24: 5,
+    32: 90, 48: 3, 64: 10, 96: 2, 128: 2, 192: 1, 256: 1,
     512: 1, 1024: 1,
 }
 
@@ -235,6 +242,59 @@ def get_pc_navigator_hardware_profile_weight(profile: dict[str, object]) -> int:
     cpu = _LOGICAL_PROCESSOR_WEIGHTS.get(concurrency, 1)
     memory = _PHYSICAL_MEMORY_WEIGHTS.get(physical_ram, 1)
     return max(1, base * cpu * memory // 100)
+
+
+_HARDWARE_POOL_WEIGHT_CACHE: dict[
+    int,
+    tuple[tuple[dict[str, object], ...], tuple[float, ...]],
+] = {}
+
+
+def get_pc_navigator_hardware_pool_weights(
+    profiles: tuple[dict[str, object], ...],
+) -> tuple[float, ...]:
+    """Normalize catalog rows to the target CPU/RAM bucket distribution.
+
+    Several form-factor rows can represent the same CPU/RAM bucket. Without
+    normalization, merely adding another real row would make that bucket more
+    likely. The bucket receives one survey-derived weight, then its rows split
+    that weight according to their local catalog weights.
+    """
+
+    cache_key = id(profiles)
+    cached = _HARDWARE_POOL_WEIGHT_CACHE.get(cache_key)
+    if cached is not None and cached[0] is profiles:
+        return cached[1]
+
+    pair_base_totals: dict[tuple[int, int], float] = {}
+    cpu_memory_buckets: dict[int, set[int]] = {}
+    for profile in profiles:
+        cpu = int(profile.get("hardwareConcurrency", 0) or 0)
+        memory = int(profile.get("physicalRamHintGb", 0) or 0)
+        pair = (cpu, memory)
+        pair_base_totals[pair] = pair_base_totals.get(pair, 0.0) + max(
+            1.0,
+            float(profile.get("weight", 1) or 1),
+        )
+        cpu_memory_buckets.setdefault(cpu, set()).add(memory)
+
+    cpu_memory_totals = {
+        cpu: sum(_PHYSICAL_MEMORY_WEIGHTS.get(memory, 1) for memory in memories)
+        for cpu, memories in cpu_memory_buckets.items()
+    }
+    weights = []
+    for profile in profiles:
+        cpu = int(profile.get("hardwareConcurrency", 0) or 0)
+        memory = int(profile.get("physicalRamHintGb", 0) or 0)
+        base = max(1.0, float(profile.get("weight", 1) or 1))
+        cpu_weight = float(_LOGICAL_PROCESSOR_WEIGHTS.get(cpu, 1))
+        memory_weight = float(_PHYSICAL_MEMORY_WEIGHTS.get(memory, 1))
+        pair_share = base / pair_base_totals[(cpu, memory)]
+        memory_share = memory_weight / max(1.0, cpu_memory_totals[cpu])
+        weights.append(cpu_weight * memory_share * pair_share)
+    result = tuple(weights)
+    _HARDWARE_POOL_WEIGHT_CACHE[cache_key] = (profiles, result)
+    return result
 
 
 def get_pc_navigator_hardware_profiles(
@@ -272,7 +332,7 @@ def choose_pc_navigator_hardware_profile(
         profiles = get_pc_navigator_hardware_profiles(include_virtual=include_virtual)
     if not profiles:
         raise ValueError("no PC navigator hardware profiles available")
-    weights = [get_pc_navigator_hardware_profile_weight(profile) for profile in profiles]
+    weights = get_pc_navigator_hardware_pool_weights(profiles)
     return rng.choices(profiles, weights=weights, k=1)[0]
 
 
@@ -330,7 +390,7 @@ def choose_pc_navigator_hardware_profile_for_gpu_tier(
 
     if not candidates:
         candidates = profiles
-    weights = [get_pc_navigator_hardware_profile_weight(profile) for profile in candidates]
+    weights = get_pc_navigator_hardware_pool_weights(candidates)
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
@@ -353,11 +413,11 @@ def choose_pc_navigator_hardware_profile_for_gpu(
             str((gpu_profile or {}).get("tier", "") or ""),
             tag=tag,
         )
-    weights = [get_pc_navigator_hardware_profile_weight(profile) for profile in candidates]
+    weights = get_pc_navigator_hardware_pool_weights(candidates)
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
-def get_compatible_pc_navigator_hardware_profiles_for_gpu(
+def _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
     gpu_profile: dict[str, object] | None,
     tag: str | None = "windows",
 ) -> tuple[dict[str, object], ...]:
@@ -427,7 +487,7 @@ def get_compatible_pc_navigator_hardware_profiles_for_gpu(
             if has_any(profile, {"laptop", "touch", "convertible", "surface"})
             and not has_any(profile, {"arm64", "workstation", "obsolete"})
             and minimum_cpu <= concurrency(profile) <= 32
-            and minimum_ram <= physical_ram(profile) <= 64
+            and minimum_ram <= physical_ram(profile) <= 96
         )
 
     modern_integrated_arches = {
@@ -514,6 +574,36 @@ def get_compatible_pc_navigator_hardware_profiles_for_gpu(
     return tuple(
         profile for profile in profiles if "arm64" not in profile_tags(profile)
     )
+
+
+_GPU_HARDWARE_COMPATIBILITY_CACHE: dict[
+    tuple[str, str, str, str, str],
+    tuple[dict[str, object], ...],
+] = {}
+
+
+def get_compatible_pc_navigator_hardware_profiles_for_gpu(
+    gpu_profile: dict[str, object] | None,
+    tag: str | None = "windows",
+) -> tuple[dict[str, object], ...]:
+    """Return a cached coherent hardware pool for one GPU family."""
+
+    gpu = gpu_profile or {}
+    cache_key = (
+        str(gpu.get("baseProfileId", gpu.get("id", ""))),
+        str(gpu.get("tier", "")),
+        str(gpu.get("architecture", "")),
+        str(gpu.get("model", "")),
+        str(tag or "").lower(),
+    )
+    cached = _GPU_HARDWARE_COMPATIBILITY_CACHE.get(cache_key)
+    if cached is None:
+        cached = _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
+            gpu_profile,
+            tag=tag,
+        )
+        _GPU_HARDWARE_COMPATIBILITY_CACHE[cache_key] = cached
+    return cached
 
 
 def build_pc_navigator_hardware_patch(profile: dict[str, object]) -> dict[str, object]:
