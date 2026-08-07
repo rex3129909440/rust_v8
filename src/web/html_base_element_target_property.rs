@@ -12,8 +12,9 @@ fn get_target(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
-        if let Some(v) = v8::String::new(s, &x.target) {
+    if record(s, a.this()).is_some() {
+        let target = super::element::reflected_string(s, a.this(), "target").unwrap_or_default();
+        if let Some(v) = v8::String::new(s, &target) {
             r.set(v.into())
         }
     } else {
@@ -27,11 +28,8 @@ fn set_target(
     _: v8::ReturnValue<'_>,
 ) {
     let v = crate::webidl::value_to_string(s, a.get(0));
-    if let Some(x) = s
-        .get_slot_mut::<HtmlBaseElementStore>()
-        .and_then(|q| q.records.get_mut(&a.this().get_identity_hash().get()))
-    {
-        x.target = v
+    if record(s, a.this()).is_some() {
+        super::element::set_reflected_string(s, a.this(), "target", v);
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }

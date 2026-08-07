@@ -201,6 +201,34 @@ PC_SCREEN_PROFILES: tuple[dict[str, object], ...] = tuple(
 )
 
 
+# Common browser-exposed CSS screen sizes receive a distribution boost while
+# the complete legacy, HiDPI, and ultrawide tail remains selectable.
+_COMMON_SCREEN_SIZE_BOOSTS: dict[tuple[int, int], int] = {
+    (1920, 1080): 6,
+    (2560, 1440): 5,
+    (1536, 864): 4,
+    (1366, 768): 4,
+    (1280, 720): 3,
+    (1920, 1200): 3,
+    (2560, 1600): 3,
+    (3840, 2160): 3,
+    (1600, 900): 2,
+    (1440, 900): 2,
+    (3440, 1440): 2,
+}
+
+
+def get_pc_screen_profile_weight(profile: dict[str, object]) -> int:
+    screen = profile.get("screen", {})
+    if not isinstance(screen, dict):
+        return max(1, int(profile.get("weight", 1) or 1))
+    size = (int(screen.get("width", 0) or 0), int(screen.get("height", 0) or 0))
+    return max(
+        1,
+        int(profile.get("weight", 1) or 1) * _COMMON_SCREEN_SIZE_BOOSTS.get(size, 1),
+    )
+
+
 def get_pc_screen_profiles(tag: str | None = None) -> tuple[dict[str, object], ...]:
     tag_key = str(tag or "").strip().lower()
     if not tag_key:
@@ -228,7 +256,7 @@ def choose_pc_screen_profile(
     profiles = get_pc_screen_profiles(tag=tag)
     if not profiles:
         profiles = PC_SCREEN_PROFILES
-    weights = [int(profile.get("weight", 1)) for profile in profiles]
+    weights = [get_pc_screen_profile_weight(profile) for profile in profiles]
     return rng.choices(profiles, weights=weights, k=1)[0]
 
 
@@ -236,14 +264,39 @@ def choose_pc_screen_profile_for_hardware(
     rng: random.Random,
     hardware_profile: dict[str, object] | None,
     tag: str | None = "windows",
+    gpu_profile: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    candidates = get_compatible_pc_screen_profiles_for_device(
+        hardware_profile,
+        tag=tag,
+        gpu_profile=gpu_profile,
+    )
+    if not candidates:
+        return choose_pc_screen_profile(rng, tag=tag)
+    weights = [get_pc_screen_profile_weight(profile) for profile in candidates]
+    return rng.choices(candidates, weights=weights, k=1)[0]
+
+
+def get_compatible_pc_screen_profiles_for_device(
+    hardware_profile: dict[str, object] | None,
+    tag: str | None = "windows",
+    gpu_profile: dict[str, object] | None = None,
+) -> tuple[dict[str, object], ...]:
+    """Filter screen rows by form factor without collapsing the long tail."""
+
     profiles = get_pc_screen_profiles(tag=tag)
     if not profiles:
-        return choose_pc_screen_profile(rng, tag=tag)
+        return ()
 
     hardware_tags = tuple(
         str(item).lower()
         for item in (hardware_profile or {}).get("tags", ())
+    )
+    gpu_tier = str((gpu_profile or {}).get("tier", "") or "").lower()
+    gpu_model = str((gpu_profile or {}).get("model", "") or "").lower()
+    portable_gpu = gpu_tier == "laptop" or any(
+        needle in gpu_model
+        for needle in ("laptop gpu", "max-q", "geforce mx")
     )
 
     def screen_tags(profile: dict[str, object]) -> tuple[str, ...]:
@@ -272,32 +325,36 @@ def choose_pc_screen_profile_for_hardware(
             if has_any(profile, {"arm64", "surface", "hidpi", "laptop", "scaled"})
             and not has_any(profile, {"ultrawide", "super_ultrawide", "legacy", "netbook", "5k"})
         )
-    elif "surface" in hardware_tags or "touch" in hardware_tags or "convertible" in hardware_tags:
+    elif portable_gpu or "laptop" in hardware_tags or "surface" in hardware_tags or "touch" in hardware_tags or "convertible" in hardware_tags:
         candidates = tuple(
             profile
             for profile in profiles
-            if has_any(profile, {"surface", "laptop", "hidpi", "scaled"})
-            and not has_any(profile, {"ultrawide", "super_ultrawide", "legacy", "netbook", "5k"})
+            if has_any(profile, {"surface", "laptop", "hidpi", "scaled", "lowend"})
+            and not has_any(profile, {"arm64", "ultrawide", "super_ultrawide", "5k"})
+            and (
+                "legacy" in hardware_tags
+                or not has_any(profile, {"legacy", "netbook"})
+            )
         )
     elif "workstation" in hardware_tags:
         candidates = tuple(
             profile
             for profile in profiles
             if has_any(profile, {"desktop", "productivity", "qhd", "4k", "ultrawide", "super_ultrawide", "hidpi"})
-            and not has_any(profile, {"legacy", "netbook", "surface", "lowend", "laptop"})
+            and not has_any(profile, {"arm64", "legacy", "netbook", "surface", "lowend", "laptop"})
         )
     elif "gaming" in hardware_tags or "performance" in hardware_tags:
         candidates = tuple(
             profile
             for profile in profiles
-            if has_any(profile, {"desktop", "qhd", "4k", "ultrawide", "windows", "laptop", "productivity"})
-            and not has_any(profile, {"legacy", "netbook", "surface", "lowend", "5k"})
+            if has_any(profile, {"desktop", "qhd", "4k", "ultrawide", "windows", "productivity"})
+            and not has_any(profile, {"arm64", "legacy", "netbook", "surface", "lowend", "laptop", "5k"})
         )
     elif "legacy" in hardware_tags or "lowend" in hardware_tags:
         candidates = tuple(
             profile
             for profile in profiles
-            if not has_any(profile, {"surface", "ultrawide", "super_ultrawide", "qhd", "4k", "5k", "hidpi"})
+            if not has_any(profile, {"arm64", "surface", "ultrawide", "super_ultrawide", "qhd", "4k", "5k", "hidpi"})
             and screen_size(profile)[0] <= 1920
             and screen_size(profile)[1] <= 1200
             and dpr(profile) <= 1.5
@@ -306,13 +363,10 @@ def choose_pc_screen_profile_for_hardware(
         candidates = tuple(
             profile
             for profile in profiles
-            if not has_any(profile, {"surface", "super_ultrawide", "5k", "legacy", "netbook"})
+            if not has_any(profile, {"arm64", "surface", "super_ultrawide", "5k", "legacy", "netbook", "laptop"})
         )
 
-    if not candidates:
-        candidates = profiles
-    weights = [int(profile.get("weight", 1)) for profile in candidates]
-    return rng.choices(candidates, weights=weights, k=1)[0]
+    return candidates
 
 
 def build_pc_screen_patch(profile: dict[str, object]) -> dict[str, object]:

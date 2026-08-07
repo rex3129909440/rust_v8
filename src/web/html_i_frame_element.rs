@@ -451,6 +451,13 @@ pub(crate) fn current_frame_element<'s>(
         .then(|| v8::Local::new(scope, &record.element))
 }
 
+pub(crate) fn current_frame_element_for_layout<'s>(
+    scope: &v8::PinScope<'s, '_>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let record = current_iframe_record(scope)?;
+    Some(v8::Local::new(scope, &record.element))
+}
+
 pub(crate) fn current_content_document<'s>(
     scope: &v8::PinScope<'s, '_>,
 ) -> Option<v8::Local<'s, v8::Object>> {
@@ -791,6 +798,7 @@ pub(crate) fn ensure_browsing_context(
     if snapshot.context.is_some() {
         return Ok(());
     }
+    let inherited_base_url = parent_document_base_url(scope, &snapshot);
     let global_template = v8::ObjectTemplate::new(scope);
     let handler_data = v8::Integer::new(scope, iframe.get_identity_hash().get());
     global_template.set_indexed_property_handler(
@@ -1023,6 +1031,12 @@ pub(crate) fn ensure_browsing_context(
             "text/html".to_owned(),
         );
         let document = super::document_global::create_document(child_scope, "about:blank")?;
+        super::document::set_string_value(
+            child_scope,
+            document,
+            "fallbackBaseURL",
+            &inherited_base_url,
+        );
         super::history_global::install(child_scope)?;
         super::custom_elements_global::install_for_document(child_scope, document)?;
         super::cookie_store_global::install(child_scope)?;
@@ -1041,6 +1055,7 @@ pub(crate) fn ensure_browsing_context(
         super::frame_element_global::install(child_scope)?;
         super::document_global::install_existing(child_scope)?;
         super::location_global::install_existing(child_scope)?;
+        super::origin_global::install(child_scope)?;
         super::window_name::install(child_scope)?;
         super::window_length::install(child_scope)?;
         super::closed_global::install(child_scope)?;
@@ -1099,6 +1114,7 @@ pub(crate) fn ensure_browsing_context(
 
 struct IFrameNavigation {
     url: String,
+    fallback_base_url: String,
     html: String,
     content_type: String,
     response_status: u16,
@@ -1113,6 +1129,7 @@ pub(crate) fn load_selected_source(
 ) -> Result<(), String> {
     let snapshot = record(scope, iframe).ok_or_else(|| "Illegal invocation".to_owned())?;
     let parent_url = parent_document_url(scope, &snapshot);
+    let parent_base_url = parent_document_base_url(scope, &snapshot);
     let resource_start_time = super::performance::now_for_current_realm(scope).unwrap_or(0.0);
     let mut timing_replay = None;
     let navigation = if snapshot.srcdoc_present {
@@ -1121,6 +1138,7 @@ pub(crate) fn load_selected_source(
         }
         IFrameNavigation {
             url: "about:srcdoc".to_owned(),
+            fallback_base_url: parent_base_url.clone(),
             html: snapshot.srcdoc.clone(),
             content_type: "text/html".to_owned(),
             response_status: 0,
@@ -1129,8 +1147,8 @@ pub(crate) fn load_selected_source(
             loaded_src: None,
         }
     } else if !snapshot.src.is_empty() {
-        let base =
-            url::Url::parse(&parent_url).map_err(|_| "iframe parent URL is invalid".to_owned())?;
+        let base = url::Url::parse(&parent_base_url)
+            .map_err(|_| "iframe parent base URL is invalid".to_owned())?;
         let resolved = base
             .join(&snapshot.src)
             .map_err(|_| "iframe src is invalid".to_owned())?;
@@ -1164,6 +1182,7 @@ pub(crate) fn load_selected_source(
         IFrameNavigation {
             same_origin: urls_share_origin(&parent_url, &resolved),
             url: resolved.clone(),
+            fallback_base_url: resolved.clone(),
             html: String::from_utf8_lossy(&replay.body).into_owned(),
             content_type,
             response_status: replay.status,
@@ -1177,6 +1196,7 @@ pub(crate) fn load_selected_source(
         }
         IFrameNavigation {
             url: "about:blank".to_owned(),
+            fallback_base_url: parent_base_url,
             html: String::new(),
             content_type: "text/html".to_owned(),
             response_status: 0,
@@ -1228,6 +1248,8 @@ fn navigate_browsing_context(
     parent_url: &str,
     navigation: IFrameNavigation,
 ) -> Result<(), String> {
+    let document_referrer =
+        iframe_document_referrer(parent_url, &navigation.url, navigation.same_origin);
     let snapshot = record(scope, iframe).ok_or_else(|| "Illegal invocation".to_owned())?;
     let global_template = snapshot
         .global_template
@@ -1425,6 +1447,12 @@ fn navigate_browsing_context(
             navigation.content_type.clone(),
         );
         let document = super::document_global::create_document(child_scope, &navigation.url)?;
+        super::document::set_string_value(
+            child_scope,
+            document,
+            "fallbackBaseURL",
+            &navigation.fallback_base_url,
+        );
         super::history_global::install(child_scope)?;
         super::custom_elements_global::install_for_document(child_scope, document)?;
         super::cookie_store_global::install(child_scope)?;
@@ -1438,7 +1466,7 @@ fn navigate_browsing_context(
             super::document_html_parser::parse_page(child_scope, document, &navigation.html)?;
         }
         super::document::set_content_type(child_scope, document, navigation.content_type.clone());
-        super::document::set_string_value(child_scope, document, "referrer", parent_url);
+        super::document::set_string_value(child_scope, document, "referrer", &document_referrer);
         let domain = url::Url::parse(&navigation.url)
             .ok()
             .and_then(|url| url.host_str().map(str::to_owned))
@@ -1472,6 +1500,7 @@ fn navigate_browsing_context(
         super::frame_element_global::install(child_scope)?;
         super::document_global::install_existing(child_scope)?;
         super::location_global::install_existing(child_scope)?;
+        super::origin_global::install(child_scope)?;
         super::window_name::install(child_scope)?;
         super::window_length::install(child_scope)?;
         super::closed_global::install(child_scope)?;
@@ -1573,11 +1602,33 @@ fn parent_document_url(scope: &v8::PinScope<'_, '_>, record: &IFrameRecord) -> S
     crate::page_init::base_url(scope)
 }
 
+fn parent_document_base_url(scope: &v8::PinScope<'_, '_>, record: &IFrameRecord) -> String {
+    let element = v8::Local::new(scope, &record.element);
+    super::node::owner_document(scope, element)
+        .map(|document| super::document::base_url(scope, document))
+        .unwrap_or_else(|| parent_document_url(scope, record))
+}
+
 fn urls_share_origin(parent: &str, child: &str) -> bool {
     let (Ok(parent), Ok(child)) = (url::Url::parse(parent), url::Url::parse(child)) else {
         return false;
     };
     parent.origin() == child.origin()
+}
+
+fn iframe_document_referrer(parent_url: &str, child_url: &str, same_origin: bool) -> String {
+    if same_origin && !matches!(child_url, "about:srcdoc" | "about:blank") {
+        return parent_url.to_owned();
+    }
+    let Ok(parent) = url::Url::parse(parent_url) else {
+        return String::new();
+    };
+    let origin = parent.origin().ascii_serialization();
+    if origin == "null" {
+        String::new()
+    } else {
+        format!("{}/", origin.trim_end_matches('/'))
+    }
 }
 
 fn script_sources(scope: &v8::PinScope<'_, '_>, root: v8::Local<'_, v8::Object>) -> Vec<String> {
@@ -1605,11 +1656,10 @@ fn is_cross_origin_parent_access(scope: &v8::PinScope<'_, '_>, record: &IFrameRe
     if record.same_origin {
         return false;
     }
-    let Some(context) = record.context.as_ref() else {
-        return false;
-    };
-    let child_context = v8::Local::new(scope, context);
-    scope.get_entered_or_microtask_context() != child_context
+    !current_iframe_record(scope).is_some_and(|current| {
+        v8::Local::new(scope, &current.element)
+            .strict_equals(v8::Local::new(scope, &record.element).into())
+    })
 }
 
 fn cross_origin_record_for_window(
@@ -1760,17 +1810,16 @@ pub(crate) fn cross_origin_window_all_keys<'s>(
 }
 
 pub(crate) fn throw_cross_origin_window_security_error(scope: &mut v8::PinScope<'_, '_>) {
-    let message = "Blocked a frame from accessing a cross-origin frame.".to_owned();
-    match super::dom_exception::create(scope, message, "SecurityError".to_owned()) {
+    let window = scope.get_current_context().global(scope);
+    let origin = origin_for_window(scope, window);
+    let message =
+        format!("Blocked a frame with origin \"{origin}\" from accessing a cross-origin frame.");
+    match super::dom_exception::create(scope, message.clone(), "SecurityError".to_owned()) {
         Ok(exception) => {
             scope.throw_exception(exception.into());
         }
         Err(_) => {
-            let message = v8::String::new(
-                scope,
-                "Blocked a frame from accessing a cross-origin frame.",
-            )
-            .expect("short SecurityError message");
+            let message = v8::String::new(scope, &message).expect("short SecurityError message");
             scope.throw_exception(v8::Exception::error(scope, message));
         }
     }

@@ -14,7 +14,16 @@ fn get(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    if let Some(value) = v8::String::new(scope, &crate::page_init::base_url(scope)) {
+    let object = arguments.this();
+    let document = if super::document::is_document(scope, object) {
+        Some(object)
+    } else {
+        super::node::owner_document(scope, object)
+    };
+    let base_url = document
+        .map(|document| super::document::base_url(scope, document))
+        .unwrap_or_else(|| crate::page_init::base_url(scope));
+    if let Some(value) = v8::String::new(scope, &base_url) {
         result.set(value.into());
     }
 }

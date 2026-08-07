@@ -105,17 +105,23 @@ pub(crate) fn throw_security_error(
     property: &str,
     interface: &str,
 ) {
+    let window = scope.get_current_context().global(scope);
+    let origin = super::html_i_frame_element::origin_for_window(scope, window);
     let message = format!(
-        "Failed to read a named property '{property}' from '{interface}': Blocked a frame from accessing a cross-origin frame."
+        "Failed to read a named property '{property}' from '{interface}': Blocked a frame with origin \"{origin}\" from accessing a cross-origin frame."
     );
     match super::dom_exception::create(scope, message, "SecurityError".to_owned()) {
         Ok(exception) => {
             scope.throw_exception(exception.into());
         }
         Err(_) => {
-            let message =
-                crate::webidl::string(scope, "Blocked a frame from accessing a cross-origin frame")
-                    .expect("short SecurityError message");
+            let message = crate::webidl::string(
+                scope,
+                &format!(
+                    "Blocked a frame with origin \"{origin}\" from accessing a cross-origin frame"
+                ),
+            )
+            .expect("short SecurityError message");
             scope.throw_exception(v8::Exception::error(scope, message));
         }
     }

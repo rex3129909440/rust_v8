@@ -11,6 +11,7 @@ from .edge_runtime_options import (
 )
 from .edge_sandbox_pool import EdgeSandboxPool, PooledNetworkRequest, SandboxTask
 from .mac_edge_profile import mac_edge_150_profile
+from .windows_edge_profile import windows_edge_150_profile
 from .run_sandbox import (
     CapturedConsoleOutput,
     CapturedConsoleValue,
@@ -42,6 +43,7 @@ __all__ = [
     "WebAudioProfile",
     "find_native_artifacts",
     "mac_edge_150_profile",
+    "windows_edge_150_profile",
 ]
 
 

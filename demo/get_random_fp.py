@@ -13,7 +13,6 @@ observation with the selected typed profile.
 
 from __future__ import annotations
 
-import hashlib
 import random
 import re
 import secrets
@@ -27,6 +26,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 DEMO_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DEMO_DIR.parent
 FP_DIR = DEMO_DIR / "fp"
+SOURCE_CHECKOUT = (PROJECT_ROOT / "examples" / "edge_profile.py").is_file()
 
 for import_root in (PROJECT_ROOT, FP_DIR):
     import_text = str(import_root)
@@ -39,7 +39,21 @@ from fingerprint_runtime_composer import (  # noqa: E402
     is_supported_country_code,
     normalize_country_code,
 )
+from mac_chromium150_capture_catalog import (  # noqa: E402
+    CHROME_MAC_REMOTE_SPEECH_VOICES,
+    MAC_CHROMIUM150_AUDIO,
+    MAC_CHROMIUM150_CANVAS,
+    MAC_CHROMIUM150_KEYBOARD_LAYOUT,
+    MAC_CHROMIUM150_MEDIA_LISTS,
+    MAC_CHROMIUM150_RTC_AUDIO_CODECS,
+    MAC_CHROMIUM150_RTC_HEADER_EXTENSIONS,
+    MAC_CHROMIUM150_RTC_VIDEO_CODECS,
+    MACOS_LOCAL_SPEECH_VOICES,
+)
 from mac_font_profile_catalog import build_mac_font_profile  # noqa: E402
+from mac_graphics_capability_catalog import (  # noqa: E402
+    build_mac_graphics_capabilities,
+)
 from mac_screen_profile_catalog import (  # noqa: E402
     choose_mac_screen_profile_for_gpu,
 )
@@ -68,27 +82,7 @@ from windows_webgl_gpu_catalog import (  # noqa: E402
 )
 from windows_font_profile_catalog import build_windows_font_profile  # noqa: E402
 
-try:  # Installed Wheel.
-    from edge_sandbox.edge_profile import (
-        BatteryProfile,
-        EdgeProfile,
-        FontMetricProfile,
-        FontProfile,
-        GeolocationProfile,
-        LocaleProfile,
-        LocalFontProfile,
-        MediaDeviceProfile,
-        NavigatorProfile,
-        NetworkProfile,
-        ScreenProfile,
-        SpeechProfile,
-        SpeechVoiceProfile,
-        TimingProfile,
-        UserAgentBrandProfile,
-        UserAgentDataProfile,
-        WindowProfile,
-    )
-except ImportError:  # Source checkout.
+if SOURCE_CHECKOUT:
     from examples.edge_profile import (  # type: ignore
         BatteryProfile,
         EdgeProfile,
@@ -97,9 +91,35 @@ except ImportError:  # Source checkout.
         GeolocationProfile,
         LocaleProfile,
         LocalFontProfile,
+        KeyboardLayoutEntryProfile,
         MediaDeviceProfile,
         NavigatorProfile,
         NetworkProfile,
+        RtcCodecProfile,
+        RtcHeaderExtensionProfile,
+        ScreenProfile,
+        SpeechProfile,
+        SpeechVoiceProfile,
+        TimingProfile,
+        UserAgentBrandProfile,
+        UserAgentDataProfile,
+        WindowProfile,
+    )
+else:  # Installed wheel.
+    from edge_sandbox.edge_profile import (
+        BatteryProfile,
+        EdgeProfile,
+        FontMetricProfile,
+        FontProfile,
+        GeolocationProfile,
+        LocaleProfile,
+        LocalFontProfile,
+        KeyboardLayoutEntryProfile,
+        MediaDeviceProfile,
+        NavigatorProfile,
+        NetworkProfile,
+        RtcCodecProfile,
+        RtcHeaderExtensionProfile,
         ScreenProfile,
         SpeechProfile,
         SpeechVoiceProfile,
@@ -109,10 +129,12 @@ except ImportError:  # Source checkout.
         WindowProfile,
     )
 
-try:  # Installed Wheel.
-    from edge_sandbox.mac_edge_profile import mac_edge_150_profile
-except ImportError:  # Source checkout.
+if SOURCE_CHECKOUT:
     from examples.mac_edge_profile import mac_edge_150_profile  # type: ignore
+    from examples.windows_edge_profile import windows_edge_150_profile  # type: ignore
+else:  # Installed wheel.
+    from edge_sandbox.mac_edge_profile import mac_edge_150_profile
+    from edge_sandbox.windows_edge_profile import windows_edge_150_profile
 
 
 DEFAULT_TEST_COUNTRIES: tuple[str, ...] = (
@@ -143,6 +165,7 @@ _PROBE_SEPARATOR = "\x1f"
 # link name.  Both identifiers describe the same zone and therefore the same
 # configured Date/Intl behavior.
 _ICU_TIME_ZONE_ALIASES: dict[str, str] = {
+    "America/Indiana/Indianapolis": "America/Indianapolis",
     "America/Kentucky/Louisville": "America/Louisville",
     "Asia/Kathmandu": "Asia/Katmandu",
     "Asia/Kolkata": "Asia/Calcutta",
@@ -442,6 +465,29 @@ def _screen_profiles(
     )
 
 
+def _mac_css_for_screen(css: object, selected: dict[str, object]) -> object:
+    """Apply Chromium 150 macOS input geometry captured at the selected DPR."""
+
+    window = selected.get("window", {})
+    if not isinstance(window, dict):
+        window = {}
+    dpr = float(window.get("devicePixelRatio", 2.0))
+    if dpr >= 1.5:
+        width, height = 139.0, 15.5
+    else:
+        width, height = 145.0, 15.0
+    return replace(
+        css,
+        input_text=(
+            "display:inline-block;box-sizing:content-box;"
+            f"width:{width:g}px;height:{height:g}px;"
+            "padding:1px 2px;border-width:2px;border-style:inset;"
+            "border-color:rgb(118, 118, 118);"
+            "background-color:rgb(255, 255, 255)"
+        ),
+    )
+
+
 def _speech_profile(selected: dict[str, object]) -> SpeechProfile:
     voices = []
     for item in selected.get("voices", ()):
@@ -457,6 +503,160 @@ def _speech_profile(selected: dict[str, object]) -> SpeechProfile:
             )
         )
     return SpeechProfile(voices=tuple(voices))
+
+
+_MAC_DEFAULT_VOICE_NAMES: dict[str, str] = {
+    "ar-001": "Majed",
+    "bg-bg": "Daria",
+    "ca-es": "Montse",
+    "cs-cz": "Zuzana",
+    "da-dk": "Sara",
+    "de-de": "Anna",
+    "el-gr": "Melina",
+    "en-au": "Karen",
+    "en-gb": "Daniel",
+    "en-ie": "Moira",
+    "en-in": "Rishi",
+    "en-us": "Samantha",
+    "en-za": "Tessa",
+    "es-es": "Mónica",
+    "es-mx": "Paulina",
+    "fi-fi": "Satu",
+    "fr-ca": "Amélie",
+    "fr-fr": "Thomas",
+    "he-il": "Carmit",
+    "hi-in": "Lekha",
+    "hr-hr": "Lana",
+    "hu-hu": "Tünde",
+    "id-id": "Damayanti",
+    "it-it": "Alice",
+    "ja-jp": "Kyoko",
+    "ko-kr": "Yuna",
+    "ms-my": "Amira",
+    "nb-no": "Nora",
+    "nl-be": "Ellen",
+    "nl-nl": "Xander",
+    "pl-pl": "Zosia",
+    "pt-br": "Luciana",
+    "pt-pt": "Joana",
+    "ro-ro": "Ioana",
+    "ru-ru": "Milena",
+    "sk-sk": "Laura",
+    "sl-si": "Tina",
+    "sv-se": "Alva",
+    "th-th": "Kanya",
+    "tr-tr": "Yelda",
+    "uk-ua": "Lesya",
+    "vi-vn": "Linh",
+    "yue-hk": "善怡",
+    "zh-cn": "婷婷",
+    "zh-tw": "美嘉",
+}
+
+
+def _mac_speech_profile(
+    languages: Sequence[str],
+    browser: str,
+) -> SpeechProfile:
+    preferred = tuple(str(item).replace("_", "-").lower() for item in languages)
+    primary = preferred[0] if preferred else "en-us"
+    # Names containing a parenthesised language are localized by macOS.  The
+    # capture was taken on a zh-CN system, so retain those rows only for a
+    # Chinese system locale; the portable system voices remain valid for every
+    # locale.  Chrome's provider voices are browser-specific and are never
+    # inserted into an Edge profile.
+    local_voices = tuple(
+        row
+        for row in MACOS_LOCAL_SPEECH_VOICES
+        if primary.startswith("zh-") or " (" not in row[1]
+    )
+    provider_voices = (
+        CHROME_MAC_REMOTE_SPEECH_VOICES
+        if browser == "chrome"
+        else ()
+    )
+    voices = local_voices + tuple(provider_voices)
+    default_name = _MAC_DEFAULT_VOICE_NAMES.get(primary)
+    default_index = next(
+        (
+            index
+            for index, row in enumerate(voices)
+            if row[0].lower() == primary and row[1] == default_name
+        ),
+        -1,
+    )
+    if default_index < 0:
+        primary_base = primary.split("-", 1)[0]
+        default_index = next(
+            (
+                index
+                for index, row in enumerate(voices)
+                if row[0].lower().split("-", 1)[0] == primary_base
+            ),
+            0,
+        )
+    ordered_voices = (
+        (voices[default_index],)
+        + voices[:default_index]
+        + voices[default_index + 1 :]
+    )
+    return SpeechProfile(
+        voices=tuple(
+            SpeechVoiceProfile(
+                voice_uri=voice_uri,
+                name=name,
+                lang=language,
+                local_service=local_service,
+                is_default=index == 0,
+            )
+            for index, (
+                language,
+                name,
+                voice_uri,
+                local_service,
+                _captured_default,
+            ) in enumerate(ordered_voices)
+        )
+    )
+
+
+def _mac_media_profile(media: object) -> object:
+    lists = MAC_CHROMIUM150_MEDIA_LISTS
+    return replace(
+        media,
+        supported_constraints=lists["supported_constraints"],
+        can_play_probably_types=lists["can_play_probably_types"],
+        can_play_maybe_types=lists["can_play_maybe_types"],
+        media_source_types=lists["media_source_types"],
+        media_recorder_types=lists["media_recorder_types"],
+        decoding_supported_types=lists["decoding_supported_types"],
+        decoding_smooth_types=lists["decoding_smooth_types"],
+        decoding_power_efficient_types=(
+            lists["decoding_power_efficient_types"]
+        ),
+        encoding_supported_types=lists["encoding_supported_types"],
+        encoding_smooth_types=lists["encoding_smooth_types"],
+        encoding_power_efficient_types=(
+            lists["encoding_power_efficient_types"]
+        ),
+        image_decoder_types=lists["image_decoder_types"],
+        audio_decoder_codecs=lists["audio_decoder_codecs"],
+        audio_encoder_codecs=lists["audio_encoder_codecs"],
+        video_decoder_codecs=lists["video_decoder_codecs"],
+        video_encoder_codecs=lists["video_encoder_codecs"],
+        rtc_audio_codecs=tuple(
+            RtcCodecProfile(mime, rate, channels, fmtp)
+            for mime, rate, channels, fmtp in MAC_CHROMIUM150_RTC_AUDIO_CODECS
+        ),
+        rtc_video_codecs=tuple(
+            RtcCodecProfile(mime, rate, channels, fmtp)
+            for mime, rate, channels, fmtp in MAC_CHROMIUM150_RTC_VIDEO_CODECS
+        ),
+        rtc_header_extensions=tuple(
+            RtcHeaderExtensionProfile(kind, uri)
+            for kind, uri in MAC_CHROMIUM150_RTC_HEADER_EXTENSIONS
+        ),
+    )
 
 
 def _font_profile(selected: dict[str, object]) -> FontProfile:
@@ -531,10 +731,10 @@ def _media_devices(platform_name: str) -> tuple[MediaDeviceProfile, ...]:
 
     devices = [
         MediaDeviceProfile("", "audioinput", "", ""),
-        MediaDeviceProfile("", "audiooutput", "", ""),
     ]
     if platform_name == "macos":
         devices.append(MediaDeviceProfile("", "videoinput", "", ""))
+    devices.append(MediaDeviceProfile("", "audiooutput", "", ""))
     return tuple(devices)
 
 
@@ -617,11 +817,12 @@ def get_random_fp_details(
     ``country_code`` controls the linked locale, navigator language list,
     IANA time zone, Accept-Language value, and speech voices.  ``user_agent``
     controls browser and platform: Windows UA selects Windows hardware; Mac UA
-    selects a coherent Intel or Apple-silicon Mac, a compatible Retina screen,
-    and macOS fonts.  If omitted, the fixed Chrome 150 Windows UA is used.
-    ``seed`` makes every catalog choice deterministic.  The frozen low-entropy
-    Mac UA is shared by both architectures; UA-CH is set from the selected
-    hardware candidate.
+    selects an Apple-silicon Mac with a complete Chromium-150 Metal capability
+    record, a compatible Retina screen, and macOS fonts.  If omitted, the fixed
+    Chrome 150 Windows UA is used.
+    ``seed`` makes every catalog choice deterministic.  Chromium's frozen
+    low-entropy Mac UA retains ``MacIntel`` while UA-CH is set to the selected
+    Apple-silicon hardware architecture.
     """
 
     country = _require_country_code(country_code)
@@ -676,10 +877,14 @@ def get_random_fp_details(
             rng,
             hardware,
             tag="windows",
+            gpu_profile=gpu,
         )
         selected_fonts = build_windows_font_profile(languages[0])
     else:
-        gpu = choose_mac_gpu_candidate(rng, get_mac_gpu_candidates())
+        gpu = choose_mac_gpu_candidate(
+            rng,
+            get_mac_gpu_candidates(verified_only=True),
+        )
         memory_choices = tuple(int(item) for item in gpu.get("memoryChoicesGb", ()))
         if not memory_choices:
             raise ValueError("selected Mac GPU has no memory choices")
@@ -709,11 +914,20 @@ def get_random_fp_details(
             languages[0],
             str(gpu.get("macosPlatformVersion", "15.5.0")),
         )
-    speech = choose_speech_synthesis_voice_profile(
-        rng,
-        country,
-        languages,
-    )
+    if platform_name == "macos":
+        speech = {
+            "id": (
+                "macos-chromium150-local-plus-google-voices"
+                if str(user_agent_profile.get("browser", "")) == "chrome"
+                else "macos-chromium150-local-voices"
+            )
+        }
+    else:
+        speech = choose_speech_synthesis_voice_profile(
+            rng,
+            country,
+            languages,
+        )
 
     ua_data_raw = user_agent_profile.get("userAgentData", {})
     if not isinstance(ua_data_raw, dict):
@@ -734,22 +948,28 @@ def get_random_fp_details(
             }
         )
     screen_profile, window_profile = _screen_profiles(screen)
+    # This workload explicitly models a non-rendered top-level viewport.
+    # Preserve physical Screen and outer window geometry, while the inner and
+    # visual viewport surfaces remain fixed at zero for every generated worker.
+    screen_profile = replace(
+        screen_profile,
+        viewport_width=0.0,
+        viewport_height=0.0,
+    )
+    window_profile = replace(
+        window_profile,
+        inner_width=0.0,
+        inner_height=0.0,
+    )
 
     webgl_data = gpu.get("webgl", {})
     if not isinstance(webgl_data, dict):
         raise ValueError("selected GPU profile has no WebGL data")
-    canvas_material = "|".join(
-        (
-            str(resolved_seed),
-            country,
-            str(user_agent_profile.get("id", "")),
-            str(hardware.get("id", "")),
-            str(screen.get("id", "")),
-            str(gpu.get("id", "")),
-        )
-    )
-    canvas_salt = hashlib.sha256(canvas_material.encode("utf-8")).hexdigest()[:32]
-    text_width_scale = rng.choice((0.985, 0.9925, 1.0, 1.0075, 1.015))
+    # Canvas output is tied to the selected platform/font/rendering stack. A
+    # seed-derived salt or arbitrary global text scale would create values that
+    # do not correspond to any sourced device profile.
+    canvas_salt = ""
+    text_width_scale = 1.0
 
     locale_profile = LocaleProfile(
         locale=languages[0],
@@ -784,7 +1004,14 @@ def get_random_fp_details(
             save_data=False,
         ),
     )
-    speech_profile = _speech_profile(speech)
+    speech_profile = (
+        _mac_speech_profile(
+            languages,
+            str(user_agent_profile.get("browser", "")),
+        )
+        if platform_name == "macos"
+        else _speech_profile(speech)
+    )
     battery_profile = _battery_profile(rng, hardware, screen, gpu)
     timing_profile = TimingProfile(clock_step_ms=1, random_seed=resolved_seed)
 
@@ -792,42 +1019,67 @@ def get_random_fp_details(
     # configurable surface is explicit.  Platform-linked values are replaced
     # below; nothing is allowed to fall through to the native DLL's synthetic
     # fallback devices or rendering identifiers.
-    base_profile = mac_edge_150_profile(
-        locale=languages[0],
-        hardware_concurrency=int(hardware["hardwareConcurrency"]),
-        device_memory_gb=float(hardware["deviceMemory"]),
-        screen_width=int(screen_profile.width or 0),
-        screen_height=int(screen_profile.height or 0),
-        avail_height=int(screen_profile.avail_height or 0),
-        inner_width=float(window_profile.inner_width or 0),
-        inner_height=float(window_profile.inner_height or 0),
-        device_pixel_ratio=float(screen_profile.device_pixel_ratio or 1),
-        font_families=tuple(str(item) for item in selected_fonts["families"]),
-        local_fonts=tuple(
+    base_arguments = {
+        "locale": languages[0],
+        "hardware_concurrency": int(hardware["hardwareConcurrency"]),
+        "device_memory_gb": float(hardware["deviceMemory"]),
+        "screen_width": int(screen_profile.width or 0),
+        "screen_height": int(screen_profile.height or 0),
+        "avail_height": int(screen_profile.avail_height or 0),
+        "inner_width": float(window_profile.inner_width or 0),
+        "inner_height": float(window_profile.inner_height or 0),
+        "device_pixel_ratio": float(screen_profile.device_pixel_ratio or 1),
+        "font_families": tuple(str(item) for item in selected_fonts["families"]),
+        "local_fonts": tuple(
             LocalFontProfile(str(item[0]), str(item[1]), str(item[2]), str(item[3]))
             for item in selected_fonts["localFonts"]
         ),
-        font_metrics=tuple(
+        "font_metrics": tuple(
             FontMetricProfile(str(item[0]), float(item[1]), bool(item[2]))
             for item in selected_fonts["metrics"]
         ),
-        allow_unknown_font_families=False,
-    )
+        "allow_unknown_font_families": False,
+    }
+    if platform_name == "windows":
+        base_profile = windows_edge_150_profile(
+            windows_platform_version=str(ua_data_values["platformVersion"]),
+            time_zone=selected_time_zone,
+            time_zone_offset_minutes=locale_profile.time_zone_offset_minutes,
+            **base_arguments,
+        )
+    else:
+        base_profile = mac_edge_150_profile(
+            macos_platform_version=str(ua_data_values["platformVersion"]),
+            time_zone=selected_time_zone,
+            time_zone_offset_minutes=locale_profile.time_zone_offset_minutes,
+            **base_arguments,
+        )
     physical_memory_gb = int(
         hardware.get("physicalRamHintGb", hardware.get("deviceMemory", 8))
     )
     quota_bytes, usage_bytes = _storage_values(rng, physical_memory_gb)
     heap_limit, total_heap, used_heap = _memory_values(rng)
+    canvas_profile = replace(
+        base_profile.canvas,
+        data_url_salt=canvas_salt,
+        text_width_scale=text_width_scale,
+    )
+    if platform_name == "macos":
+        canvas_profile = replace(
+            canvas_profile,
+            **MAC_CHROMIUM150_CANVAS,
+        )
     shared_profile = replace(
         base_profile,
         locale=locale_profile,
         navigator=navigator_profile,
         screen=screen_profile,
         window=window_profile,
-        canvas=replace(
-            base_profile.canvas,
-            data_url_salt=canvas_salt,
-            text_width_scale=text_width_scale,
+        canvas=canvas_profile,
+        css=(
+            _mac_css_for_screen(base_profile.css, screen)
+            if platform_name == "macos"
+            else base_profile.css
         ),
         audio=replace(
             base_profile.audio,
@@ -926,42 +1178,55 @@ def get_random_fp_details(
             ),
         )
     else:
-        mac_gpu_vendor = str(gpu.get("vendor", "apple")).lower()
+        mac_webgl_capabilities, mac_webgpu_capabilities = (
+            build_mac_graphics_capabilities(gpu)
+        )
         mac_webgl_profile = replace(
             base_profile.webgl,
             unmasked_vendor=str(webgl_data.get("unmaskedVendor", "")),
             unmasked_renderer=str(webgl_data.get("unmaskedRenderer", "")),
+            **mac_webgl_capabilities,
         )
-        if mac_gpu_vendor != "apple":
-            # Intel-era Macs use desktop-class Intel/AMD texture compression,
-            # not the Apple-silicon ASTC/ETC set inherited by the base preset.
-            mac_webgl_profile = replace(
-                mac_webgl_profile,
-                webgl1_extensions=_WINDOWS_WEBGL1_EXTENSIONS,
-                webgl2_extensions=_WINDOWS_WEBGL2_EXTENSIONS,
-                compressed_texture_formats=tuple(
-                    int(item) for item in _WINDOWS_COMPRESSED_TEXTURE_FORMATS
-                ),
-            )
         profile = replace(
             shared_profile,
             id=f"random-macos-{country.lower()}-{resolved_seed:016x}",
             webgl=mac_webgl_profile,
             webgpu=replace(
                 base_profile.webgpu,
-                vendor=str(gpu.get("vendor", "apple")),
-                architecture=str(gpu.get("architecture", "")),
                 device=str(gpu.get("deviceMarker", "") or gpu.get("model", "")),
                 description=str(gpu.get("model", "")),
-                features=(
-                    (
-                        "bgra8unorm-storage",
-                        "texture-compression-astc",
-                        "texture-compression-etc2",
-                    )
-                    if mac_gpu_vendor == "apple"
-                    else ("bgra8unorm-storage", "texture-compression-bc")
+                **mac_webgpu_capabilities,
+            ),
+            audio=replace(
+                shared_profile.audio,
+                sample_rate=float(MAC_CHROMIUM150_AUDIO["sample_rate"]),
+                max_channel_count=int(
+                    MAC_CHROMIUM150_AUDIO["max_channel_count"]
                 ),
+                base_latency=float(MAC_CHROMIUM150_AUDIO["base_latency"]),
+                output_latency=float(MAC_CHROMIUM150_AUDIO["output_latency"]),
+            ),
+            media=_mac_media_profile(shared_profile.media),
+            permissions=replace(
+                shared_profile.permissions,
+                window_management="prompt",
+            ),
+            hardware_devices=replace(
+                shared_profile.hardware_devices,
+                keyboard_layout=tuple(
+                    KeyboardLayoutEntryProfile(code, value)
+                    for code, value in MAC_CHROMIUM150_KEYBOARD_LAYOUT
+                ),
+            ),
+            memory=replace(
+                shared_profile.memory,
+                performance_js_heap_size_limit=4_395_630_592,
+                console_js_heap_size_limit=4_395_630_592,
+            ),
+            media_preferences=replace(
+                shared_profile.media_preferences,
+                color_gamut=str(screen.get("colorGamut", "p3")),
+                dynamic_range=str(screen.get("dynamicRange", "standard")),
             ),
         )
 

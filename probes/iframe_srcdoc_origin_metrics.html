@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="output">pending</pre>
+<script>
+(() => {
+  let childReport = null;
+  addEventListener("message", event => {
+    if (event.data && event.data.kind === "cross-origin-child") {
+      childReport = event.data;
+    }
+  });
+  addEventListener("load", () => {
+    const srcdocFrame = document.getElementById("srcdoc-frame");
+    const sameFrame = document.getElementById("same-frame");
+    const crossFrame = document.getElementById("cross-frame");
+    const childWindow = crossFrame.contentWindow;
+    const capture = callback => {
+      try {
+        const value = callback();
+        return { ok: true, value: value === null ? null : String(value) };
+      } catch (error) {
+        return { ok: false, name: error.name, message: error.message };
+      }
+    };
+    const srcdocWindow = srcdocFrame.contentWindow;
+    const srcdocDocument = srcdocFrame.contentDocument;
+    const output = {
+      parent: {
+        href: location.href,
+        origin: location.origin,
+        documentURL: document.URL,
+        baseURI: document.baseURI,
+      },
+      srcdoc: {
+        iframeSrc: srcdocFrame.src,
+        href: srcdocWindow.location.href,
+        origin: srcdocWindow.location.origin,
+        windowOrigin: srcdocWindow.origin,
+        documentURL: srcdocDocument.URL,
+        documentURI: srcdocDocument.documentURI,
+        baseURI: srcdocDocument.baseURI,
+        referrer: srcdocDocument.referrer,
+        relativeHref: srcdocDocument.getElementById("relative").href,
+        contentDocumentAccessible: srcdocFrame.contentDocument === srcdocDocument,
+        parentIdentity: srcdocWindow.parent === window,
+        topIdentity: srcdocWindow.top === window,
+        frameElementIdentity: srcdocWindow.frameElement === srcdocFrame,
+      },
+      crossParentView: {
+        contentDocument: crossFrame.contentDocument,
+        document: capture(() => childWindow.document),
+        href: capture(() => childWindow.location.href),
+        locationType: capture(() => typeof childWindow.location),
+        closed: capture(() => childWindow.closed),
+        length: capture(() => childWindow.length),
+        postMessageType: capture(() => typeof childWindow.postMessage),
+        frameElement: capture(() => childWindow.frameElement),
+      },
+      sameOriginChild: {
+        href: sameFrame.contentWindow.location.href,
+        documentURL: sameFrame.contentDocument.URL,
+        baseURI: sameFrame.contentDocument.baseURI,
+        referrer: sameFrame.contentDocument.referrer,
+        frameElementIdentity: sameFrame.contentWindow.frameElement === sameFrame,
+      },
+      crossChildView: childReport,
+    };
+    document.getElementById("output").textContent = JSON.stringify(output);
+  });
+})();
+</script>
+<iframe id="srcdoc-frame" srcdoc="<!doctype html><base href='relative-base/'><a id='relative' href='asset.js'>x</a>"></iframe>
+<iframe id="same-frame" src="http://127.0.0.1:18123/probes/iframe_cross_origin_child.html"></iframe>
+<iframe id="cross-frame" src="http://127.0.0.1:18124/probes/iframe_cross_origin_child.html"></iframe>

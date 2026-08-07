@@ -1,12 +1,24 @@
-"""macOS font inventory used by generated Mac sandbox profiles.
+"""macOS font inventories used by generated Mac sandbox profiles.
 
-The family inventory is a conservative common subset of Apple's macOS Sequoia
-and Tahoe font lists.  A stock macOS installation carries its script-support fonts
-independently of the current Region setting, so changing Accept-Language must
-not make bundled CJK/Arabic/etc. families appear or disappear.
+Tahoe profiles use a Chromium Local Font Access capture.  The older Sequoia
+fallback remains a conservative common subset.  Neither inventory depends on
+the requested locale because Accept-Language does not install or remove fonts.
 """
 
 from __future__ import annotations
+
+try:
+    from .mac_tahoe_m5_font_catalog import (
+        MACOS_TAHOE_FONT_FAMILIES,
+        MACOS_TAHOE_FONT_METRICS,
+        MACOS_TAHOE_LOCAL_FONTS,
+    )
+except ImportError:  # Direct import from demo/fp.
+    from mac_tahoe_m5_font_catalog import (  # type: ignore
+        MACOS_TAHOE_FONT_FAMILIES,
+        MACOS_TAHOE_FONT_METRICS,
+        MACOS_TAHOE_LOCAL_FONTS,
+    )
 
 
 APPLE_SEQUOIA_FONT_SOURCE = "https://support.apple.com/en-ie/120414"
@@ -217,35 +229,27 @@ def build_mac_font_profile(
     locale: str,
     macos_platform_version: str = "15.5.0",
 ) -> dict[str, object]:
-    # Locale changes fallback preference, not which stock language-support
-    # fonts are physically present.  Merge every bundled-script subset for all
-    # country profiles; this avoids the previous impossible result where the
-    # same Mac gained/lost PingFang or Hiragino merely because the
-    # requested country code changed.
-    script_families = tuple(
-        family
-        for additions in _LANGUAGE_FONT_ADDITIONS.values()
-        for family in additions[0]
-    )
-    script_local_fonts = tuple(
-        font
-        for additions in _LANGUAGE_FONT_ADDITIONS.values()
-        for font in additions[1]
-    )
-    script_metrics = tuple(
-        metric
-        for additions in _LANGUAGE_FONT_ADDITIONS.values()
-        for metric in additions[2]
-    )
-    families = tuple(dict.fromkeys((*MAC_CORE_FONT_FAMILIES, *script_families)))
-    local_fonts = tuple(
-        dict.fromkeys((*MAC_CORE_LOCAL_FONTS, *script_local_fonts))
-    )
-    metrics = tuple(dict.fromkeys((*MAC_CORE_FONT_METRICS, *script_metrics)))
     tahoe = str(macos_platform_version).strip().startswith("26.")
+    if tahoe:
+        # Captured with granted Local Font Access in Chromium 150 on an M5 Mac
+        # running macOS 26.5.2.  The same 631 faces were returned on both the
+        # built-in DPR-2 display and a DPR-1 secondary display.
+        families = MACOS_TAHOE_FONT_FAMILIES
+        local_fonts = MACOS_TAHOE_LOCAL_FONTS
+        metrics = MACOS_TAHOE_FONT_METRICS
+    else:
+        # Locale affects font fallback order, not the fonts installed by the
+        # operating system.  Do not synthesize a different installed inventory
+        # by merging locale-specific/downloadable font groups.
+        families = MAC_CORE_FONT_FAMILIES
+        local_fonts = MAC_CORE_LOCAL_FONTS
+        metrics = MAC_CORE_FONT_METRICS
     return {
         "id": "macos-tahoe-stock" if tahoe else "macos-sequoia-stock",
         "source": APPLE_TAHOE_FONT_SOURCE if tahoe else APPLE_SEQUOIA_FONT_SOURCE,
+        "sourceKind": (
+            "real-device-capture" if tahoe else "apple-published-inventory"
+        ),
         "families": families,
         "allowUnknownFamilies": False,
         "localFonts": local_fonts,

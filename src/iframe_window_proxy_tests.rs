@@ -49,6 +49,153 @@ fn iframe_window_has_the_complete_edge_surface_and_stable_navigation_identity() 
 }
 
 #[test]
+fn iframe_srcdoc_and_cross_origin_url_state_match_edge_150() {
+    let child_source = br#"
+      <script>
+        try {
+          parent.postMessage([
+            location.href,
+            location.origin,
+            origin,
+            document.URL,
+            document.documentURI,
+            document.baseURI,
+            document.referrer,
+            frameElement === null,
+            parent !== window,
+            top === parent
+          ].join("~"), "*");
+        } catch (error) {
+          parent.postMessage(
+            ["ERROR", error.name, error.message].join("~"),
+            "*"
+          );
+        }
+      </script>
+    "#;
+    let mut runtime = EdgeRuntime::with_options(EdgeRuntimeOptions {
+        page: Some(PageInit {
+            url: "https://app.example.test/root/index.html".to_owned(),
+            html: "<main>root</main>".to_owned(),
+            referrer: String::new(),
+            content_type: "text/html".to_owned(),
+        }),
+        network_replay: vec![
+            NetworkReplayEntry {
+                url: "https://app.example.test/root/same.html".to_owned(),
+                method: "GET".to_owned(),
+                status: 200,
+                status_text: "OK".to_owned(),
+                headers: vec![("Content-Type".to_owned(), "text/html".to_owned())],
+                body: b"<p>same origin</p>".to_vec(),
+            },
+            NetworkReplayEntry {
+                url: "https://other.example.test/frame/child.html".to_owned(),
+                method: "GET".to_owned(),
+                status: 200,
+                status_text: "OK".to_owned(),
+                headers: vec![("Content-Type".to_owned(), "text/html".to_owned())],
+                body: child_source.to_vec(),
+            },
+        ],
+        ..Default::default()
+    })
+    .expect("configured iframe URL runtime");
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          globalThis.iframeUrlChildReport = "missing";
+          addEventListener(
+            "message",
+            event => iframeUrlChildReport = event.data
+          );
+          const srcdocFrame = document.createElement("iframe");
+          srcdocFrame.srcdoc =
+            "<!doctype html><base href='relative-base/'><a id='relative' href='asset.js'>x</a>";
+          document.body.appendChild(srcdocFrame);
+          const srcdocWindow = srcdocFrame.contentWindow;
+          const srcdocDocument = srcdocFrame.contentDocument;
+
+          const sameFrame = document.createElement("iframe");
+          sameFrame.src = "same.html";
+          document.body.appendChild(sameFrame);
+          const sameDocument = sameFrame.contentDocument;
+
+          const crossFrame = document.createElement("iframe");
+          crossFrame.src = "https://other.example.test/frame/child.html";
+          document.body.appendChild(crossFrame);
+          const childWindow = crossFrame.contentWindow;
+          const capture = callback => {
+            try {
+              const value = callback();
+              return value === null ? "null" : String(value);
+            } catch (error) {
+              return error.name + ":" + error.message;
+            }
+          };
+          return [
+            srcdocFrame.src,
+            srcdocWindow.location.href,
+            srcdocWindow.location.origin,
+            srcdocWindow.origin,
+            srcdocDocument.URL,
+            srcdocDocument.documentURI,
+            srcdocDocument.baseURI,
+            srcdocDocument.referrer,
+            srcdocDocument.getElementById("relative").href,
+            srcdocDocument.querySelector("base").href,
+            srcdocFrame.contentDocument === srcdocDocument,
+            srcdocWindow.parent === window,
+            srcdocWindow.top === window,
+            srcdocWindow.frameElement === srcdocFrame,
+            sameFrame.contentWindow.location.href,
+            sameDocument.URL,
+            sameDocument.baseURI,
+            sameDocument.referrer,
+            sameFrame.contentWindow.frameElement === sameFrame,
+            crossFrame.contentDocument === null,
+            capture(() => childWindow.document),
+            capture(() => childWindow.location.href),
+            capture(() => typeof childWindow.location),
+            capture(() => childWindow.closed),
+            capture(() => childWindow.length),
+            capture(() => typeof childWindow.postMessage),
+            capture(() => childWindow.frameElement)
+          ].join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        result,
+        concat!(
+            "|about:srcdoc|null|https://app.example.test|about:srcdoc|about:srcdoc|",
+            "https://app.example.test/root/relative-base/|https://app.example.test/|",
+            "https://app.example.test/root/relative-base/asset.js|",
+            "https://app.example.test/root/relative-base/|true|true|true|true|",
+            "https://app.example.test/root/same.html|https://app.example.test/root/same.html|",
+            "https://app.example.test/root/same.html|https://app.example.test/root/index.html|true|true|",
+            "SecurityError:Failed to read a named property 'document' from 'Window': ",
+            "Blocked a frame with origin \"https://app.example.test\" from accessing a cross-origin frame.|",
+            "SecurityError:Failed to read a named property 'href' from 'Location': ",
+            "Blocked a frame with origin \"https://app.example.test\" from accessing a cross-origin frame.|",
+            "object|false|0|function|",
+            "SecurityError:Failed to read a named property 'frameElement' from 'Window': ",
+            "Blocked a frame with origin \"https://app.example.test\" from accessing a cross-origin frame."
+        )
+    );
+    assert_eq!(
+        text(&mut runtime, "iframeUrlChildReport"),
+        concat!(
+            "https://other.example.test/frame/child.html~https://other.example.test~",
+            "https://other.example.test~https://other.example.test/frame/child.html~",
+            "https://other.example.test/frame/child.html~",
+            "https://other.example.test/frame/child.html~https://app.example.test/~true~true~true"
+        )
+    );
+}
+
+#[test]
 fn iframe_window_interfaces_and_global_functions_are_realm_local() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     assert_eq!(

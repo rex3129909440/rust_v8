@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<script>
+parent.postMessage({
+  kind: "cross-origin-child",
+  href: location.href,
+  origin: location.origin,
+  windowOrigin: origin,
+  documentURL: document.URL,
+  documentURI: document.documentURI,
+  baseURI: document.baseURI,
+  referrer: document.referrer,
+  frameElementIsNull: frameElement === null,
+  parentIdentity: parent !== window,
+  topIdentity: top === parent,
+}, "*");
+</script>

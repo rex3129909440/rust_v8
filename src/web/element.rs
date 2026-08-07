@@ -642,11 +642,8 @@ pub(crate) fn element_base_url(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> String {
-    if let Some(document) = super::node::owner_document(scope, object)
-        && let Some(value) = super::document::stored_value(scope, document, "URL")
-    {
-        let value = v8::Local::new(scope, &value);
-        return crate::webidl::value_to_string(scope, value);
+    if let Some(document) = super::node::owner_document(scope, object) {
+        return super::document::base_url(scope, document);
     }
     crate::page_init::base_url(scope)
 }

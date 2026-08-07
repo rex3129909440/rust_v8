@@ -769,12 +769,45 @@ fn get_property_value(
         return;
     };
     let value = queried_property_name(&requested_name)
-        .and_then(|name| find_property(&record, &name))
-        .map(|property| property.value)
+        .map(|name| {
+            find_property(&record, &name)
+                .map(|property| property.value)
+                .or_else(|| {
+                    (record.readonly && name == "background")
+                        .then(|| computed_background_shorthand(&record))
+                })
+                .unwrap_or_default()
+        })
         .unwrap_or_default();
     if let Some(value) = v8::String::new(scope, &value) {
         result.set(value.into());
     }
+}
+
+fn computed_background_shorthand(record: &CssStyleDeclarationRecord) -> String {
+    let value = |name: &str, default: &str| {
+        find_property(record, name)
+            .map(|property| property.value)
+            .unwrap_or_else(|| default.to_owned())
+    };
+    let color = value("background-color", "rgba(0, 0, 0, 0)");
+    let image = value("background-image", "none");
+    let repeat_x = value("background-repeat-x", "repeat");
+    let repeat_y = value("background-repeat-y", "repeat");
+    let repeat = if repeat_x == repeat_y {
+        repeat_x
+    } else {
+        format!("{repeat_x} {repeat_y}")
+    };
+    let attachment = value("background-attachment", "scroll");
+    let position_x = value("background-position-x", "0%");
+    let position_y = value("background-position-y", "0%");
+    let size = value("background-size", "auto");
+    let origin = value("background-origin", "padding-box");
+    let clip = value("background-clip", "border-box");
+    format!(
+        "{color} {image} {repeat} {attachment} {position_x} {position_y} / {size} {origin} {clip}"
+    )
 }
 
 fn get_property_priority(

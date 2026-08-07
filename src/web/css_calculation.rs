@@ -120,9 +120,7 @@ pub(crate) fn is_root_numeric_math(value: &str) -> bool {
 pub(crate) fn normalize_property_value(name: &str, value: &str) -> Option<String> {
     let value = value.trim();
     if is_color_property(name) {
-        if let Some(value) = canonical_system_color(value) {
-            return Some(value.to_owned());
-        }
+        return normalize_color_value(value);
     }
     if value.is_empty() || name.starts_with("--") || !contains_math(value) {
         return Some(value.to_owned());
@@ -160,6 +158,396 @@ fn canonical_system_color(value: &str) -> Option<&'static str> {
         .map(|(name, _)| *name)
 }
 
+fn normalize_color_value(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Some(String::new());
+    }
+    if let Some(value) = canonical_system_color(value) {
+        return Some(value.to_owned());
+    }
+    let lower = value.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "transparent"
+            | "currentcolor"
+            | "inherit"
+            | "initial"
+            | "unset"
+            | "revert"
+            | "revert-layer"
+    ) || named_color_hex(&lower).is_some()
+    {
+        return Some(lower);
+    }
+    if let Some(hex) = lower.strip_prefix('#') {
+        if matches!(hex.len(), 3 | 4 | 6 | 8) && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return computed_hex_color(hex);
+        }
+        return None;
+    }
+    valid_color_function(&lower)
+        .then(|| canonical_color_function(&lower))
+        .flatten()
+}
+
+#[derive(Clone, Copy)]
+struct SrgbColor {
+    red: f64,
+    green: f64,
+    blue: f64,
+    alpha: f64,
+}
+
+fn canonical_color_function(value: &str) -> Option<String> {
+    let open = value.find('(')?;
+    let name = &value[..open];
+    let body = &value[open + 1..value.len() - 1];
+    match name {
+        "rgb" | "rgba" => parse_rgb_color(name, body).map(serialize_srgb),
+        "hsl" | "hsla" => parse_hsl_color(name, body).map(serialize_srgb),
+        "hwb" => parse_hwb_color(body).map(serialize_srgb),
+        "lab" | "lch" | "oklab" | "oklch" | "color" => {
+            Some(canonical_absolute_function(name, body))
+        }
+        "color-mix" | "light-dark" | "var" => Some(value.to_owned()),
+        _ => None,
+    }
+}
+
+fn parse_rgb_color(name: &str, body: &str) -> Option<SrgbColor> {
+    let commas = split_top_level(body, ',');
+    let (channels, alpha) = if commas.len() > 1 {
+        let expected = if name == "rgba" { 4 } else { 3 };
+        if commas.len() != expected {
+            return None;
+        }
+        (&commas[..3], commas.get(3).copied())
+    } else {
+        let slash = split_top_level(body, '/');
+        if slash.len() > 2 {
+            return None;
+        }
+        let channels = split_ascii_whitespace_top_level(slash[0]);
+        if channels.len() != 3 {
+            return None;
+        }
+        return Some(SrgbColor {
+            red: parse_rgb_channel(channels[0])?,
+            green: parse_rgb_channel(channels[1])?,
+            blue: parse_rgb_channel(channels[2])?,
+            alpha: slash.get(1).map_or(Some(1.0), |value| parse_alpha(value))?,
+        });
+    };
+    Some(SrgbColor {
+        red: parse_rgb_channel(channels[0])?,
+        green: parse_rgb_channel(channels[1])?,
+        blue: parse_rgb_channel(channels[2])?,
+        alpha: alpha.map_or(Some(1.0), parse_alpha)?,
+    })
+}
+
+fn parse_hsl_color(name: &str, body: &str) -> Option<SrgbColor> {
+    let commas = split_top_level(body, ',');
+    let (channels, alpha) = if commas.len() > 1 {
+        let expected = if name == "hsla" { 4 } else { 3 };
+        if commas.len() != expected {
+            return None;
+        }
+        (commas[..3].to_vec(), commas.get(3).copied())
+    } else {
+        let slash = split_top_level(body, '/');
+        if slash.len() > 2 {
+            return None;
+        }
+        let channels = split_ascii_whitespace_top_level(slash[0]);
+        if channels.len() != 3 {
+            return None;
+        }
+        (channels, slash.get(1).copied())
+    };
+    let hue = parse_hue(channels[0])?;
+    let saturation = parse_percentage(channels[1])?.clamp(0.0, 1.0);
+    let lightness = parse_percentage(channels[2])?.clamp(0.0, 1.0);
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let sector = (hue.rem_euclid(360.0)) / 60.0;
+    let x = chroma * (1.0 - (sector.rem_euclid(2.0) - 1.0).abs());
+    let (red, green, blue) = match sector.floor() as i32 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let offset = lightness - chroma / 2.0;
+    Some(SrgbColor {
+        red: (red + offset) * 255.0,
+        green: (green + offset) * 255.0,
+        blue: (blue + offset) * 255.0,
+        alpha: alpha.map_or(Some(1.0), parse_alpha)?,
+    })
+}
+
+fn parse_hwb_color(body: &str) -> Option<SrgbColor> {
+    let slash = split_top_level(body, '/');
+    if slash.len() > 2 {
+        return None;
+    }
+    let channels = split_ascii_whitespace_top_level(slash[0]);
+    if channels.len() != 3 {
+        return None;
+    }
+    let hue = parse_hue(channels[0])?;
+    let mut white = parse_percentage(channels[1])?.max(0.0);
+    let mut black = parse_percentage(channels[2])?.max(0.0);
+    if white + black >= 1.0 {
+        let gray = white / (white + black);
+        return Some(SrgbColor {
+            red: gray * 255.0,
+            green: gray * 255.0,
+            blue: gray * 255.0,
+            alpha: slash.get(1).map_or(Some(1.0), |value| parse_alpha(value))?,
+        });
+    }
+    white = white.clamp(0.0, 1.0);
+    black = black.clamp(0.0, 1.0);
+    let pure = parse_hsl_color("hsl", &format!("{hue} 100% 50%"))?;
+    let factor = 1.0 - white - black;
+    Some(SrgbColor {
+        red: (pure.red / 255.0 * factor + white) * 255.0,
+        green: (pure.green / 255.0 * factor + white) * 255.0,
+        blue: (pure.blue / 255.0 * factor + white) * 255.0,
+        alpha: slash.get(1).map_or(Some(1.0), |value| parse_alpha(value))?,
+    })
+}
+
+fn parse_rgb_channel(value: &str) -> Option<f64> {
+    let value = value.trim();
+    if value == "none" {
+        return Some(0.0);
+    }
+    if let Some(value) = value.strip_suffix('%') {
+        return Some(value.parse::<f64>().ok()?.clamp(0.0, 100.0) * 2.55);
+    }
+    Some(value.parse::<f64>().ok()?.clamp(0.0, 255.0))
+}
+
+fn parse_alpha(value: &str) -> Option<f64> {
+    let value = value.trim();
+    if value == "none" {
+        return Some(0.0);
+    }
+    if let Some(value) = value.strip_suffix('%') {
+        return Some((value.parse::<f64>().ok()? / 100.0).clamp(0.0, 1.0));
+    }
+    Some(value.parse::<f64>().ok()?.clamp(0.0, 1.0))
+}
+
+fn parse_percentage(value: &str) -> Option<f64> {
+    Some(value.trim().strip_suffix('%')?.parse::<f64>().ok()? / 100.0)
+}
+
+fn parse_hue(value: &str) -> Option<f64> {
+    let value = value.trim();
+    if value == "none" {
+        return Some(0.0);
+    }
+    for (suffix, scale) in [
+        ("deg", 1.0),
+        ("grad", 0.9),
+        ("rad", 180.0 / std::f64::consts::PI),
+        ("turn", 360.0),
+    ] {
+        if let Some(number) = value.strip_suffix(suffix) {
+            return Some(number.parse::<f64>().ok()? * scale);
+        }
+    }
+    value.parse::<f64>().ok()
+}
+
+fn serialize_srgb(color: SrgbColor) -> String {
+    let red = color.red.clamp(0.0, 255.0).round() as u8;
+    let green = color.green.clamp(0.0, 255.0).round() as u8;
+    let blue = color.blue.clamp(0.0, 255.0).round() as u8;
+    if color.alpha < 1.0 {
+        let alpha = (color.alpha.clamp(0.0, 1.0) * 1_000.0).round() / 1_000.0;
+        format!("rgba({red}, {green}, {blue}, {})", format_number(alpha))
+    } else {
+        format!("rgb({red}, {green}, {blue})")
+    }
+}
+
+fn canonical_absolute_function(name: &str, body: &str) -> String {
+    let slash = split_top_level(body, '/');
+    let mut components = split_ascii_whitespace_top_level(slash[0])
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if matches!(name, "lab" | "lch") {
+        if let Some(lightness) = components.first_mut() {
+            if let Some(number) = lightness.strip_suffix('%') {
+                *lightness = number.to_owned();
+            }
+        }
+    }
+    let mut output = format!("{name}({})", components.join(" "));
+    if let Some(alpha) = slash.get(1) {
+        output.pop();
+        output.push_str(" / ");
+        output.push_str(alpha.trim());
+        output.push(')');
+    }
+    output
+}
+
+fn valid_color_function(value: &str) -> bool {
+    let Some(open) = value.find('(') else {
+        return false;
+    };
+    let Some(close) = matching_parenthesis(value, open) else {
+        return false;
+    };
+    if close + 1 != value.len() {
+        return false;
+    }
+    let name = value[..open].trim();
+    let body = value[open + 1..close].trim();
+    if body.is_empty() {
+        return false;
+    }
+    match name {
+        "rgb" | "rgba" | "hsl" | "hsla" | "hwb" | "lab" | "lch" | "oklab" | "oklch" => {
+            valid_component_color_function(name, body)
+        }
+        "color" => valid_color_space_function(body),
+        "color-mix" => valid_color_mix_function(body),
+        "light-dark" => split_top_level(body, ',').len() == 2,
+        "var" => body.starts_with("--"),
+        _ => false,
+    }
+}
+
+fn valid_component_color_function(name: &str, body: &str) -> bool {
+    let comma_parts = split_top_level(body, ',');
+    if comma_parts.len() > 1 {
+        let expected = if matches!(name, "rgba" | "hsla") {
+            4
+        } else {
+            3
+        };
+        return comma_parts.len() == expected
+            && comma_parts.iter().all(|part| valid_color_component(part));
+    }
+    let slash_parts = split_top_level(body, '/');
+    if slash_parts.len() > 2 || slash_parts.iter().any(|part| part.trim().is_empty()) {
+        return false;
+    }
+    let components = split_ascii_whitespace_top_level(slash_parts[0]);
+    components.len() == 3
+        && components.iter().all(|part| valid_color_component(part))
+        && slash_parts
+            .get(1)
+            .is_none_or(|alpha| valid_color_component(alpha))
+}
+
+fn valid_color_space_function(body: &str) -> bool {
+    let slash_parts = split_top_level(body, '/');
+    if slash_parts.len() > 2 {
+        return false;
+    }
+    let components = split_ascii_whitespace_top_level(slash_parts[0]);
+    let Some(space) = components.first().copied() else {
+        return false;
+    };
+    let known_space = matches!(
+        space,
+        "srgb"
+            | "srgb-linear"
+            | "display-p3"
+            | "a98-rgb"
+            | "prophoto-rgb"
+            | "rec2020"
+            | "xyz"
+            | "xyz-d50"
+            | "xyz-d65"
+    );
+    known_space
+        && components.len() == 4
+        && components[1..]
+            .iter()
+            .all(|part| valid_color_component(part))
+        && slash_parts
+            .get(1)
+            .is_none_or(|alpha| valid_color_component(alpha))
+}
+
+fn valid_color_mix_function(body: &str) -> bool {
+    let parts = split_top_level(body, ',');
+    parts.len() == 3
+        && parts[0].trim_start().starts_with("in ")
+        && parts[1..].iter().all(|part| !part.trim().is_empty())
+}
+
+fn valid_color_component(value: &str) -> bool {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("none") || value.starts_with("var(") || value.starts_with("calc(")
+    {
+        return true;
+    }
+    let number = value
+        .strip_suffix('%')
+        .or_else(|| value.strip_suffix("deg"))
+        .or_else(|| value.strip_suffix("grad"))
+        .or_else(|| value.strip_suffix("rad"))
+        .or_else(|| value.strip_suffix("turn"))
+        .unwrap_or(value);
+    !number.is_empty() && number.parse::<f64>().is_ok_and(f64::is_finite)
+}
+
+fn split_top_level(value: &str, delimiter: char) -> Vec<&str> {
+    let mut output = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, character) in value.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if character == delimiter && depth == 0 => {
+                output.push(&value[start..index]);
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    output.push(&value[start..]);
+    output
+}
+
+fn split_ascii_whitespace_top_level(value: &str) -> Vec<&str> {
+    let mut output = Vec::new();
+    let mut depth = 0usize;
+    let mut start = None;
+    for (index, character) in value.char_indices() {
+        if character == '(' {
+            depth += 1;
+        } else if character == ')' {
+            depth = depth.saturating_sub(1);
+        }
+        if character.is_ascii_whitespace() && depth == 0 {
+            if let Some(begin) = start.take() {
+                output.push(&value[begin..index]);
+            }
+        } else if start.is_none() {
+            start = Some(index);
+        }
+    }
+    if let Some(begin) = start {
+        output.push(&value[begin..]);
+    }
+    output
+}
+
 pub(crate) fn computed_system_color(name: &str, value: &str) -> Option<&'static str> {
     if !is_color_property(name) {
         return None;
@@ -169,6 +557,51 @@ pub(crate) fn computed_system_color(name: &str, value: &str) -> Option<&'static 
         .iter()
         .find(|(name, _)| *name == value)
         .map(|(_, computed)| *computed)
+}
+
+pub(crate) fn computed_color(name: &str, value: &str) -> Option<String> {
+    if !is_color_property(name) {
+        return None;
+    }
+    if let Some(value) = computed_system_color(name, value) {
+        return Some(value.to_owned());
+    }
+    let lower = value.trim().to_ascii_lowercase();
+    if lower == "transparent" {
+        return Some("rgba(0, 0, 0, 0)".to_owned());
+    }
+    let hex = lower
+        .strip_prefix('#')
+        .or_else(|| named_color_hex(&lower))?;
+    computed_hex_color(hex)
+}
+
+fn computed_hex_color(hex: &str) -> Option<String> {
+    let expanded;
+    let hex = match hex.len() {
+        3 | 4 => {
+            expanded = hex
+                .chars()
+                .flat_map(|character| [character, character])
+                .collect::<String>();
+            expanded.as_str()
+        }
+        6 | 8 => hex,
+        _ => return None,
+    };
+    let red = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let green = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let blue = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    if hex.len() == 8 {
+        let alpha = u8::from_str_radix(&hex[6..8], 16).ok()?;
+        if alpha < 255 {
+            return Some(format!(
+                "rgba({red}, {green}, {blue}, {})",
+                format_number(f64::from(alpha) / 255.0)
+            ));
+        }
+    }
+    Some(format!("rgb({red}, {green}, {blue})"))
 }
 
 // Microsoft Edge/Chromium resolves CSS system colors to used RGB values in
@@ -218,6 +651,164 @@ const SYSTEM_COLORS: &[(&str, &str)] = &[
     ("windowtext", "rgb(0, 0, 0)"),
     ("accentcolor", "rgb(0, 117, 255)"),
     ("accentcolortext", "rgb(255, 255, 255)"),
+];
+
+fn named_color_hex(value: &str) -> Option<&'static str> {
+    NAMED_COLORS
+        .iter()
+        .find(|(name, _)| *name == value)
+        .map(|(_, hex)| *hex)
+}
+
+const NAMED_COLORS: &[(&str, &str)] = &[
+    ("aliceblue", "F0F8FF"),
+    ("antiquewhite", "FAEBD7"),
+    ("aqua", "00FFFF"),
+    ("aquamarine", "7FFFD4"),
+    ("azure", "F0FFFF"),
+    ("beige", "F5F5DC"),
+    ("bisque", "FFE4C4"),
+    ("black", "000000"),
+    ("blanchedalmond", "FFEBCD"),
+    ("blue", "0000FF"),
+    ("blueviolet", "8A2BE2"),
+    ("brown", "A52A2A"),
+    ("burlywood", "DEB887"),
+    ("cadetblue", "5F9EA0"),
+    ("chartreuse", "7FFF00"),
+    ("chocolate", "D2691E"),
+    ("coral", "FF7F50"),
+    ("cornflowerblue", "6495ED"),
+    ("cornsilk", "FFF8DC"),
+    ("crimson", "DC143C"),
+    ("cyan", "00FFFF"),
+    ("darkblue", "00008B"),
+    ("darkcyan", "008B8B"),
+    ("darkgoldenrod", "B8860B"),
+    ("darkgray", "A9A9A9"),
+    ("darkgreen", "006400"),
+    ("darkgrey", "A9A9A9"),
+    ("darkkhaki", "BDB76B"),
+    ("darkmagenta", "8B008B"),
+    ("darkolivegreen", "556B2F"),
+    ("darkorange", "FF8C00"),
+    ("darkorchid", "9932CC"),
+    ("darkred", "8B0000"),
+    ("darksalmon", "E9967A"),
+    ("darkseagreen", "8FBC8F"),
+    ("darkslateblue", "483D8B"),
+    ("darkslategray", "2F4F4F"),
+    ("darkslategrey", "2F4F4F"),
+    ("darkturquoise", "00CED1"),
+    ("darkviolet", "9400D3"),
+    ("deeppink", "FF1493"),
+    ("deepskyblue", "00BFFF"),
+    ("dimgray", "696969"),
+    ("dimgrey", "696969"),
+    ("dodgerblue", "1E90FF"),
+    ("firebrick", "B22222"),
+    ("floralwhite", "FFFAF0"),
+    ("forestgreen", "228B22"),
+    ("fuchsia", "FF00FF"),
+    ("gainsboro", "DCDCDC"),
+    ("ghostwhite", "F8F8FF"),
+    ("gold", "FFD700"),
+    ("goldenrod", "DAA520"),
+    ("gray", "808080"),
+    ("green", "008000"),
+    ("greenyellow", "ADFF2F"),
+    ("grey", "808080"),
+    ("honeydew", "F0FFF0"),
+    ("hotpink", "FF69B4"),
+    ("indianred", "CD5C5C"),
+    ("indigo", "4B0082"),
+    ("ivory", "FFFFF0"),
+    ("khaki", "F0E68C"),
+    ("lavender", "E6E6FA"),
+    ("lavenderblush", "FFF0F5"),
+    ("lawngreen", "7CFC00"),
+    ("lemonchiffon", "FFFACD"),
+    ("lightblue", "ADD8E6"),
+    ("lightcoral", "F08080"),
+    ("lightcyan", "E0FFFF"),
+    ("lightgoldenrodyellow", "FAFAD2"),
+    ("lightgray", "D3D3D3"),
+    ("lightgreen", "90EE90"),
+    ("lightgrey", "D3D3D3"),
+    ("lightpink", "FFB6C1"),
+    ("lightsalmon", "FFA07A"),
+    ("lightseagreen", "20B2AA"),
+    ("lightskyblue", "87CEFA"),
+    ("lightslategray", "778899"),
+    ("lightslategrey", "778899"),
+    ("lightsteelblue", "B0C4DE"),
+    ("lightyellow", "FFFFE0"),
+    ("lime", "00FF00"),
+    ("limegreen", "32CD32"),
+    ("linen", "FAF0E6"),
+    ("magenta", "FF00FF"),
+    ("maroon", "800000"),
+    ("mediumaquamarine", "66CDAA"),
+    ("mediumblue", "0000CD"),
+    ("mediumorchid", "BA55D3"),
+    ("mediumpurple", "9370DB"),
+    ("mediumseagreen", "3CB371"),
+    ("mediumslateblue", "7B68EE"),
+    ("mediumspringgreen", "00FA9A"),
+    ("mediumturquoise", "48D1CC"),
+    ("mediumvioletred", "C71585"),
+    ("midnightblue", "191970"),
+    ("mintcream", "F5FFFA"),
+    ("mistyrose", "FFE4E1"),
+    ("moccasin", "FFE4B5"),
+    ("navajowhite", "FFDEAD"),
+    ("navy", "000080"),
+    ("oldlace", "FDF5E6"),
+    ("olive", "808000"),
+    ("olivedrab", "6B8E23"),
+    ("orange", "FFA500"),
+    ("orangered", "FF4500"),
+    ("orchid", "DA70D6"),
+    ("palegoldenrod", "EEE8AA"),
+    ("palegreen", "98FB98"),
+    ("paleturquoise", "AFEEEE"),
+    ("palevioletred", "DB7093"),
+    ("papayawhip", "FFEFD5"),
+    ("peachpuff", "FFDAB9"),
+    ("peru", "CD853F"),
+    ("pink", "FFC0CB"),
+    ("plum", "DDA0DD"),
+    ("powderblue", "B0E0E6"),
+    ("purple", "800080"),
+    ("rebeccapurple", "663399"),
+    ("red", "FF0000"),
+    ("rosybrown", "BC8F8F"),
+    ("royalblue", "4169E1"),
+    ("saddlebrown", "8B4513"),
+    ("salmon", "FA8072"),
+    ("sandybrown", "F4A460"),
+    ("seagreen", "2E8B57"),
+    ("seashell", "FFF5EE"),
+    ("sienna", "A0522D"),
+    ("silver", "C0C0C0"),
+    ("skyblue", "87CEEB"),
+    ("slateblue", "6A5ACD"),
+    ("slategray", "708090"),
+    ("slategrey", "708090"),
+    ("snow", "FFFAFA"),
+    ("springgreen", "00FF7F"),
+    ("steelblue", "4682B4"),
+    ("tan", "D2B48C"),
+    ("teal", "008080"),
+    ("thistle", "D8BFD8"),
+    ("tomato", "FF6347"),
+    ("turquoise", "40E0D0"),
+    ("violet", "EE82EE"),
+    ("wheat", "F5DEB3"),
+    ("white", "FFFFFF"),
+    ("whitesmoke", "F5F5F5"),
+    ("yellow", "FFFF00"),
+    ("yellowgreen", "9ACD32"),
 ];
 
 fn normalize_node(node: &Node) -> String {
@@ -372,6 +963,9 @@ fn is_math_function(name: &str) -> bool {
 pub(crate) fn supports_property(name: &str, value: &str) -> bool {
     if name.trim().is_empty() || value.trim().is_empty() {
         return false;
+    }
+    if is_color_property(&name.trim().to_ascii_lowercase()) {
+        return normalize_color_value(value).is_some_and(|value| !value.is_empty());
     }
     if !contains_math(value) {
         return true;
@@ -1648,6 +2242,33 @@ fn serialize_function(name: &str, arguments: &[Node]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_standard_named_and_system_color_normalizes_and_computes() {
+        assert_eq!(NAMED_COLORS.len(), 148);
+        for (name, _) in NAMED_COLORS {
+            assert_eq!(
+                normalize_property_value("color", name).as_deref(),
+                Some(*name)
+            );
+            let computed = computed_color("color", name).expect("named color computes");
+            assert!(computed.starts_with("rgb("), "{name}: {computed}");
+        }
+        for (name, expected) in SYSTEM_COLORS {
+            assert_eq!(
+                normalize_property_value("color", name).as_deref(),
+                Some(*name)
+            );
+            assert_eq!(computed_color("color", name).as_deref(), Some(*expected));
+        }
+        for invalid in ["FakeColor", "-moz-ButtonDefault", "#12", "#ggg", "rgb(foo)"] {
+            assert!(
+                normalize_property_value("color", invalid).is_none(),
+                "{invalid}"
+            );
+            assert!(!supports_property("color", invalid), "{invalid}");
+        }
+    }
 
     #[test]
     fn edge_complex_width_expression_reduces_to_a_canonical_pixel_calc() {

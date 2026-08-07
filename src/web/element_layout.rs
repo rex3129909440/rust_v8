@@ -56,6 +56,7 @@ pub(crate) fn compute(
 ) -> LayoutBox {
     if super::element::record(scope, element).is_none()
         || !super::node::is_connected(scope, element)
+        || current_iframe_is_display_none(scope)
         || hidden_by_display(scope, element)
     {
         return LayoutBox::default();
@@ -170,8 +171,22 @@ pub(crate) fn scroll_metrics(
     if !layout.rendered {
         return ScrollMetrics::default();
     }
-    let base_client_width = layout.client_width();
-    let base_client_height = layout.client_height();
+    let mut base_client_width = layout.client_width();
+    let mut base_client_height = layout.client_height();
+    let tag = super::element::record(scope, element)
+        .map(|record| record.tag_name)
+        .unwrap_or_default();
+    if tag.eq_ignore_ascii_case("HTML")
+        && super::window_view_state::inner_width(scope) == 0.0
+        && super::window_view_state::inner_height(scope) == 0.0
+    {
+        return ScrollMetrics {
+            client_width: base_client_width,
+            client_height: base_client_height,
+            scroll_width: base_client_width,
+            scroll_height: base_client_height,
+        };
+    }
     let scroll_left = super::element::record(scope, element)
         .map(|record| record.scroll_left)
         .unwrap_or(0.0);
@@ -194,6 +209,15 @@ pub(crate) fn scroll_metrics(
             .max(child_layout.x - content_origin_x + scroll_left + child_layout.border_width());
         extent_height = extent_height
             .max(child_layout.y - content_origin_y + scroll_top + child_layout.border_height());
+    }
+
+    if tag.eq_ignore_ascii_case("BODY") {
+        if property_length(scope, element, "width").is_none() {
+            base_client_width = base_client_width.max(extent_width);
+        }
+        if property_length(scope, element, "height").is_none() {
+            base_client_height = base_client_height.max(extent_height);
+        }
     }
 
     let overflow = property(scope, element, "overflow");
@@ -288,6 +312,11 @@ fn hidden_by_display(scope: &v8::PinScope<'_, '_>, element: v8::Local<'_, v8::Ob
         current = layout_parent(scope, candidate);
     }
     false
+}
+
+fn current_iframe_is_display_none(scope: &v8::PinScope<'_, '_>) -> bool {
+    super::html_i_frame_element::current_frame_element_for_layout(scope)
+        .is_some_and(|frame| hidden_by_display(scope, frame))
 }
 
 fn layout_parent<'s>(

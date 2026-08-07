@@ -12,8 +12,9 @@ Important browser constraints:
 
 - hardwareConcurrency is the number of logical processors available to the
   user agent. Browsers may report a lower value than the real CPU thread count.
-- deviceMemory is privacy-coarsened. Chromium-style values are powers of two
-  and high-memory PCs commonly still report 8 instead of 16/32/64.
+- deviceMemory is privacy-coarsened and must remain separate from physical
+  RAM. The version-aware composer calculates the exposed bucket after this
+  catalog selects a physical-memory row.
 - maxTouchPoints is 0 for ordinary non-touch desktop/laptop PCs. Windows touch
   laptops and Surface-like devices commonly report 5 or 10.
 """
@@ -47,8 +48,74 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     ("pc_16c_8g_notouch_performance", 16, 8, 0, 32, 48, ("performance", "notouch")),
     ("pc_18c_8g_notouch_mainstream", 18, 8, 0, 24, 22, ("mainstream", "performance", "notouch")),
 
-    # Gaming and workstation PCs. deviceMemory remains 8 because browser output
-    # is coarsened/capped even when physical RAM is much larger.
+    # Desktop memory variants.  A GPU family is compatible with many CPU/RAM
+    # combinations; keeping these as independent evidence-backed rows creates
+    # a large valid space without inventing arbitrary cross-products.
+    ("pc_desktop_6c_16g_notouch_mainstream", 6, 8, 0, 16, 34, ("desktop", "mainstream", "office", "notouch")),
+    ("pc_desktop_8c_16g_notouch_mainstream", 8, 8, 0, 16, 82, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_8c_32g_notouch_mainstream", 8, 8, 0, 32, 70, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_10c_16g_notouch_mainstream", 10, 8, 0, 16, 40, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_10c_32g_notouch_performance", 10, 8, 0, 32, 34, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_12c_16g_notouch_mainstream", 12, 8, 0, 16, 50, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_12c_24g_notouch_mainstream", 12, 8, 0, 24, 8, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_12c_32g_notouch_performance", 12, 8, 0, 32, 52, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_12c_64g_notouch_performance", 12, 8, 0, 64, 8, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_14c_16g_notouch_mainstream", 14, 8, 0, 16, 35, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_14c_32g_notouch_performance", 14, 8, 0, 32, 38, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_14c_64g_notouch_performance", 14, 8, 0, 64, 6, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_16c_16g_notouch_mainstream", 16, 8, 0, 16, 30, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_16c_24g_notouch_mainstream", 16, 8, 0, 24, 6, ("desktop", "mainstream", "gaming", "notouch")),
+    ("pc_desktop_16c_32g_notouch_performance", 16, 8, 0, 32, 45, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_16c_64g_notouch_performance", 16, 8, 0, 64, 10, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_20c_16g_notouch_performance", 20, 8, 0, 16, 16, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_20c_32g_notouch_performance", 20, 8, 0, 32, 30, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_20c_48g_notouch_performance", 20, 8, 0, 48, 4, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_20c_64g_notouch_performance", 20, 8, 0, 64, 8, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_24c_16g_notouch_performance", 24, 8, 0, 16, 12, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_24c_32g_notouch_performance", 24, 8, 0, 32, 28, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_24c_48g_notouch_performance", 24, 8, 0, 48, 4, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_24c_64g_notouch_performance", 24, 8, 0, 64, 8, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_28c_32g_notouch_performance", 28, 8, 0, 32, 8, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_28c_64g_notouch_performance", 28, 8, 0, 64, 4, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_32c_32g_notouch_performance", 32, 8, 0, 32, 8, ("desktop", "performance", "gaming", "notouch")),
+    ("pc_desktop_32c_64g_notouch_performance", 32, 8, 0, 64, 5, ("desktop", "performance", "gaming", "notouch")),
+
+    # Portable Windows systems.  These rows deliberately keep physical RAM
+    # separate from navigator.deviceMemory; the composer applies Chromium's
+    # observable bucket after selecting a complete device combination.
+    ("pc_laptop_4c_4g_notouch_legacy", 4, 4, 0, 4, 4, ("laptop", "legacy", "lowend", "notouch")),
+    ("pc_laptop_4c_8g_notouch_lowend", 4, 8, 0, 8, 14, ("laptop", "lowend", "notouch")),
+    ("pc_laptop_6c_8g_notouch_office", 6, 8, 0, 8, 18, ("laptop", "office", "notouch")),
+    ("pc_laptop_8c_8g_notouch_mainstream", 8, 8, 0, 8, 28, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_8c_16g_notouch_mainstream", 8, 8, 0, 16, 42, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_10c_8g_notouch_mainstream", 10, 8, 0, 8, 18, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_10c_16g_notouch_mainstream", 10, 8, 0, 16, 36, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_12c_16g_notouch_mainstream", 12, 8, 0, 16, 42, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_12c_24g_notouch_mainstream", 12, 8, 0, 24, 10, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_12c_32g_notouch_performance", 12, 8, 0, 32, 20, ("laptop", "performance", "notouch")),
+    ("pc_laptop_14c_16g_notouch_mainstream", 14, 8, 0, 16, 38, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_14c_32g_notouch_performance", 14, 8, 0, 32, 22, ("laptop", "performance", "notouch")),
+    ("pc_laptop_16c_16g_notouch_mainstream", 16, 8, 0, 16, 30, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_16c_24g_notouch_mainstream", 16, 8, 0, 24, 10, ("laptop", "mainstream", "notouch")),
+    ("pc_laptop_16c_32g_notouch_performance", 16, 8, 0, 32, 30, ("laptop", "performance", "notouch")),
+    ("pc_laptop_16c_64g_notouch_performance", 16, 8, 0, 64, 5, ("laptop", "performance", "notouch")),
+    ("pc_laptop_20c_16g_notouch_performance", 20, 8, 0, 16, 15, ("laptop", "performance", "notouch")),
+    ("pc_laptop_20c_32g_notouch_performance", 20, 8, 0, 32, 26, ("laptop", "performance", "notouch")),
+    ("pc_laptop_20c_64g_notouch_performance", 20, 8, 0, 64, 5, ("laptop", "performance", "notouch")),
+    ("pc_laptop_22c_16g_notouch_performance", 22, 8, 0, 16, 12, ("laptop", "performance", "notouch")),
+    ("pc_laptop_22c_32g_notouch_performance", 22, 8, 0, 32, 30, ("laptop", "performance", "notouch")),
+    ("pc_laptop_22c_64g_notouch_performance", 22, 8, 0, 64, 8, ("laptop", "performance", "notouch")),
+    ("pc_laptop_24c_16g_notouch_performance", 24, 8, 0, 16, 10, ("laptop", "performance", "notouch")),
+    ("pc_laptop_24c_32g_notouch_performance", 24, 8, 0, 32, 24, ("laptop", "performance", "notouch")),
+    ("pc_laptop_24c_48g_notouch_performance", 24, 8, 0, 48, 6, ("laptop", "performance", "notouch")),
+    ("pc_laptop_24c_64g_notouch_performance", 24, 8, 0, 64, 8, ("laptop", "performance", "notouch")),
+    ("pc_laptop_28c_32g_notouch_performance", 28, 8, 0, 32, 10, ("laptop", "performance", "notouch")),
+    ("pc_laptop_28c_64g_notouch_performance", 28, 8, 0, 64, 4, ("laptop", "performance", "notouch")),
+    ("pc_laptop_32c_32g_notouch_performance", 32, 8, 0, 32, 10, ("laptop", "performance", "notouch")),
+    ("pc_laptop_32c_64g_notouch_performance", 32, 8, 0, 64, 5, ("laptop", "performance", "notouch")),
+
+    # Gaming and workstation PCs. The placeholder deviceMemory value is
+    # replaced by the version-aware bucket in get_random_fp.py.
     ("pc_20c_8g_notouch_gaming", 20, 8, 0, 32, 34, ("gaming", "performance", "notouch")),
     ("pc_22c_8g_notouch_performance_laptop", 22, 8, 0, 32, 16, ("laptop", "performance", "notouch")),
     ("pc_24c_8g_notouch_gaming", 24, 8, 0, 32, 26, ("gaming", "performance", "notouch")),
@@ -72,6 +139,15 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     ("pc_128c_8g_notouch_workstation", 128, 8, 0, 256, 1, ("workstation", "notouch")),
     ("pc_172c_8g_notouch_workstation", 172, 8, 0, 1024, 1, ("workstation", "notouch")),
     ("pc_192c_8g_notouch_workstation", 192, 8, 0, 1024, 1, ("workstation", "notouch")),
+    ("pc_workstation_4c_16g_notouch", 4, 8, 0, 16, 3, ("workstation", "entry_workstation", "notouch")),
+    ("pc_workstation_8c_16g_notouch", 8, 8, 0, 16, 8, ("workstation", "entry_workstation", "notouch")),
+    ("pc_workstation_8c_32g_notouch", 8, 8, 0, 32, 8, ("workstation", "entry_workstation", "notouch")),
+    ("pc_workstation_12c_16g_notouch", 12, 8, 0, 16, 6, ("workstation", "entry_workstation", "notouch")),
+    ("pc_workstation_12c_32g_notouch", 12, 8, 0, 32, 10, ("workstation", "notouch")),
+    ("pc_workstation_16c_32g_notouch", 16, 8, 0, 32, 12, ("workstation", "notouch")),
+    ("pc_workstation_16c_64g_notouch", 16, 8, 0, 64, 8, ("workstation", "notouch")),
+    ("pc_workstation_24c_32g_notouch", 24, 8, 0, 32, 7, ("workstation", "notouch")),
+    ("pc_workstation_24c_64g_notouch", 24, 8, 0, 64, 8, ("workstation", "notouch")),
 
     # Windows touch laptops / 2-in-1 / Surface-like PCs.
     ("pc_4c_8g_touch5_convertible", 4, 8, 5, 8, 16, ("touch", "convertible", "surface")),
@@ -139,6 +215,28 @@ PC_NAVIGATOR_HARDWARE_PROFILES: tuple[dict[str, object], ...] = tuple(
 )
 
 
+# Relative weights follow the broad shape of Steam's Windows survey. Rare
+# workstation and mixed-memory states stay in the catalog with low weights.
+_LOGICAL_PROCESSOR_WEIGHTS = {
+    1: 1, 2: 3, 4: 44, 6: 100, 8: 98, 10: 25, 12: 18, 14: 17,
+    16: 20, 18: 2, 20: 8, 22: 1, 24: 10, 28: 1, 32: 3,
+}
+_PHYSICAL_MEMORY_WEIGHTS = {
+    1: 1, 2: 1, 4: 4, 8: 20, 12: 6, 16: 100, 24: 8, 28: 2,
+    32: 93, 48: 3, 60: 2, 64: 10, 128: 2, 192: 1, 256: 1,
+    512: 1, 1024: 1,
+}
+
+
+def get_pc_navigator_hardware_profile_weight(profile: dict[str, object]) -> int:
+    concurrency = int(profile.get("hardwareConcurrency", 0) or 0)
+    physical_ram = int(profile.get("physicalRamHintGb", 0) or 0)
+    base = int(profile.get("weight", 1) or 1)
+    cpu = _LOGICAL_PROCESSOR_WEIGHTS.get(concurrency, 1)
+    memory = _PHYSICAL_MEMORY_WEIGHTS.get(physical_ram, 1)
+    return max(1, base * cpu * memory // 100)
+
+
 def get_pc_navigator_hardware_profiles(
     tag: str | None = None,
     include_virtual: bool = False,
@@ -174,7 +272,7 @@ def choose_pc_navigator_hardware_profile(
         profiles = get_pc_navigator_hardware_profiles(include_virtual=include_virtual)
     if not profiles:
         raise ValueError("no PC navigator hardware profiles available")
-    weights = [int(profile.get("weight", 1)) for profile in profiles]
+    weights = [get_pc_navigator_hardware_profile_weight(profile) for profile in profiles]
     return rng.choices(profiles, weights=weights, k=1)[0]
 
 
@@ -232,7 +330,7 @@ def choose_pc_navigator_hardware_profile_for_gpu_tier(
 
     if not candidates:
         candidates = profiles
-    weights = [int(profile.get("weight", 1)) for profile in candidates]
+    weights = [get_pc_navigator_hardware_profile_weight(profile) for profile in candidates]
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
@@ -245,6 +343,30 @@ def choose_pc_navigator_hardware_profile_for_gpu(
     if not profiles:
         return choose_pc_navigator_hardware_profile(rng, tag=tag, include_virtual=False)
 
+    candidates = get_compatible_pc_navigator_hardware_profiles_for_gpu(
+        gpu_profile,
+        tag=tag,
+    )
+    if not candidates:
+        return choose_pc_navigator_hardware_profile_for_gpu_tier(
+            rng,
+            str((gpu_profile or {}).get("tier", "") or ""),
+            tag=tag,
+        )
+    weights = [get_pc_navigator_hardware_profile_weight(profile) for profile in candidates]
+    return rng.choices(candidates, weights=weights, k=1)[0]
+
+
+def get_compatible_pc_navigator_hardware_profiles_for_gpu(
+    gpu_profile: dict[str, object] | None,
+    tag: str | None = "windows",
+) -> tuple[dict[str, object], ...]:
+    """Return coherent hardware rows while preserving broad catalog coverage."""
+
+    profiles = get_pc_navigator_hardware_profiles(tag=tag, include_virtual=False)
+    if not profiles:
+        return ()
+
     tier = str((gpu_profile or {}).get("tier", "") or "").strip().lower()
     architecture = str((gpu_profile or {}).get("architecture", "") or "").strip().lower()
     model = str((gpu_profile or {}).get("model", "") or "").strip().lower()
@@ -254,6 +376,59 @@ def choose_pc_navigator_hardware_profile_for_gpu(
 
     def concurrency(profile: dict[str, object]) -> int:
         return int(profile.get("hardwareConcurrency", 0) or 0)
+
+    def physical_ram(profile: dict[str, object]) -> int:
+        return int(profile.get("physicalRamHintGb", 0) or 0)
+
+    def has_any(profile: dict[str, object], values: set[str]) -> bool:
+        tags = profile_tags(profile)
+        return any(value in tags for value in values)
+
+    portable_gpu = tier == "laptop" or any(
+        needle in model
+        for needle in (
+            "laptop gpu",
+            "max-q",
+            "geforce mx",
+        )
+    )
+    recent_arches = {
+        "blackwell", "ada", "ampere", "turing", "rdna4", "rdna3.5",
+        "rdna3", "rdna2", "xe2-battlemage", "xe2", "xe-lpg", "xe-hpg",
+        "xe-lp", "gen-12", "gen-12lp", "gen-11", "adreno-x2", "adreno-x1",
+    }
+    legacy_arches = {
+        "gen-6", "gen-7", "gen-7.5", "gen-8", "kepler", "gcn1",
+    }
+
+    if str(tag or "").lower() == "arm64":
+        return tuple(
+            profile
+            for profile in profiles
+            if has_any(profile, {"arm64", "copilot_pc"})
+        )
+
+    if tier == "virtual":
+        return ()
+
+    if portable_gpu:
+        demanding_mobile = any(
+            needle in model
+            for needle in (
+                "5090", "5080", "5070", "4090", "4080", "4070",
+                "3080", "3070", "2080", "quadro rtx", "rtx a",
+            )
+        )
+        minimum_cpu = 12 if demanding_mobile and architecture in recent_arches else 4
+        minimum_ram = 16 if demanding_mobile and architecture in recent_arches else 4
+        return tuple(
+            profile
+            for profile in profiles
+            if has_any(profile, {"laptop", "touch", "convertible", "surface"})
+            and not has_any(profile, {"arm64", "workstation", "obsolete"})
+            and minimum_cpu <= concurrency(profile) <= 32
+            and minimum_ram <= physical_ram(profile) <= 64
+        )
 
     modern_integrated_arches = {
         "xe2",
@@ -289,23 +464,55 @@ def choose_pc_navigator_hardware_profile_for_gpu(
         architecture in modern_integrated_arches
         or any(needle in model for needle in modern_integrated_model_needles)
     ):
-        candidates = tuple(
+        return tuple(
             profile
             for profile in profiles
-            if "legacy" not in profile_tags(profile)
-            and "lowend" not in profile_tags(profile)
-            and "workstation" not in profile_tags(profile)
-            and concurrency(profile) >= 6
-            and concurrency(profile) <= 24
+            if not has_any(profile, {"legacy", "lowend", "workstation", "obsolete", "arm64"})
+            and 6 <= concurrency(profile) <= 32
+            and 8 <= physical_ram(profile) <= 64
         )
-        if candidates:
-            weights = [int(profile.get("weight", 1)) for profile in candidates]
-            return rng.choices(candidates, weights=weights, k=1)[0]
 
-    return choose_pc_navigator_hardware_profile_for_gpu_tier(
-        rng,
-        tier,
-        tag=tag,
+    if tier in {"legacy", "integrated"} or architecture in legacy_arches:
+        return tuple(
+            profile
+            for profile in profiles
+            if not has_any(profile, {"workstation", "arm64"})
+            and has_any(profile, {"legacy", "lowend", "office", "laptop"})
+            and concurrency(profile) <= 16
+            and physical_ram(profile) <= 32
+        )
+
+    if tier == "workstation":
+        recent_workstation = architecture in recent_arches
+        return tuple(
+            profile
+            for profile in profiles
+            if "workstation" in profile_tags(profile)
+            and concurrency(profile) >= (16 if recent_workstation else 4)
+            and physical_ram(profile) >= (32 if recent_workstation else 16)
+        )
+
+    if tier in {"enthusiast", "high"}:
+        return tuple(
+            profile
+            for profile in profiles
+            if has_any(profile, {"gaming", "performance"})
+            and not has_any(profile, {"laptop", "touch", "convertible", "surface", "arm64", "workstation"})
+            and 12 <= concurrency(profile) <= 64
+            and physical_ram(profile) >= 16
+        )
+
+    if tier in {"mainstream", "entry"}:
+        return tuple(
+            profile
+            for profile in profiles
+            if not has_any(profile, {"laptop", "touch", "convertible", "surface", "arm64", "workstation", "obsolete"})
+            and 4 <= concurrency(profile) <= 32
+            and 4 <= physical_ram(profile) <= 64
+        )
+
+    return tuple(
+        profile for profile in profiles if "arm64" not in profile_tags(profile)
     )
 
 

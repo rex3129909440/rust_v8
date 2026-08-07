@@ -9,7 +9,7 @@ fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
 
 #[test]
 fn edge_150_css_own_shape_and_all_element_reference_reflections_are_exact() {
-    let source = r#"
+    let source = r##"
       (() => {
         const style = document.createElement("div").style;
         const emptyKeys = Reflect.ownKeys(style);
@@ -70,7 +70,7 @@ fn edge_150_css_own_shape_and_all_element_reference_reflections_are_exact() {
           ...reflection(svg, "interestForElement", "interestfor")
         ].join("|");
       })()
-    "#;
+    "##;
     let expected = concat!(
         "744|accentColor|zoom|true|false||true|true|true|",
         "animation-name|false|true|true||||1|",
@@ -136,6 +136,187 @@ fn css_system_colors_serialize_and_compute_like_edge() {
     let mut traced = EdgeRuntime::new().expect("traced system-color runtime");
     traced.enable_proxy_trace().expect("enable Proxy trace");
     assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn css_color_parsing_rejects_unknown_values_and_computes_complete_keywords() {
+    let source = r##"
+      (() => {
+        const tokens = [
+          "WindowText",
+          "ActiveBorder",
+          "AccentColor",
+          "rebeccapurple",
+          "transparent",
+          "#1234",
+          "rgb(1 2 3 / 50%)",
+          "hsl(120 50% 25%)",
+          "hwb(120 10% 20%)",
+          "lab(50% 0 0)",
+          "lch(50% 20 30)",
+          "oklab(0.5 0 0)",
+          "oklch(0.5 0.2 30)",
+          "color(display-p3 1 0 0)",
+          "color-mix(in srgb, red, blue)",
+          "light-dark(white, black)",
+          "-moz-ButtonDefault",
+          "FakeColor",
+          "#12",
+          "rgb(foo)"
+        ];
+        return tokens.map(token => {
+          const element = document.createElement("div");
+          document.body.appendChild(element);
+          element.style.color = token;
+          return [
+            token,
+            CSS.supports("color", token),
+            element.style.color,
+            getComputedStyle(element).color,
+            getComputedStyle(element).getPropertyValue(token)
+          ].join("~");
+        }).join("|");
+      })()
+    "##;
+    let mut runtime = EdgeRuntime::new().expect("complete CSS color runtime");
+    let result = text(&mut runtime, source);
+    let rows = result.split('|').collect::<Vec<_>>();
+    assert_eq!(rows.len(), 20);
+    for row in &rows[..16] {
+        let fields = row.split('~').collect::<Vec<_>>();
+        assert_eq!(fields[1], "true", "valid color row: {row}");
+        assert!(!fields[2].is_empty(), "declared color row: {row}");
+        assert!(!fields[3].is_empty(), "computed color row: {row}");
+        assert!(fields[4].is_empty(), "token is not a property name: {row}");
+    }
+    for row in &rows[16..] {
+        let fields = row.split('~').collect::<Vec<_>>();
+        assert_eq!(fields[1], "false", "invalid color row: {row}");
+        assert!(fields[2].is_empty(), "invalid declared color row: {row}");
+        assert_eq!(
+            fields[3], "rgb(0, 0, 0)",
+            "invalid computed color row: {row}"
+        );
+        assert!(fields[4].is_empty(), "invalid token property row: {row}");
+    }
+}
+
+#[test]
+fn edge_150_complete_legacy_and_mozilla_color_matrix_is_exact() {
+    let source = r##"
+      (() => {
+        const tokens = [
+          "ActiveBorder", "ActiveCaption", "AppWorkspace", "Background",
+          "ButtonFace", "ButtonHighlight", "ButtonShadow", "ButtonText",
+          "CaptionText", "GrayText", "Highlight", "HighlightText",
+          "InactiveBorder", "InactiveCaption", "InactiveCaptionText",
+          "InfoBackground", "InfoText", "Menu", "MenuText", "Scrollbar",
+          "ThreeDDarkShadow", "ThreeDFace", "ThreeDHighlight",
+          "ThreeDLightShadow", "ThreeDShadow", "Window", "WindowFrame",
+          "WindowText", "FakeColor", "-moz-ButtonDefault",
+          "-moz-ButtonHoverFace", "-moz-ButtonHoverText", "-moz-CellHighlight",
+          "-moz-CellHighlightText", "-moz-Combobox", "-moz-ComboboxText",
+          "-moz-Dialog", "-moz-DialogText", "-moz-dragtargetzone",
+          "-moz-EvenTreeRow", "-moz-Field", "-moz-FieldText",
+          "-moz-html-CellHighlight", "-moz-html-CellHighlightText",
+          "-moz-mac-accentdarkestshadow", "-moz-mac-accentdarkshadow",
+          "-moz-mac-accentface", "-moz-mac-accentlightesthighlight",
+          "-moz-mac-accentlightshadow", "-moz-mac-accentregularhighlight",
+          "-moz-mac-accentregularshadow", "-moz-mac-chrome-active",
+          "-moz-mac-chrome-inactive", "-moz-mac-focusring",
+          "-moz-mac-menuselect", "-moz-mac-menushadow",
+          "-moz-mac-menutextselect", "-moz-MenuHover", "-moz-MenuHoverText",
+          "-moz-MenuBarText", "-moz-MenuBarHoverText",
+          "-moz-nativehyperlinktext", "-moz-OddTreeRow",
+          "-moz-win-communicationstext", "-moz-win-mediatext",
+          "-moz-win-accentcolor", "-moz-win-accentcolortext",
+          "-moz-activehyperlinktext", "-moz-default-background-color",
+          "-moz-default-color", "-moz-hyperlinktext", "-moz-visitedhyperlinktext"
+        ];
+        const rows = tokens.map(token => {
+          const element = document.createElement("div");
+          document.body.appendChild(element);
+          element.style.color = token;
+          const computed = getComputedStyle(element);
+          return [
+            token,
+            CSS.supports("color", token),
+            element.style.color,
+            computed.color,
+            computed.getPropertyValue(token)
+          ].join("~");
+        });
+        const retained = document.createElement("div");
+        retained.style.color = "rgb(0, 0, 0)";
+        retained.style.color = "FakeColor";
+        rows.push([retained.style.color, getComputedStyle(retained).color].join("~"));
+        return rows.join("|");
+      })()
+    "##;
+    let mut runtime = EdgeRuntime::new().expect("Edge CSS color matrix runtime");
+    let result = text(&mut runtime, source);
+    let rows = result.split('|').collect::<Vec<_>>();
+    assert_eq!(rows.len(), 73);
+    let expected_computed = [
+        "rgb(0, 0, 0)",
+        "rgb(255, 255, 255)",
+        "rgb(255, 255, 255)",
+        "rgb(255, 255, 255)",
+        "rgb(240, 240, 240)",
+        "rgb(240, 240, 240)",
+        "rgb(240, 240, 240)",
+        "rgb(0, 0, 0)",
+        "rgb(0, 0, 0)",
+        "rgb(109, 109, 109)",
+        "rgb(0, 120, 215)",
+        "rgb(255, 255, 255)",
+        "rgb(0, 0, 0)",
+        "rgb(255, 255, 255)",
+        "rgb(128, 128, 128)",
+        "rgb(255, 255, 255)",
+        "rgb(0, 0, 0)",
+        "rgb(255, 255, 255)",
+        "rgb(0, 0, 0)",
+        "rgb(255, 255, 255)",
+        "rgb(0, 0, 0)",
+        "rgb(240, 240, 240)",
+        "rgb(0, 0, 0)",
+        "rgb(0, 0, 0)",
+        "rgb(0, 0, 0)",
+        "rgb(255, 255, 255)",
+        "rgb(0, 0, 0)",
+        "rgb(0, 0, 0)",
+    ];
+
+    for (index, row) in rows[..28].iter().enumerate() {
+        let fields = row.split('~').collect::<Vec<_>>();
+        assert_eq!(fields[1], "true", "accepted Edge system color: {row}");
+        assert_eq!(
+            fields[2],
+            fields[0].to_ascii_lowercase(),
+            "declared system color serialization: {row}"
+        );
+        assert_eq!(
+            fields[3], expected_computed[index],
+            "computed system color must match Edge 150: {row}"
+        );
+        if fields[0] == "Background" {
+            assert!(
+                fields[4].starts_with("rgba(0, 0, 0, 0) none repeat scroll"),
+                "Background is also a CSS property name: {row}"
+            );
+        } else {
+            assert!(fields[4].is_empty(), "color is not a property name: {row}");
+        }
+    }
+    for row in &rows[28..72] {
+        let fields = row.split('~').collect::<Vec<_>>();
+        assert_eq!(fields[1], "false", "unsupported Edge color: {row}");
+        assert!(fields[2].is_empty(), "unsupported declaration: {row}");
+        assert_eq!(fields[3], "rgb(0, 0, 0)", "initial computed color: {row}");
+        assert!(fields[4].is_empty(), "unsupported property lookup: {row}");
+    }
+    assert_eq!(rows[72], "rgb(0, 0, 0)~rgb(0, 0, 0)");
 }
 
 #[test]

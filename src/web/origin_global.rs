@@ -30,7 +30,9 @@ fn get_origin(
     _: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(origin) = v8::String::new(scope, &crate::page_init::origin(scope)) {
+    let window = scope.get_current_context().global(scope);
+    let origin = super::html_i_frame_element::origin_for_window(scope, window);
+    if let Some(origin) = v8::String::new(scope, &origin) {
         result.set(origin.into());
     }
 }

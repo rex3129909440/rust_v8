@@ -684,6 +684,49 @@ pub(crate) fn stored_value(
     record(scope, document)?.values.get(name).cloned()
 }
 
+fn stored_string(
+    scope: &v8::PinScope<'_, '_>,
+    document: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Option<String> {
+    let value = stored_value(scope, document, name)?;
+    Some(crate::webidl::value_to_string(
+        scope,
+        v8::Local::new(scope, &value),
+    ))
+}
+
+pub(crate) fn fallback_base_url(
+    scope: &v8::PinScope<'_, '_>,
+    document: v8::Local<'_, v8::Object>,
+) -> String {
+    stored_string(scope, document, "fallbackBaseURL")
+        .or_else(|| stored_string(scope, document, "URL"))
+        .unwrap_or_else(|| crate::page_init::base_url(scope))
+}
+
+pub(crate) fn base_url(
+    scope: &v8::PinScope<'_, '_>,
+    document: v8::Local<'_, v8::Object>,
+) -> String {
+    let fallback = fallback_base_url(scope, document);
+    let base_href = document_descendants(scope, document)
+        .into_iter()
+        .find(|node| {
+            super::node::record(scope, *node)
+                .is_some_and(|record| record.node_name.eq_ignore_ascii_case("BASE"))
+                && super::element::attribute_value(scope, *node, "href").is_some()
+        })
+        .and_then(|base| super::element::attribute_value(scope, base, "href"));
+    let Some(base_href) = base_href else {
+        return fallback;
+    };
+    ::url::Url::parse(&base_href)
+        .or_else(|_| ::url::Url::parse(&fallback).and_then(|base| base.join(&base_href)))
+        .map(|url| url.as_str().to_owned())
+        .unwrap_or(fallback)
+}
+
 pub(crate) fn current_script<'s>(
     scope: &v8::PinScope<'s, '_>,
     document: v8::Local<'_, v8::Object>,

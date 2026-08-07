@@ -1,4 +1,4 @@
-"""Evidence-backed Apple-silicon GPU candidates for macOS Chromium profiles.
+"""Apple-published Mac GPU/model candidates for Chromium profiles.
 
 The observable WebGL renderer is derived from ANGLE's Metal backend, which
 builds its renderer description from ``"ANGLE Metal Renderer: "`` plus the
@@ -6,8 +6,11 @@ active ``MTLDevice.name``.  Chromium appends the WebGL-safe version text
 ``"Unspecified Version"``.  Apple documents the Metal GPU-family mapping and
 the CPU/GPU core counts used below.
 
-This catalog intentionally contains Apple silicon only.  An Intel Mac needs a
-captured Intel/AMD adapter and must not be synthesized from these rows.
+Apple product specifications establish the model, core, memory, and display
+relationships in these rows.  Only Apple-silicon rows currently have a full,
+version-locked ANGLE/Dawn capability record.  Intel/AMD rows remain available
+for inventory and future real-device captures, but are excluded from the
+default random profile pool instead of receiving guessed runtime limits.
 """
 
 from __future__ import annotations
@@ -15,12 +18,19 @@ from __future__ import annotations
 import random
 from typing import Iterable, Sequence
 
+try:
+    from .mac_graphics_capability_catalog import (
+        ANGLE_DISPLAY_MTL_SOURCE,
+        is_verified_mac_graphics_candidate,
+    )
+except ImportError:  # Direct import from demo/fp.
+    from mac_graphics_capability_catalog import (  # type: ignore
+        ANGLE_DISPLAY_MTL_SOURCE,
+        is_verified_mac_graphics_candidate,
+    )
 
-ANGLE_METAL_SOURCE = (
-    "https://chromium.googlesource.com/angle/angle/+/"
-    "662226a3243caa9963ae8778c81b84ce71b4d2f6/"
-    "src/libANGLE/renderer/metal/DisplayMtl.mm"
-)
+
+ANGLE_METAL_SOURCE = ANGLE_DISPLAY_MTL_SOURCE
 APPLE_METAL_FAMILY_SOURCE = "https://developer.apple.com/metal/capabilities/"
 
 
@@ -37,7 +47,7 @@ MAC_GPU_ROWS: tuple[
         8,
         7,
         (8, 16),
-        ("air13_m1",),
+        ("air13_m1", "imac24"),
         7,
         "https://support.apple.com/en-la/111883",
     ),
@@ -48,9 +58,86 @@ MAC_GPU_ROWS: tuple[
         8,
         8,
         (8, 16),
-        ("air13_m1",),
+        ("air13_m1", "imac24", "external"),
         10,
         "https://support.apple.com/en-la/111883",
+    ),
+    (
+        "mac_m1_pro_8cpu_14gpu",
+        "Apple M1 Pro",
+        "apple7",
+        8,
+        14,
+        (16, 32),
+        ("pro14",),
+        5,
+        "https://support.apple.com/en-us/111902",
+    ),
+    (
+        "mac_m1_pro_10cpu_14gpu",
+        "Apple M1 Pro",
+        "apple7",
+        10,
+        14,
+        (16, 32),
+        ("pro14",),
+        4,
+        "https://support.apple.com/en-us/111902",
+    ),
+    (
+        "mac_m1_pro_10cpu_16gpu",
+        "Apple M1 Pro",
+        "apple7",
+        10,
+        16,
+        (16, 32),
+        ("pro14", "pro16"),
+        7,
+        "https://support.apple.com/en-us/111902",
+    ),
+    (
+        "mac_m1_max_10cpu_24gpu",
+        "Apple M1 Max",
+        "apple7",
+        10,
+        24,
+        (32, 64),
+        ("pro14", "pro16", "external"),
+        3,
+        "https://support.apple.com/en-us/111902",
+    ),
+    (
+        "mac_m1_max_10cpu_32gpu",
+        "Apple M1 Max",
+        "apple7",
+        10,
+        32,
+        (32, 64),
+        ("pro14", "pro16", "external"),
+        2,
+        "https://support.apple.com/en-ie/111900",
+    ),
+    (
+        "mac_m1_ultra_20cpu_48gpu",
+        "Apple M1 Ultra",
+        "apple7",
+        20,
+        48,
+        (64, 128),
+        ("external",),
+        1,
+        "https://support.apple.com/en-ie/111900",
+    ),
+    (
+        "mac_m1_ultra_20cpu_64gpu",
+        "Apple M1 Ultra",
+        "apple7",
+        20,
+        64,
+        (64, 128),
+        ("external",),
+        1,
+        "https://support.apple.com/en-ie/111900",
     ),
     (
         "mac_m2_8gpu",
@@ -59,7 +146,7 @@ MAC_GPU_ROWS: tuple[
         8,
         8,
         (8, 16, 24),
-        ("air13_modern",),
+        ("air13_modern", "air15_modern", "external"),
         9,
         "https://support.apple.com/en-us/111867",
     ),
@@ -70,7 +157,7 @@ MAC_GPU_ROWS: tuple[
         8,
         10,
         (8, 16, 24),
-        ("air13_modern",),
+        ("air13_modern", "air15_modern", "external"),
         9,
         "https://support.apple.com/en-us/111867",
     ),
@@ -81,7 +168,7 @@ MAC_GPU_ROWS: tuple[
         10,
         16,
         (16, 32),
-        ("pro14",),
+        ("pro14", "external"),
         6,
         "https://support.apple.com/en-ca/111340",
     ),
@@ -92,7 +179,7 @@ MAC_GPU_ROWS: tuple[
         12,
         19,
         (16, 32),
-        ("pro14", "pro16"),
+        ("pro14", "pro16", "external"),
         5,
         "https://support.apple.com/en-ca/111340",
     ),
@@ -103,7 +190,7 @@ MAC_GPU_ROWS: tuple[
         12,
         30,
         (32, 64),
-        ("pro14", "pro16"),
+        ("pro14", "pro16", "external"),
         2,
         "https://support.apple.com/en-ca/111340",
     ),
@@ -114,9 +201,42 @@ MAC_GPU_ROWS: tuple[
         12,
         38,
         (32, 64, 96),
-        ("pro14", "pro16"),
+        ("pro14", "pro16", "external"),
         2,
         "https://support.apple.com/en-ca/111340",
+    ),
+    (
+        "mac_m2_ultra_24cpu_60gpu",
+        "Apple M2 Ultra",
+        "apple8",
+        24,
+        60,
+        (64, 128, 192),
+        ("external",),
+        1,
+        "https://support.apple.com/en-ie/111835",
+    ),
+    (
+        "mac_m2_ultra_24cpu_76gpu",
+        "Apple M2 Ultra",
+        "apple8",
+        24,
+        76,
+        (64, 128, 192),
+        ("external",),
+        1,
+        "https://support.apple.com/en-ie/111835",
+    ),
+    (
+        "mac_m3_8gpu",
+        "Apple M3",
+        "apple9",
+        8,
+        8,
+        (8, 16, 24),
+        ("air13_modern", "imac24"),
+        7,
+        "https://support.apple.com/en-us/118551",
     ),
     (
         "mac_m3_10gpu",
@@ -125,9 +245,75 @@ MAC_GPU_ROWS: tuple[
         8,
         10,
         (8, 16, 24),
+        ("air13_modern", "air15_modern", "pro14", "imac24", "external"),
+        10,
+        "https://support.apple.com/en-us/118551",
+    ),
+    (
+        "mac_m3_pro_11cpu_14gpu",
+        "Apple M3 Pro",
+        "apple9",
+        11,
+        14,
+        (18, 36),
         ("pro14",),
+        5,
+        "https://support.apple.com/en-euro/117736",
+    ),
+    (
+        "mac_m3_pro_12cpu_18gpu",
+        "Apple M3 Pro",
+        "apple9",
+        12,
+        18,
+        (18, 36),
+        ("pro14", "pro16"),
         7,
-        "https://support.apple.com/en-us/117735",
+        "https://support.apple.com/en-euro/117736",
+    ),
+    (
+        "mac_m3_max_14cpu_30gpu",
+        "Apple M3 Max",
+        "apple9",
+        14,
+        30,
+        (36, 96),
+        ("pro14", "pro16"),
+        3,
+        "https://support.apple.com/en-euro/117736",
+    ),
+    (
+        "mac_m3_max_16cpu_40gpu",
+        "Apple M3 Max",
+        "apple9",
+        16,
+        40,
+        (48, 64, 128),
+        ("pro14", "pro16"),
+        2,
+        "https://support.apple.com/en-euro/117736",
+    ),
+    (
+        "mac_m3_ultra_28cpu_60gpu",
+        "Apple M3 Ultra",
+        "apple9",
+        28,
+        60,
+        (96, 256),
+        ("external",),
+        1,
+        "https://support.apple.com/en-us/122211",
+    ),
+    (
+        "mac_m3_ultra_32cpu_80gpu",
+        "Apple M3 Ultra",
+        "apple9",
+        32,
+        80,
+        (96, 256),
+        ("external",),
+        1,
+        "https://support.apple.com/en-us/122211",
     ),
     (
         "mac_m4_air_8gpu",
@@ -163,13 +349,35 @@ MAC_GPU_ROWS: tuple[
         "https://support.apple.com/en-us/121557",
     ),
     (
+        "mac_m4_pro14_10gpu",
+        "Apple M4",
+        "apple9",
+        10,
+        10,
+        (16, 24, 32),
+        ("pro14", "external"),
+        7,
+        "https://support.apple.com/en-ca/121552",
+    ),
+    (
+        "mac_m4_pro_16gpu",
+        "Apple M4 Pro",
+        "apple9",
+        12,
+        16,
+        (24, 48),
+        ("pro14", "pro16", "external"),
+        6,
+        "https://support.apple.com/en-us/121553",
+    ),
+    (
         "mac_m4_pro_20gpu",
         "Apple M4 Pro",
         "apple9",
         14,
         20,
         (24, 48),
-        ("pro14", "pro16"),
+        ("pro14", "pro16", "external"),
         7,
         "https://support.apple.com/en-us/121554",
     ),
@@ -180,7 +388,7 @@ MAC_GPU_ROWS: tuple[
         14,
         32,
         (36,),
-        ("pro14", "pro16"),
+        ("pro14", "pro16", "external"),
         3,
         "https://support.apple.com/en-us/121554",
     ),
@@ -191,7 +399,7 @@ MAC_GPU_ROWS: tuple[
         16,
         40,
         (48, 64, 128),
-        ("pro14", "pro16"),
+        ("pro14", "pro16", "external"),
         2,
         "https://support.apple.com/en-us/121554",
     ),
@@ -216,6 +424,61 @@ MAC_GPU_ROWS: tuple[
         ("air13_modern", "air15_modern"),
         6,
         "https://support.apple.com/en-mide/126320",
+    ),
+    (
+        "mac_m5_pro14_10gpu",
+        "Apple M5",
+        "apple10",
+        10,
+        10,
+        (16, 24, 32),
+        ("pro14",),
+        8,
+        "https://support.apple.com/en-ca/125405",
+    ),
+    (
+        "mac_m5_pro_15cpu_16gpu",
+        "Apple M5 Pro",
+        "apple10",
+        15,
+        16,
+        (24, 48),
+        ("pro14",),
+        10,
+        "https://support.apple.com/en-us/126318",
+    ),
+    (
+        "mac_m5_pro_18cpu_20gpu",
+        "Apple M5 Pro",
+        "apple10",
+        18,
+        20,
+        (24, 48, 64),
+        ("pro14", "pro16"),
+        7,
+        "https://support.apple.com/en-us/126318",
+    ),
+    (
+        "mac_m5_max_18cpu_32gpu",
+        "Apple M5 Max",
+        "apple10",
+        18,
+        32,
+        (36,),
+        ("pro14", "pro16"),
+        3,
+        "https://support.apple.com/en-us/126318",
+    ),
+    (
+        "mac_m5_max_18cpu_40gpu",
+        "Apple M5 Max",
+        "apple10",
+        18,
+        40,
+        (48, 64, 128),
+        ("pro14", "pro16"),
+        2,
+        "https://support.apple.com/en-us/126318",
     ),
     (
         "mac_intel_air_2020_iris_plus_dual",
@@ -375,7 +638,23 @@ def build_mac_gpu_candidate(
         f"ANGLE ({angle_vendor}, ANGLE Metal Renderer: {device_name}, "
         "Unspecified Version)"
     )
-    return {
+    chip_generation = next(
+        (
+            generation
+            for generation in ("M1", "M2", "M3", "M4", "M5")
+            if device_name.startswith(f"Apple {generation}")
+        ),
+        "Intel" if intel_cpu else "Legacy",
+    )
+    chip_tier = next(
+        (
+            tier
+            for tier in ("Ultra", "Max", "Pro")
+            if device_name.endswith(f" {tier}")
+        ),
+        "Base",
+    )
+    candidate = {
         "id": profile_id,
         "vendor": gpu_vendor,
         "driverVendor": driver_vendor,
@@ -383,13 +662,15 @@ def build_mac_gpu_candidate(
         "cpuArchitecture": "x86" if intel_cpu else "arm",
         "cpuBitness": "64",
         "macosPlatformVersion": (
-            "26.0.0" if profile_id.startswith("mac_m5_") else "15.5.0"
+            "15.5.0" if intel_cpu else "26.5.2"
         ),
         "tier": "integrated",
         "model": device_name,
         "deviceMarker": device_name,
         "cpuCores": cpu_cores,
         "gpuCores": gpu_cores,
+        "chipGeneration": chip_generation,
+        "chipTier": chip_tier,
         "gpuCoreUnit": "cores" if gpu_vendor == "apple" else (
             "execution-units" if gpu_vendor == "intel" else "compute-units"
         ),
@@ -403,11 +684,18 @@ def build_mac_gpu_candidate(
         },
         "webgpu": {
             "vendor": gpu_vendor,
-            "architecture": family,
+            "architecture": "metal-3" if gpu_vendor == "apple" else family,
             "device": device_name,
             "description": f"{device_name} Metal adapter",
         },
     }
+    candidate["graphicsVerified"] = is_verified_mac_graphics_candidate(candidate)
+    candidate["graphicsCapabilityId"] = (
+        f"chromium150-angle-metal-{family}"
+        if candidate["graphicsVerified"]
+        else None
+    )
+    return candidate
 
 
 MAC_GPU_CANDIDATES: tuple[dict[str, object], ...] = tuple(
@@ -418,13 +706,20 @@ MAC_GPU_CANDIDATES: tuple[dict[str, object], ...] = tuple(
 def get_mac_gpu_candidates(
     *,
     family: str | None = None,
+    generation: str | None = None,
     device_class: str | None = None,
+    verified_only: bool = True,
 ) -> tuple[dict[str, object], ...]:
     family_key = str(family or "").strip().lower()
+    generation_key = str(generation or "").strip().lower()
     device_key = str(device_class or "").strip().lower()
     output = []
     for candidate in MAC_GPU_CANDIDATES:
+        if verified_only and not bool(candidate.get("graphicsVerified", False)):
+            continue
         if family_key and str(candidate["architecture"]).lower() != family_key:
+            continue
+        if generation_key and str(candidate["chipGeneration"]).lower() != generation_key:
             continue
         classes = tuple(str(item).lower() for item in candidate["screenClasses"])
         if device_key and device_key not in classes:
@@ -437,7 +732,11 @@ def choose_mac_gpu_candidate(
     rng: random.Random,
     candidates: Sequence[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    choices = tuple(candidates) if candidates is not None else MAC_GPU_CANDIDATES
+    choices = (
+        tuple(candidates)
+        if candidates is not None
+        else get_mac_gpu_candidates(verified_only=True)
+    )
     if not choices:
         raise ValueError("no Mac GPU candidates available")
     weights = [int(candidate.get("weight", 1)) for candidate in choices]

@@ -37,6 +37,7 @@ class BuildPythonWithNativeLibrary(_build_py):
         "edge_sandbox_pool",
         "mac_edge_profile",
         "run_sandbox",
+        "windows_edge_profile",
     }
 
     def find_package_modules(self, package: str, package_dir: str):

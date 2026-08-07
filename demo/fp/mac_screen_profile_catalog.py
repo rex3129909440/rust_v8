@@ -273,7 +273,8 @@ _MAC_WORK_AREAS: dict[tuple[int, int], tuple[int, int]] = {
     (1470, 956): (863, 33),
     (1440, 932): (839, 33),
     (1710, 1107): (1014, 33),
-    (1512, 982): (889, 33),
+    # Chromium 150 / macOS 26.5.2 / M5 14-inch built-in display capture.
+    (1512, 982): (879, 33),
     (1800, 1169): (1067, 39),
     (1728, 1117): (1024, 33),
     (2056, 1329): (1227, 39),
@@ -282,6 +283,13 @@ _MAC_WORK_AREAS: dict[tuple[int, int], tuple[int, int]] = {
     (1536, 960): (867, 25),
     (1792, 1120): (1027, 25),
     (2048, 1280): (1187, 25),
+}
+
+
+# outerHeight is window-manager state and is not always identical to the
+# available work-area height.  Keep captured exceptions explicit.
+_MAC_OUTER_HEIGHTS: dict[tuple[int, int], int] = {
+    (1512, 982): 876,
 }
 
 
@@ -306,11 +314,15 @@ def build_mac_screen_profile(
         raise ValueError(
             f"no macOS work-area evidence for {width}x{height}"
         ) from error
-    browser_chrome_height = 88
+    # Chromium 150 captures measured 118 CSS px on the built-in DPR-2 display
+    # and 121 CSS px on the DPR-1 secondary display.
+    browser_chrome_height = 118 if dpr >= 1.5 else 121
     outer_width = width
-    outer_height = avail_height
+    outer_height = _MAC_OUTER_HEIGHTS.get((width, height), avail_height)
     inner_width = outer_width
     inner_height = max(360, outer_height - browser_chrome_height)
+    color_depth = 24 if device_class == "external" else 30
+    dynamic_range = "high" if device_class in {"pro14", "pro16"} else "standard"
     return {
         "id": profile_id,
         "deviceClass": device_class,
@@ -320,6 +332,8 @@ def build_mac_screen_profile(
         "weight": weight,
         "source": source,
         "tags": ("mac", "hidpi", "laptop" if portable else "desktop"),
+        "colorGamut": "p3",
+        "dynamicRange": dynamic_range,
         "window": {
             "innerWidth": inner_width,
             "innerHeight": inner_height,
@@ -333,11 +347,11 @@ def build_mac_screen_profile(
             "width": width,
             "height": height,
             "availWidth": width,
-            "availHeight": outer_height,
+            "availHeight": avail_height,
             "availLeft": 0,
             "availTop": avail_top,
-            "colorDepth": 24,
-            "pixelDepth": 24,
+            "colorDepth": color_depth,
+            "pixelDepth": color_depth,
             "orientation": {"type": "landscape-primary", "angle": 0},
         },
         "visualViewport": {
@@ -381,7 +395,17 @@ def choose_mac_screen_profile_for_gpu(
     include_external: bool = True,
 ) -> dict[str, object]:
     classes = tuple(str(item) for item in gpu_profile.get("screenClasses", ()))
-    candidates = get_mac_screen_profiles(classes, include_external=include_external)
+    # A Mac Studio/Ultra configuration has no built-in panel, so an external
+    # display is mandatory rather than an optional random addition.  Portable
+    # and iMac candidates still honor include_external=False and remain bound
+    # to their model's built-in display class.
+    external_only = bool(classes) and all(
+        item.strip().lower() == "external" for item in classes
+    )
+    candidates = get_mac_screen_profiles(
+        classes,
+        include_external=include_external or external_only,
+    )
     if not candidates:
         raise ValueError("no screen profile matches the selected Mac GPU")
     weights = [int(profile.get("weight", 1)) for profile in candidates]

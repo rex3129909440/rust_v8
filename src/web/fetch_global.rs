@@ -175,14 +175,19 @@ pub(crate) fn resolve_request_url(
     if let Ok(url) = url::Url::parse(input) {
         return Ok(url.to_string());
     }
+    let document_base = super::document_global::value(scope)
+        .map(|document| super::document::base_url(scope, document));
     let global = scope.get_current_context().global(scope);
-    let base = v8::String::new(scope, "location")
-        .and_then(|key| global.get(scope, key.into()))
-        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-        .and_then(|location| {
-            v8::String::new(scope, "href")
-                .and_then(|key| location.get(scope, key.into()))
-                .map(|value| crate::webidl::value_to_string(scope, value))
+    let base = document_base
+        .or_else(|| {
+            v8::String::new(scope, "location")
+                .and_then(|key| global.get(scope, key.into()))
+                .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+                .and_then(|location| {
+                    v8::String::new(scope, "href")
+                        .and_then(|key| location.get(scope, key.into()))
+                        .map(|value| crate::webidl::value_to_string(scope, value))
+                })
         })
         .unwrap_or_else(|| crate::page_init::base_url(scope));
     let base = url::Url::parse(&base)

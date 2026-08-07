@@ -9,8 +9,16 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+project_root_text = str(PROJECT_ROOT)
+if project_root_text not in sys.path:
+    sys.path.insert(0, project_root_text)
 
 try:
     from .edge_profile import (
@@ -21,6 +29,7 @@ try:
         FontMetricProfile,
         FontProfile,
         HardwareDevicesProfile,
+        KeyboardLayoutEntryProfile,
         LocalFontProfile,
         LocaleProfile,
         MediaDeviceProfile,
@@ -57,6 +66,7 @@ except ImportError:
         FontMetricProfile,
         FontProfile,
         HardwareDevicesProfile,
+        KeyboardLayoutEntryProfile,
         LocalFontProfile,
         LocaleProfile,
         MediaDeviceProfile,
@@ -85,14 +95,48 @@ except ImportError:
         XrProfile,
     )
 
+if (PROJECT_ROOT / "demo" / "fp" / "mac_chromium150_capture_catalog.py").is_file():
+    from demo.fp.mac_chromium150_capture_catalog import (  # type: ignore
+        CHROME_MAC_REMOTE_SPEECH_VOICES,
+        MAC_CHROMIUM150_AUDIO,
+        MAC_CHROMIUM150_CANVAS,
+        MAC_CHROMIUM150_KEYBOARD_LAYOUT,
+        MAC_CHROMIUM150_MEDIA_LISTS,
+        MAC_CHROMIUM150_RTC_AUDIO_CODECS,
+        MAC_CHROMIUM150_RTC_HEADER_EXTENSIONS,
+        MAC_CHROMIUM150_RTC_VIDEO_CODECS,
+        MAC_CHROMIUM150_WEBGL1_EXTENSIONS,
+        MAC_CHROMIUM150_WEBGL2_EXTENSIONS,
+        MAC_CHROMIUM150_WEBGPU_FEATURES,
+        MAC_CHROMIUM150_WEBGPU_LIMITS,
+        MACOS_LOCAL_SPEECH_VOICES,
+    )
+else:  # Installed wheel.
+    from edge_sandbox.country_profiles.fp.mac_chromium150_capture_catalog import (
+        CHROME_MAC_REMOTE_SPEECH_VOICES,
+        MAC_CHROMIUM150_AUDIO,
+        MAC_CHROMIUM150_CANVAS,
+        MAC_CHROMIUM150_KEYBOARD_LAYOUT,
+        MAC_CHROMIUM150_MEDIA_LISTS,
+        MAC_CHROMIUM150_RTC_AUDIO_CODECS,
+        MAC_CHROMIUM150_RTC_HEADER_EXTENSIONS,
+        MAC_CHROMIUM150_RTC_VIDEO_CODECS,
+        MAC_CHROMIUM150_WEBGL1_EXTENSIONS,
+        MAC_CHROMIUM150_WEBGL2_EXTENSIONS,
+        MAC_CHROMIUM150_WEBGPU_FEATURES,
+        MAC_CHROMIUM150_WEBGPU_LIMITS,
+        MACOS_LOCAL_SPEECH_VOICES,
+    )
+
 
 EDGE_150_FULL_VERSION = "150.0.0.0"
-APPLE_GPU_NAME = "Apple M2 Pro"
-APPLE_GPU_FAMILY = "apple8"
-MAC_PHYSICAL_MEMORY_GB = 32
-MAC_HARDWARE_CONCURRENCY = 10
+APPLE_GPU_NAME = "Apple M5 Pro"
+APPLE_GPU_FAMILY = "apple10"
+APPLE_WEBGPU_ARCHITECTURE = "metal-3"
+MAC_PHYSICAL_MEMORY_GB = 24
+MAC_HARDWARE_CONCURRENCY = 15
 # Chromium 147+ desktop builds expose the updated 2/4/8/16/32-GiB buckets.
-MAC_DEVICE_MEMORY_GB = 32.0
+MAC_DEVICE_MEMORY_GB = 16.0
 MAC_EDGE_150_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -156,7 +200,7 @@ def _windows_local_time_zone() -> str | None:
             )
     except (OSError, ImportError):
         return None
-    return _WINDOWS_TIME_ZONE_TO_IANA.get(windows_name)
+    return 'America/New_York'
 
 
 def local_time_zone() -> tuple[str, int]:
@@ -188,8 +232,12 @@ def _time_zone_offset(time_zone: str) -> int:
     return -int(offset.total_seconds() / 60) if offset is not None else 0
 
 
-# ETC2/EAC plus linear and sRGB ASTC formats exposed by Apple8/Metal.
+# BC/S3TC/BPTC, ETC2/EAC, and linear/sRGB ASTC formats exposed by an
+# Apple8 macOS device through Chromium 150's ANGLE Metal backend.
 APPLE_M2_COMPRESSED_TEXTURE_FORMATS = (
+    *range(0x83F0, 0x83F4),
+    *range(0x8C4C, 0x8C50),
+    *range(0x8E8C, 0x8E90),
     *range(0x9270, 0x927A),
     *range(0x93B0, 0x93BE),
     *range(0x93D0, 0x93DE),
@@ -255,13 +303,36 @@ MAC_CSS = CssProfile(
     input_button="display:inline-block;box-sizing:border-box;width:16px;height:21px;padding:1px 6px;border-width:2px",
     input_submit_reset="display:inline-block;box-sizing:border-box;width:42.671875px;height:23px;padding:1px 6px;border-width:2px",
     input_file="display:inline-block;box-sizing:content-box;width:253px;height:23px;padding:0;border-width:0",
-    input_text="display:inline-block;box-sizing:content-box;width:169px;height:15px;padding:1px 2px;border-width:2px",
+    input_text=(
+        "display:inline-block;box-sizing:content-box;width:139px;height:15.5px;"
+        "padding:1px 2px;border-width:2px;border-style:inset;"
+        "border-color:rgb(118, 118, 118);background-color:rgb(255, 255, 255)"
+    ),
 )
+
+
+def mac_css_for_device_pixel_ratio(device_pixel_ratio: float) -> CssProfile:
+    """Return Chromium 150 macOS control geometry for the display scale."""
+
+    if float(device_pixel_ratio) >= 1.5:
+        width, height = 139.0, 15.5
+    else:
+        width, height = 145.0, 15.0
+    return replace(
+        MAC_CSS,
+        input_text=(
+            "display:inline-block;box-sizing:content-box;"
+            f"width:{width:g}px;height:{height:g}px;"
+            "padding:1px 2px;border-width:2px;border-style:inset;"
+            "border-color:rgb(118, 118, 118);"
+            "background-color:rgb(255, 255, 255)"
+        ),
+    )
 
 
 def mac_edge_150_profile(
     *,
-    macos_platform_version: str = "15.5.0",
+    macos_platform_version: str = "26.5.2",
     locale: str = "en-US",
     time_zone: str | None = None,
     time_zone_offset_minutes: int | None = None,
@@ -269,9 +340,9 @@ def mac_edge_150_profile(
     device_memory_gb: float = MAC_DEVICE_MEMORY_GB,
     screen_width: int = 1512,
     screen_height: int = 982,
-    avail_height: int = 944,
-    inner_width: float = 1440.0,
-    inner_height: float = 820.0,
+    avail_height: int = 879,
+    inner_width: float = 0.0,
+    inner_height: float = 0.0,
     device_pixel_ratio: float = 2.0,
     font_families: tuple[str, ...] | None = None,
     local_fonts: tuple[LocalFontProfile, ...] | None = None,
@@ -284,8 +355,8 @@ def mac_edge_150_profile(
     Chromium's compatibility-facing ``navigator.platform`` remains
     ``"MacIntel"`` while UA-CH reports ``"arm"``. An Intel preset is not
     offered because this project does not have an evidence-backed Intel Mac
-    capture to regress against. The default hardware is a base 10-core,
-    32-GiB M2 Pro; Chromium exposes its device-memory bucket as 32 GiB. When no
+    capture to regress against. The default is the captured 15-core M5 Pro
+    profile with a 16-GiB Chromium device-memory value. When no
     time zone is supplied, the caller's host time zone is detected for every
     new profile instead of being frozen in the preset.
     """
@@ -341,8 +412,8 @@ def mac_edge_150_profile(
         "Unspecified Version)"
     )
 
-    return EdgeProfile(
-        id="macos-chrome-150-apple-m2-pro",
+    profile = EdgeProfile(
+        id="macos-chrome-150-apple-m5-pro",
         locale=LocaleProfile(
             locale=locale,
             time_zone=resolved_time_zone,
@@ -402,8 +473,8 @@ def mac_edge_150_profile(
             avail_height=avail_height,
             avail_left=0,
             avail_top=25,
-            color_depth=24,
-            pixel_depth=24,
+            color_depth=30,
+            pixel_depth=30,
             viewport_width=0,
             viewport_height=0,
             outer_width=0,
@@ -420,23 +491,14 @@ def mac_edge_150_profile(
             visual_viewport_scale=1.0,
         ),
         window=WindowProfile(
-            inner_width=inner_width,
-            inner_height=inner_height,
+            inner_width=0,
+            inner_height=0,
             outer_width=float(screen_width),
             outer_height=float(avail_height),
         ),
         canvas=CanvasProfile(
-            data_url_salt="macos-edge-150-apple-m2-metal",
-            text_width_scale=1.0,
-            actual_bounding_box_left=0.0,
-            actual_bounding_box_right_scale=1.0,
-            font_bounding_box_ascent=12.0,
-            font_bounding_box_descent=3.0,
-            actual_bounding_box_ascent=8.0,
-            actual_bounding_box_descent=2.0,
-            hanging_baseline=9.6,
-            alphabetic_baseline=0.0,
-            ideographic_baseline=-1.2,
+            data_url_salt="",
+            **MAC_CHROMIUM150_CANVAS,
         ),
         webgl=WebGlProfile(
             vendor="WebKit",
@@ -451,52 +513,16 @@ def mac_edge_150_profile(
             webgl2_shading_language_version=(
                 "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)"
             ),
-            webgl1_extensions=(
-                "ANGLE_instanced_arrays",
-                "EXT_blend_minmax",
-                "EXT_color_buffer_half_float",
-                "EXT_float_blend",
-                "EXT_frag_depth",
-                "EXT_shader_texture_lod",
-                "EXT_texture_filter_anisotropic",
-                "OES_element_index_uint",
-                "OES_fbo_render_mipmap",
-                "OES_standard_derivatives",
-                "OES_texture_float",
-                "OES_texture_float_linear",
-                "OES_texture_half_float",
-                "OES_texture_half_float_linear",
-                "OES_vertex_array_object",
-                "WEBGL_color_buffer_float",
-                "WEBGL_compressed_texture_astc",
-                "WEBGL_compressed_texture_etc",
-                "WEBGL_debug_renderer_info",
-                "WEBGL_depth_texture",
-                "WEBGL_draw_buffers",
-                "WEBGL_lose_context",
-                "WEBGL_multi_draw",
-            ),
-            webgl2_extensions=(
-                "EXT_color_buffer_float",
-                "EXT_color_buffer_half_float",
-                "EXT_float_blend",
-                "EXT_texture_filter_anisotropic",
-                "OES_draw_buffers_indexed",
-                "OES_texture_float_linear",
-                "WEBGL_compressed_texture_astc",
-                "WEBGL_compressed_texture_etc",
-                "WEBGL_debug_renderer_info",
-                "WEBGL_lose_context",
-                "WEBGL_multi_draw",
-            ),
+            webgl1_extensions=MAC_CHROMIUM150_WEBGL1_EXTENSIONS,
+            webgl2_extensions=MAC_CHROMIUM150_WEBGL2_EXTENSIONS,
             compressed_texture_formats=APPLE_M2_COMPRESSED_TEXTURE_FORMATS,
             max_texture_size=16_384,
             max_cube_map_texture_size=16_384,
             max_renderbuffer_size=16_384,
-            max_viewport_width=32_767,
-            max_viewport_height=32_767,
+            max_viewport_width=16_384,
+            max_viewport_height=16_384,
             max_vertex_attribs=16,
-            max_vertex_uniform_vectors=4_096,
+            max_vertex_uniform_vectors=1_024,
             max_varying_vectors=30,
             max_fragment_uniform_vectors=1_024,
             max_vertex_texture_image_units=16,
@@ -507,27 +533,27 @@ def mac_edge_150_profile(
             webgl2_max_array_texture_layers=2_048,
             webgl2_max_draw_buffers=8,
             webgl2_max_color_attachments=8,
-            webgl2_max_samples=4,
-            webgl2_max_vertex_uniform_components=16_384,
+            webgl2_max_samples=8,
+            webgl2_max_vertex_uniform_components=4_096,
             webgl2_max_fragment_uniform_components=4_096,
             webgl2_max_varying_components=120,
             webgl2_max_vertex_output_components=120,
             webgl2_max_fragment_input_components=120,
-            webgl2_max_vertex_uniform_blocks=12,
-            webgl2_max_fragment_uniform_blocks=12,
-            webgl2_max_combined_uniform_blocks=24,
-            webgl2_max_uniform_buffer_bindings=24,
-            webgl2_max_uniform_block_size=65_536,
-            webgl2_max_combined_vertex_uniform_components=212_992,
-            webgl2_max_combined_fragment_uniform_components=200_704,
+            webgl2_max_vertex_uniform_blocks=16,
+            webgl2_max_fragment_uniform_blocks=16,
+            webgl2_max_combined_uniform_blocks=32,
+            webgl2_max_uniform_buffer_bindings=32,
+            webgl2_max_uniform_block_size=16_384,
+            webgl2_max_combined_vertex_uniform_components=69_632,
+            webgl2_max_combined_fragment_uniform_components=69_632,
             webgl2_max_transform_feedback_separate_attribs=4,
-            webgl2_max_transform_feedback_interleaved_components=120,
+            webgl2_max_transform_feedback_interleaved_components=128,
             webgl2_max_transform_feedback_separate_components=4,
             webgl2_max_program_texel_offset=7,
             webgl2_max_elements_vertices=2_147_483_647,
             webgl2_max_elements_indices=2_147_483_647,
             webgl2_max_element_index=4_294_967_294,
-            webgl2_max_texture_lod_bias=2.0,
+            webgl2_max_texture_lod_bias=15.0,
             max_anisotropy=16.0,
             aliased_point_size_min=1.0,
             aliased_point_size_max=511.0,
@@ -549,18 +575,14 @@ def mac_edge_150_profile(
         ),
         webgpu=WebGpuProfile(
             vendor="apple",
-            architecture=APPLE_GPU_FAMILY,
+            architecture=APPLE_WEBGPU_ARCHITECTURE,
             device=APPLE_GPU_NAME,
             description=f"{APPLE_GPU_NAME} Metal adapter",
             developer_features=False,
             subgroup_min_size=32,
             subgroup_max_size=32,
             is_fallback_adapter=False,
-            features=(
-                "bgra8unorm-storage",
-                "texture-compression-astc",
-                "texture-compression-etc2",
-            ),
+            features=MAC_CHROMIUM150_WEBGPU_FEATURES,
             max_texture_dimension_1d=16_384,
             max_texture_dimension_2d=16_384,
             max_texture_dimension_3d=2_048,
@@ -568,41 +590,43 @@ def mac_edge_150_profile(
             max_bind_groups=4,
             max_bind_groups_plus_vertex_buffers=24,
             max_bindings_per_bind_group=1_000,
-            max_dynamic_uniform_buffers_per_pipeline_layout=8,
-            max_dynamic_storage_buffers_per_pipeline_layout=4,
-            max_sampled_textures_per_shader_stage=16,
+            max_dynamic_uniform_buffers_per_pipeline_layout=10,
+            max_dynamic_storage_buffers_per_pipeline_layout=8,
+            max_sampled_textures_per_shader_stage=48,
             max_samplers_per_shader_stage=16,
-            max_storage_buffers_per_shader_stage=8,
-            max_storage_textures_per_shader_stage=4,
+            max_storage_buffers_per_shader_stage=10,
+            max_storage_textures_per_shader_stage=8,
             max_uniform_buffers_per_shader_stage=12,
             max_uniform_buffer_binding_size=65_536,
-            max_storage_buffer_binding_size=134_217_728,
+            max_storage_buffer_binding_size=4_294_967_292,
             min_uniform_buffer_offset_alignment=256,
             min_storage_buffer_offset_alignment=256,
             max_vertex_buffers=8,
-            max_buffer_size=268_435_456,
-            max_vertex_attributes=16,
+            max_buffer_size=4_294_967_292,
+            max_vertex_attributes=30,
             max_vertex_buffer_array_stride=2_048,
-            max_inter_stage_shader_variables=16,
+            max_inter_stage_shader_variables=28,
             max_color_attachments=8,
-            max_color_attachment_bytes_per_sample=32,
+            max_color_attachment_bytes_per_sample=128,
             max_compute_workgroup_storage_size=32_768,
-            max_compute_invocations_per_workgroup=256,
-            max_compute_workgroup_size_x=256,
-            max_compute_workgroup_size_y=256,
+            max_compute_invocations_per_workgroup=1_024,
+            max_compute_workgroup_size_x=1_024,
+            max_compute_workgroup_size_y=1_024,
             max_compute_workgroup_size_z=64,
             max_compute_workgroups_per_dimension=65_535,
-            max_immediate_size=0,
-            max_storage_buffers_in_fragment_stage=8,
-            max_storage_textures_in_fragment_stage=4,
-            max_storage_buffers_in_vertex_stage=8,
-            max_storage_textures_in_vertex_stage=4,
+            max_immediate_size=int(
+                MAC_CHROMIUM150_WEBGPU_LIMITS["max_immediate_size"]
+            ),
+            max_storage_buffers_in_fragment_stage=10,
+            max_storage_textures_in_fragment_stage=8,
+            max_storage_buffers_in_vertex_stage=10,
+            max_storage_textures_in_vertex_stage=8,
         ),
         audio=WebAudioProfile(
-            sample_rate=48_000.0,
-            max_channel_count=2,
-            base_latency=128.0 / 48_000.0,
-            output_latency=256.0 / 48_000.0,
+            sample_rate=float(MAC_CHROMIUM150_AUDIO["sample_rate"]),
+            max_channel_count=int(MAC_CHROMIUM150_AUDIO["max_channel_count"]),
+            base_latency=float(MAC_CHROMIUM150_AUDIO["base_latency"]),
+            output_latency=float(MAC_CHROMIUM150_AUDIO["output_latency"]),
             noise_seed=0x4D41434F53,
         ),
         storage=StorageProfile(
@@ -634,7 +658,7 @@ def mac_edge_150_profile(
             local_fonts=resolved_local_fonts,
             metrics=resolved_font_metrics,
         ),
-        css=MAC_CSS,
+        css=mac_css_for_device_pixel_ratio(device_pixel_ratio),
         media=MediaProfile(
             devices=(
                 MediaDeviceProfile("default", "audioinput", "", "mac-audio"),
@@ -857,5 +881,119 @@ def mac_edge_150_profile(
             console_js_heap_size_limit=4_294_705_152,
             console_total_js_heap_size=13_061_022,
             console_used_js_heap_size=12_562_246,
+        ),
+    )
+    primary_language = locale.replace("_", "-").lower()
+    local_voice_rows = tuple(
+        row
+        for row in MACOS_LOCAL_SPEECH_VOICES
+        if primary_language.startswith("zh-") or " (" not in row[1]
+    )
+    voice_rows = local_voice_rows + tuple(CHROME_MAC_REMOTE_SPEECH_VOICES)
+    preferred_voice = {
+        "en-us": "Samantha",
+        "en-gb": "Daniel",
+        "zh-cn": "婷婷",
+        "zh-tw": "美嘉",
+        "yue-hk": "善怡",
+    }.get(primary_language)
+    default_index = next(
+        (
+            index
+            for index, row in enumerate(voice_rows)
+            if row[0].lower() == primary_language and row[1] == preferred_voice
+        ),
+        -1,
+    )
+    if default_index < 0:
+        default_index = next(
+            (
+                index
+                for index, row in enumerate(voice_rows)
+                if row[0].lower() == primary_language
+            ),
+            0,
+        )
+    ordered_voice_rows = (
+        (voice_rows[default_index],)
+        + voice_rows[:default_index]
+        + voice_rows[default_index + 1 :]
+    )
+    captured_media = MAC_CHROMIUM150_MEDIA_LISTS
+    return replace(
+        profile,
+        speech=SpeechProfile(
+            voices=tuple(
+                SpeechVoiceProfile(
+                    voice_uri=voice_uri,
+                    name=name,
+                    lang=language,
+                    local_service=local_service,
+                    is_default=index == 0,
+                )
+                for index, (
+                    language,
+                    name,
+                    voice_uri,
+                    local_service,
+                    _captured_default,
+                ) in enumerate(ordered_voice_rows)
+            )
+        ),
+        media=replace(
+            profile.media,
+            devices=(
+                MediaDeviceProfile("", "audioinput", "", ""),
+                MediaDeviceProfile("", "videoinput", "", ""),
+                MediaDeviceProfile("", "audiooutput", "", ""),
+            ),
+            supported_constraints=captured_media["supported_constraints"],
+            can_play_probably_types=captured_media["can_play_probably_types"],
+            can_play_maybe_types=captured_media["can_play_maybe_types"],
+            media_source_types=captured_media["media_source_types"],
+            media_recorder_types=captured_media["media_recorder_types"],
+            decoding_supported_types=captured_media["decoding_supported_types"],
+            decoding_smooth_types=captured_media["decoding_smooth_types"],
+            decoding_power_efficient_types=(
+                captured_media["decoding_power_efficient_types"]
+            ),
+            encoding_supported_types=captured_media["encoding_supported_types"],
+            encoding_smooth_types=captured_media["encoding_smooth_types"],
+            encoding_power_efficient_types=(
+                captured_media["encoding_power_efficient_types"]
+            ),
+            image_decoder_types=captured_media["image_decoder_types"],
+            audio_decoder_codecs=captured_media["audio_decoder_codecs"],
+            audio_encoder_codecs=captured_media["audio_encoder_codecs"],
+            video_decoder_codecs=captured_media["video_decoder_codecs"],
+            video_encoder_codecs=captured_media["video_encoder_codecs"],
+            rtc_audio_codecs=tuple(
+                RtcCodecProfile(mime, rate, channels, fmtp)
+                for mime, rate, channels, fmtp in MAC_CHROMIUM150_RTC_AUDIO_CODECS
+            ),
+            rtc_video_codecs=tuple(
+                RtcCodecProfile(mime, rate, channels, fmtp)
+                for mime, rate, channels, fmtp in MAC_CHROMIUM150_RTC_VIDEO_CODECS
+            ),
+            rtc_header_extensions=tuple(
+                RtcHeaderExtensionProfile(kind, uri)
+                for kind, uri in MAC_CHROMIUM150_RTC_HEADER_EXTENSIONS
+            ),
+        ),
+        permissions=replace(
+            profile.permissions,
+            window_management="prompt",
+        ),
+        hardware_devices=replace(
+            profile.hardware_devices,
+            keyboard_layout=tuple(
+                KeyboardLayoutEntryProfile(code, value)
+                for code, value in MAC_CHROMIUM150_KEYBOARD_LAYOUT
+            ),
+        ),
+        memory=replace(
+            profile.memory,
+            performance_js_heap_size_limit=4_395_630_592,
+            console_js_heap_size_limit=4_395_630_592,
         ),
     )

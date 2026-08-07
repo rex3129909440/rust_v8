@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
 #[derive(Clone)]
-pub(crate) struct BaseRecord {
-    pub(crate) href: String,
-    pub(crate) target: String,
-}
+pub(crate) struct BaseRecord;
 #[derive(Default)]
 pub(crate) struct HtmlBaseElementStore {
     pub(crate) constructor: crate::webidl::RealmConstructor,
@@ -64,13 +61,7 @@ pub(crate) fn create<'s>(
         .get_slot_mut::<HtmlBaseElementStore>()
         .ok_or_else(|| "HTMLBaseElement state was not prepared".to_owned())?
         .records
-        .insert(
-            o.get_identity_hash().get(),
-            BaseRecord {
-                href: "about:blank".to_owned(),
-                target: String::new(),
-            },
-        );
+        .insert(o.get_identity_hash().get(), BaseRecord);
     Ok(o)
 }
 pub(crate) fn illegal_constructor(
@@ -91,8 +82,8 @@ pub(crate) fn get_href(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
-        if let Some(v) = v8::String::new(s, &x.href) {
+    if record(s, a.this()).is_some() {
+        if let Some(v) = v8::String::new(s, &resolved_href(s, a.this())) {
             r.set(v.into())
         }
     } else {
@@ -105,15 +96,8 @@ pub(crate) fn set_href(
     _: v8::ReturnValue<'_>,
 ) {
     let v = crate::webidl::value_to_string(s, a.get(0));
-    if let Some(x) = s
-        .get_slot_mut::<HtmlBaseElementStore>()
-        .and_then(|q| q.records.get_mut(&a.this().get_identity_hash().get()))
-    {
-        x.href = if v.is_empty() {
-            "about:blank".to_owned()
-        } else {
-            v
-        }
+    if record(s, a.this()).is_some() {
+        super::element::set_reflected_string(s, a.this(), "href", v);
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }
@@ -123,8 +107,9 @@ pub(crate) fn get_target(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
-        if let Some(v) = v8::String::new(s, &x.target) {
+    if record(s, a.this()).is_some() {
+        let target = super::element::reflected_string(s, a.this(), "target").unwrap_or_default();
+        if let Some(v) = v8::String::new(s, &target) {
             r.set(v.into())
         }
     } else {
@@ -137,12 +122,26 @@ pub(crate) fn set_target(
     _: v8::ReturnValue<'_>,
 ) {
     let v = crate::webidl::value_to_string(s, a.get(0));
-    if let Some(x) = s
-        .get_slot_mut::<HtmlBaseElementStore>()
-        .and_then(|q| q.records.get_mut(&a.this().get_identity_hash().get()))
-    {
-        x.target = v
+    if record(s, a.this()).is_some() {
+        super::element::set_reflected_string(s, a.this(), "target", v);
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }
+}
+
+pub(crate) fn resolved_href(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> String {
+    if record(scope, object).is_none() {
+        return String::new();
+    }
+    let raw = super::element::attribute_value(scope, object, "href").unwrap_or_default();
+    let fallback = super::node::owner_document(scope, object)
+        .map(|document| super::document::fallback_base_url(scope, document))
+        .unwrap_or_else(|| crate::page_init::base_url(scope));
+    ::url::Url::parse(&raw)
+        .or_else(|_| ::url::Url::parse(&fallback).and_then(|base| base.join(&raw)))
+        .map(|url| url.as_str().to_owned())
+        .unwrap_or(raw)
 }

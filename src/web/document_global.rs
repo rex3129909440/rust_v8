@@ -83,6 +83,7 @@ pub(crate) fn create_document<'s>(
     }
     super::document::set_string_value(scope, document, "URL", url);
     super::document::set_string_value(scope, document, "documentURI", url);
+    super::document::set_string_value(scope, document, "fallbackBaseURL", url);
     super::document::set_string_value(scope, document, "compatMode", "CSS1Compat");
     let global = scope.get_current_context().global(scope);
     super::document::set_object_value(scope, document, "defaultView", global);

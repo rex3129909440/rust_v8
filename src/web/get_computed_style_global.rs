@@ -79,9 +79,9 @@ pub(crate) fn computed_declarations(
     let mut output = String::new();
     for mut property in resolved.drain(..) {
         if let Some(value) =
-            super::css_calculation::computed_system_color(&property.name, &property.source)
+            super::css_calculation::computed_color(&property.name, &property.source)
         {
-            property.value = value.to_owned();
+            property.value = value;
         } else if super::css_calculation::is_length_property(&property.name)
             && super::css_calculation::needs_computed_length_resolution(
                 &property.name,
@@ -148,7 +148,68 @@ fn cascaded_properties(
         }
     }
     merge_properties(&mut resolved, inline_properties(scope, element));
+    resolve_computed_color(scope, element, &mut resolved);
     resolved
+}
+
+fn resolve_computed_color(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    resolved: &mut Vec<super::css_style_declaration::CssProperty>,
+) {
+    let color_index = resolved
+        .iter()
+        .position(|property| property.name == "color");
+    let inherited = color_index.is_none_or(|index| {
+        matches!(
+            resolved[index].source.trim().to_ascii_lowercase().as_str(),
+            "inherit" | "unset" | "currentcolor"
+        )
+    });
+    let initial = color_index.is_some_and(|index| {
+        matches!(
+            resolved[index].source.trim().to_ascii_lowercase().as_str(),
+            "initial" | "revert" | "revert-layer"
+        )
+    });
+    if !inherited && !initial {
+        return;
+    }
+
+    let inherited_property = inherited
+        .then(|| nearest_element_parent(scope, element))
+        .flatten()
+        .and_then(|parent| {
+            cascaded_properties(scope, parent)
+                .into_iter()
+                .find(|property| property.name == "color")
+        });
+    let replacement =
+        inherited_property.unwrap_or_else(|| super::css_style_declaration::CssProperty {
+            name: "color".to_owned(),
+            value: "rgb(0, 0, 0)".to_owned(),
+            priority: String::new(),
+            source: "rgb(0, 0, 0)".to_owned(),
+        });
+    if let Some(index) = color_index {
+        resolved[index] = replacement;
+    } else {
+        resolved.push(replacement);
+    }
+}
+
+fn nearest_element_parent<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    element: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let mut parent = super::node::parent(scope, element);
+    while let Some(candidate) = parent {
+        if super::element::record(scope, candidate).is_some() {
+            return Some(candidate);
+        }
+        parent = super::node::parent(scope, candidate);
+    }
+    None
 }
 
 pub(crate) fn cascaded_property_source(

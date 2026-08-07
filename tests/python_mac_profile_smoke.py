@@ -15,6 +15,7 @@ from mac_edge_profile import (  # noqa: E402
     APPLE_GPU_FAMILY,
     APPLE_GPU_NAME,
     APPLE_M2_COMPRESSED_TEXTURE_FORMATS,
+    APPLE_WEBGPU_ARCHITECTURE,
     MAC_DEVICE_MEMORY_GB,
     MAC_EDGE_150_USER_AGENT,
     MAC_HARDWARE_CONCURRENCY,
@@ -280,13 +281,13 @@ class MacEdgeProfileTests(unittest.TestCase):
             "function getTimezoneOffset() { [native code] }",
         )
 
-    def test_default_profile_uses_host_timezone_and_real_m2_pro_values(self) -> None:
+    def test_default_profile_uses_host_timezone_and_real_m5_pro_values(self) -> None:
         expected_time_zone, expected_offset = local_time_zone()
         profile = mac_edge_150_profile()
 
         self.assertEqual(profile.locale.time_zone, expected_time_zone)
         self.assertEqual(profile.locale.time_zone_offset_minutes, expected_offset)
-        self.assertEqual(MAC_PHYSICAL_MEMORY_GB, 32)
+        self.assertEqual(MAC_PHYSICAL_MEMORY_GB, 24)
         self.assertEqual(
             profile.navigator.hardware_concurrency,
             MAC_HARDWARE_CONCURRENCY,
@@ -391,7 +392,7 @@ class MacEdgeProfileTests(unittest.TestCase):
             )
         finally:
             sandbox.close()
-        self.assertEqual(value, "177|21|Arial|0.965|||32|32|false")
+        self.assertEqual(value, "147|21.5|Arial|0.965|||32|32|false")
 
     def test_default_windows_profile_is_not_replaced_by_the_mac_preset(self) -> None:
         sandbox = EdgeSandbox(library=LIBRARY)
@@ -457,13 +458,13 @@ class MacEdgeProfileTests(unittest.TestCase):
             [
                 "MacIntel",
                 "en-US",
-                "10",
+                "15",
                 str(int(MAC_DEVICE_MEMORY_GB)),
                 "0",
                 "macOS",
                 "arm",
                 "64",
-                "15.5.0",
+                "26.5.2",
                 "150.0.0.0",
                 "false",
                 "Desktop",
@@ -474,12 +475,12 @@ class MacEdgeProfileTests(unittest.TestCase):
             [
                 "1512",
                 "982",
-                "944",
-                "1440",
-                "820",
+                "879",
+                "0",
+                "0",
                 "2",
                 "Google Inc. (Apple)",
-                "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
+                "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
                 "48000",
                 "true",
             ],
@@ -495,7 +496,8 @@ class MacEdgeProfileTests(unittest.TestCase):
             [field.name for field in fields(profile.webgpu) if getattr(profile.webgpu, field.name) is None],
             [],
         )
-        self.assertEqual(profile.webgpu.architecture, APPLE_GPU_FAMILY)
+        self.assertEqual(APPLE_GPU_FAMILY, "apple10")
+        self.assertEqual(profile.webgpu.architecture, APPLE_WEBGPU_ARCHITECTURE)
         self.assertEqual(profile.webgpu.device, APPLE_GPU_NAME)
         self.assertEqual(
             profile.webgl.compressed_texture_formats,
@@ -514,8 +516,8 @@ class MacEdgeProfileTests(unittest.TestCase):
         expected = "~".join(
             (
                 "Google Inc. (Apple)",
-                "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
-                "4",
+                "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)",
+                "8",
                 "1,511",
                 str(len(APPLE_M2_COMPRESSED_TEXTURE_FORMATS)),
                 "true",
@@ -525,7 +527,7 @@ class MacEdgeProfileTests(unittest.TestCase):
                 "127",
                 "23",
                 "apple",
-                "apple8",
+                "metal-3",
                 "",
                 "",
                 "true",
@@ -545,7 +547,12 @@ class MacEdgeProfileTests(unittest.TestCase):
             value = sandbox.evaluate(MAC_DEVICE_PROBE)
         finally:
             sandbox.close()
-        self.assertEqual(value, "Samantha,Alex|true|true|0|0|0|0|0")
+        values = value.split("|")
+        voices = values[0].split(",")
+        self.assertEqual(voices[0], "Samantha")
+        self.assertIn("Daniel", voices)
+        self.assertIn("婷婷", voices)
+        self.assertEqual(values[1:], ["true", "true", "0", "0", "0", "0", "0"])
 
     def test_non_gpu_os_sensitive_groups_do_not_fall_back(self) -> None:
         profile = mac_edge_150_profile()
@@ -588,7 +595,7 @@ class MacEdgeProfileTests(unittest.TestCase):
             value = sandbox.evaluate(WEB_CODECS_PROBE)
         finally:
             sandbox.close()
-        self.assertEqual(value, "true|true|true|true|false")
+        self.assertEqual(value, "true|true|true|false|false")
 
     def test_user_font_configuration_replaces_mac_defaults_in_all_realms(self) -> None:
         profile = mac_edge_150_profile(

@@ -8,6 +8,13 @@ try:  # Installed wheel layout.
         get_random_fp,
         get_random_fp_details,
     )
+    from . import country_profiles as _country_profiles
+
+    # Loading the composer submodule makes Python assign that module to the
+    # parent package's ``get_random_fp`` attribute.  Restore the documented
+    # function exports after the installed-layout import completes.
+    _country_profiles.get_random_fp = get_random_fp
+    _country_profiles.get_random_fp_details = get_random_fp_details
 except ImportError:  # Source checkout layout.
     from demo.get_random_fp import (
         RandomFingerprint,

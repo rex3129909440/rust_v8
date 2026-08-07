@@ -24,3 +24,5 @@ jobs:
       - run: cargo build --lib --locked
       - run: python tests/python_pool_smoke.py
       - run: python tests/python_mac_profile_smoke.py
+      - run: python tests/python_mac_graphics_capability_catalog.py
+      - run: python tests/python_windows_profile_catalog.py

@@ -162,6 +162,49 @@ fn zero_sized_window_viewport_is_independent_from_physical_screen() {
 }
 
 #[test]
+fn zero_sized_iframe_body_auto_height_matches_edge_layout() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.screen.viewport_width = 0.0;
+    options.fingerprint.screen.viewport_height = 0.0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("zero-sized iframe body layout");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const measure = (displayNone) => {
+                const frame = document.createElement("iframe");
+                frame.style.cssText = displayNone
+                  ? "display:none"
+                  : "width:0;height:0;border:0";
+                frame.srcdoc = "<!DOCTYPE html><html><head></head><body><div style='height:23px'></div></body></html>";
+                document.body.appendChild(frame);
+                const child = frame.contentWindow;
+                const html = frame.contentDocument.documentElement;
+                const body = frame.contentDocument.body;
+                return [
+                  child.innerWidth,
+                  child.innerHeight,
+                  html.clientWidth,
+                  html.clientHeight,
+                  body.clientWidth,
+                  body.clientHeight,
+                  html.scrollWidth,
+                  html.scrollHeight,
+                  body.scrollWidth,
+                  body.scrollHeight
+                ].join(",");
+              };
+              return `${measure(false)};${measure(true)}`;
+            })()
+            "#,
+        ),
+        "0,0,0,0,0,23,0,0,0,23;0,0,0,0,0,0,0,0,0,0"
+    );
+}
+
+#[test]
 fn match_media_reads_viewport_screen_dpr_and_color_from_their_correct_surfaces() {
     let mut options = EdgeRuntimeOptions::default();
     options.fingerprint.screen.width = 1512;
