@@ -87,6 +87,58 @@ fn edge_150_css_own_shape_and_all_element_reference_reflections_are_exact() {
 }
 
 #[test]
+fn cssom_get_property_value_rejects_unknown_names_like_edge() {
+    let source = r#"
+      (() => {
+        const element = document.createElement("div");
+        element.style.setProperty("color", "red");
+        element.style.setProperty("--CaseSensitive", "ok");
+        const computed = getComputedStyle(element);
+        return [
+          element.style.getPropertyValue("color"),
+          element.style.getPropertyValue("COLOR"),
+          element.style.getPropertyValue(" color "),
+          element.style.getPropertyValue("backgroundColor"),
+          element.style.getPropertyValue("ActiveBorder"),
+          computed.getPropertyValue("ActiveBorder"),
+          element.style.getPropertyValue("--CaseSensitive"),
+          element.style.getPropertyValue("--casesensitive")
+        ].join("|");
+      })()
+    "#;
+    let expected = "red|red|||||ok|";
+    let mut direct = EdgeRuntime::new().expect("direct CSSOM runtime");
+    assert_eq!(text(&mut direct, source), expected);
+    let mut traced = EdgeRuntime::new().expect("traced CSSOM runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn css_system_colors_serialize_and_compute_like_edge() {
+    let source = r#"
+      (() => {
+        const element = document.createElement("div");
+        document.body.appendChild(element);
+        element.style.color = "ActiveBorder";
+        element.style.backgroundColor = "Canvas";
+        return [
+          element.style.getPropertyValue("color"),
+          element.style.getPropertyValue("background-color"),
+          getComputedStyle(element).getPropertyValue("color"),
+          getComputedStyle(element).getPropertyValue("background-color")
+        ].join("|");
+      })()
+    "#;
+    let expected = "activeborder|canvas|rgb(0, 0, 0)|rgb(255, 255, 255)";
+    let mut direct = EdgeRuntime::new().expect("direct system-color runtime");
+    assert_eq!(text(&mut direct, source), expected);
+    let mut traced = EdgeRuntime::new().expect("traced system-color runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
 fn node_tree_mutations_fragments_cloning_and_relationships_work() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     let result = text(

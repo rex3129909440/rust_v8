@@ -314,15 +314,19 @@ def find_native_artifacts(
         return resolved_library, None
 
     library_name = _artifact_name()
-    packaged_library = Path(__file__).resolve().parent / "_native" / library_name
-    if packaged_library.is_file():
-        return packaged_library, None
-
+    # In a source checkout, prefer the freshly built artifact over the staged
+    # wheel payload so local regression tests cannot silently load a stale DLL.
+    # Installed wheels do not contain PROJECT_ROOT/target and therefore still
+    # resolve to their packaged native library below.
     for profile in ("release", "debug"):
         profile_dir = PROJECT_ROOT / "target" / profile
         candidate_library = profile_dir / library_name
         if candidate_library.is_file():
             return candidate_library, None
+
+    packaged_library = Path(__file__).resolve().parent / "_native" / library_name
+    if packaged_library.is_file():
+        return packaged_library, None
 
     raise FileNotFoundError("未找到 edge-sandbox 动态库；请先构建项目")
 

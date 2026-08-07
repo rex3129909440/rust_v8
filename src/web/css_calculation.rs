@@ -119,6 +119,11 @@ pub(crate) fn is_root_numeric_math(value: &str) -> bool {
 
 pub(crate) fn normalize_property_value(name: &str, value: &str) -> Option<String> {
     let value = value.trim();
+    if is_color_property(name) {
+        if let Some(value) = canonical_system_color(value) {
+            return Some(value.to_owned());
+        }
+    }
     if value.is_empty() || name.starts_with("--") || !contains_math(value) {
         return Some(value.to_owned());
     }
@@ -137,6 +142,83 @@ pub(crate) fn normalize_property_value(name: &str, value: &str) -> Option<String
     }
     normalize_embedded_math(value)
 }
+
+fn is_color_property(name: &str) -> bool {
+    name == "color"
+        || name.ends_with("-color")
+        || matches!(
+            name,
+            "fill" | "stroke" | "flood-color" | "lighting-color" | "stop-color"
+        )
+}
+
+fn canonical_system_color(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    SYSTEM_COLORS
+        .iter()
+        .find(|(name, _)| value.eq_ignore_ascii_case(name))
+        .map(|(name, _)| *name)
+}
+
+pub(crate) fn computed_system_color(name: &str, value: &str) -> Option<&'static str> {
+    if !is_color_property(name) {
+        return None;
+    }
+    let value = canonical_system_color(value)?;
+    SYSTEM_COLORS
+        .iter()
+        .find(|(name, _)| *name == value)
+        .map(|(_, computed)| *computed)
+}
+
+// Microsoft Edge/Chromium resolves CSS system colors to used RGB values in
+// getComputedStyle().  The deprecated CSS2 names remain accepted for web
+// compatibility; their specified serialization is the lowercase keyword.
+// These values are the normal (non-forced-colors) Edge palette.
+const SYSTEM_COLORS: &[(&str, &str)] = &[
+    ("activeborder", "rgb(0, 0, 0)"),
+    ("activecaption", "rgb(255, 255, 255)"),
+    ("activetext", "rgb(0, 102, 204)"),
+    ("appworkspace", "rgb(255, 255, 255)"),
+    ("background", "rgb(255, 255, 255)"),
+    ("buttonborder", "rgb(0, 0, 0)"),
+    ("buttonface", "rgb(240, 240, 240)"),
+    ("buttonhighlight", "rgb(240, 240, 240)"),
+    ("buttonshadow", "rgb(240, 240, 240)"),
+    ("buttontext", "rgb(0, 0, 0)"),
+    ("canvas", "rgb(255, 255, 255)"),
+    ("canvastext", "rgb(0, 0, 0)"),
+    ("captiontext", "rgb(0, 0, 0)"),
+    ("field", "rgb(255, 255, 255)"),
+    ("fieldtext", "rgb(0, 0, 0)"),
+    ("graytext", "rgb(109, 109, 109)"),
+    ("highlight", "rgb(0, 120, 215)"),
+    ("highlighttext", "rgb(255, 255, 255)"),
+    ("inactiveborder", "rgb(0, 0, 0)"),
+    ("inactivecaption", "rgb(255, 255, 255)"),
+    ("inactivecaptiontext", "rgb(128, 128, 128)"),
+    ("infobackground", "rgb(255, 255, 255)"),
+    ("infotext", "rgb(0, 0, 0)"),
+    ("linktext", "rgb(0, 102, 204)"),
+    ("mark", "rgb(255, 255, 0)"),
+    ("marktext", "rgb(0, 0, 0)"),
+    ("menu", "rgb(255, 255, 255)"),
+    ("menutext", "rgb(0, 0, 0)"),
+    ("scrollbar", "rgb(255, 255, 255)"),
+    ("selecteditem", "rgb(25, 103, 210)"),
+    ("selecteditemtext", "rgb(255, 255, 255)"),
+    ("threeddarkshadow", "rgb(0, 0, 0)"),
+    ("threedface", "rgb(240, 240, 240)"),
+    ("threedhighlight", "rgb(0, 0, 0)"),
+    ("threedlightshadow", "rgb(0, 0, 0)"),
+    ("threedshadow", "rgb(0, 0, 0)"),
+    ("visitedtext", "rgb(0, 102, 204)"),
+    ("window", "rgb(255, 255, 255)"),
+    ("windowframe", "rgb(0, 0, 0)"),
+    ("windowtext", "rgb(0, 0, 0)"),
+    ("accentcolor", "rgb(0, 117, 255)"),
+    ("accentcolortext", "rgb(255, 255, 255)"),
+];
 
 fn normalize_node(node: &Node) -> String {
     if let Ok(result) = evaluate(&node, EvaluationContext::constants_only()) {

@@ -96,6 +96,23 @@ fn normalize_name(name: &str) -> String {
     }
 }
 
+// CSSOM property-name lookup is deliberately stricter than declaration
+// parsing.  Edge treats ASCII case as insignificant for ordinary CSS
+// property names, but it does not trim the argument and it keeps custom
+// property names case-sensitive.  In particular, an unsupported token such
+// as `ActiveBorder` is a color *value*, not a property name, so querying it
+// must return the empty string even if malformed input reached the backing
+// declaration record.
+fn queried_property_name(name: &str) -> Option<String> {
+    if name.trim() != name {
+        return None;
+    }
+    if name.starts_with("--") {
+        return (name.len() > 2).then(|| name.to_owned());
+    }
+    css_declaration_name(name)
+}
+
 pub(crate) fn parse_declarations(text: &str) -> Vec<CssProperty> {
     let mut properties = Vec::<CssProperty>::new();
     for declaration in text.split(';') {
@@ -255,7 +272,7 @@ pub(crate) fn property_value(
     object: v8::Local<'_, v8::Object>,
     name: &str,
 ) -> Option<String> {
-    let name = normalize_name(name);
+    let name = queried_property_name(name)?;
     record(scope, object).map(|record| {
         record
             .properties
@@ -746,12 +763,13 @@ fn get_property_value(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let name = normalize_name(&crate::webidl::value_to_string(scope, arguments.get(0)));
+    let requested_name = crate::webidl::value_to_string(scope, arguments.get(0));
     let Some(record) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let value = find_property(&record, &name)
+    let value = queried_property_name(&requested_name)
+        .and_then(|name| find_property(&record, &name))
         .map(|property| property.value)
         .unwrap_or_default();
     if let Some(value) = v8::String::new(scope, &value) {
@@ -764,12 +782,13 @@ fn get_property_priority(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let name = normalize_name(&crate::webidl::value_to_string(scope, arguments.get(0)));
+    let requested_name = crate::webidl::value_to_string(scope, arguments.get(0));
     let Some(record) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let value = find_property(&record, &name)
+    let value = queried_property_name(&requested_name)
+        .and_then(|name| find_property(&record, &name))
         .map(|property| property.priority)
         .unwrap_or_default();
     if let Some(value) = v8::String::new(scope, &value) {
@@ -857,13 +876,19 @@ fn remove_property(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let name = normalize_name(&crate::webidl::value_to_string(scope, arguments.get(0)));
+    let requested_name = crate::webidl::value_to_string(scope, arguments.get(0));
+    let name = queried_property_name(&requested_name);
     let previous = record(scope, arguments.this())
-        .and_then(|record| find_property(&record, &name))
+        .and_then(|record| {
+            name.as_deref()
+                .and_then(|name| find_property(&record, name))
+        })
         .map(|property| property.value)
         .unwrap_or_default();
     mutate(scope, arguments.this(), |properties| {
-        properties.retain(|property| property.name != name)
+        if let Some(name) = &name {
+            properties.retain(|property| property.name != *name);
+        }
     });
     if let Some(previous) = v8::String::new(scope, &previous) {
         result.set(previous.into());

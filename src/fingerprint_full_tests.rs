@@ -149,13 +149,51 @@ fn zero_sized_window_viewport_is_independent_from_physical_screen() {
                 visualViewport.width,
                 visualViewport.height,
                 frame.contentWindow.innerWidth,
-                frame.contentWindow.innerHeight
+                frame.contentWindow.innerHeight,
+                typeof matchMedia("(device-height: 720px)").matches,
+                matchMedia("(device-height: 720px)").matches,
+                matchMedia("(aspect-ratio: 16/9)").matches
               ].join("|");
             })()
             "#,
         ),
-        "1280|720|0|0|0|0|0|0|0|0"
+        "1280|720|0|0|0|0|0|0|0|0|boolean|true|true"
     );
+}
+
+#[test]
+fn match_media_reads_viewport_screen_dpr_and_color_from_their_correct_surfaces() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.screen.width = 1512;
+    options.fingerprint.screen.height = 982;
+    options.fingerprint.screen.viewport_width = 1440.0;
+    options.fingerprint.screen.viewport_height = 900.0;
+    options.fingerprint.screen.device_pixel_ratio = 2.0;
+    options.fingerprint.screen.color_depth = 30;
+    options.fingerprint.screen.pixel_depth = 30;
+    let source = r#"
+      (() => {
+        const list = matchMedia("(0.250 <= aspect-ratio <= 4.000)");
+        return [
+          list instanceof MediaQueryList,
+          typeof list.matches,
+          list.matches,
+          matchMedia("(aspect-ratio: 8/5)").matches,
+          matchMedia("(device-width: 1512px)").matches,
+          matchMedia("(device-height: 982px)").matches,
+          matchMedia("(device-aspect-ratio: 1512/982)").matches,
+          matchMedia("(resolution: 2dppx)").matches,
+          matchMedia("(color: 10)").matches,
+          matchMedia("(device-height: 900px)").matches
+        ].join("|");
+      })()
+    "#;
+    let expected = "true|boolean|true|true|true|true|true|true|true|false";
+    let mut direct = EdgeRuntime::with_options(options.clone()).expect("direct media runtime");
+    assert_eq!(text(&mut direct, source), expected);
+    let mut traced = EdgeRuntime::with_options(options).expect("traced media runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    assert_eq!(text(&mut traced, source), expected);
 }
 
 #[test]

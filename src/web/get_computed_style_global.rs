@@ -78,7 +78,11 @@ pub(crate) fn computed_declarations(
     let mut resolved = cascaded_properties(scope, element);
     let mut output = String::new();
     for mut property in resolved.drain(..) {
-        if super::css_calculation::is_length_property(&property.name)
+        if let Some(value) =
+            super::css_calculation::computed_system_color(&property.name, &property.source)
+        {
+            property.value = value.to_owned();
+        } else if super::css_calculation::is_length_property(&property.name)
             && super::css_calculation::needs_computed_length_resolution(
                 &property.name,
                 &property.source,

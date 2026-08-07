@@ -76,7 +76,10 @@ pub(crate) fn create<'s>(
     media: String,
     viewport_width: f64,
     viewport_height: f64,
+    device_width: f64,
+    device_height: f64,
     device_pixel_ratio: f64,
+    color_depth: u32,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
@@ -88,9 +91,14 @@ pub(crate) fn create<'s>(
     let preferences = crate::fingerprint::edge(scope).media_preferences.clone();
     let matches = evaluate_query(
         &media,
-        viewport_width,
-        viewport_height,
-        device_pixel_ratio,
+        MediaEnvironment {
+            viewport_width,
+            viewport_height,
+            device_width,
+            device_height,
+            device_pixel_ratio,
+            color_depth,
+        },
         &preferences,
     );
     scope
@@ -247,160 +255,567 @@ fn remove_listener(
     }
 }
 
+#[derive(Clone, Copy)]
+struct MediaEnvironment {
+    viewport_width: f64,
+    viewport_height: f64,
+    device_width: f64,
+    device_height: f64,
+    device_pixel_ratio: f64,
+    color_depth: u32,
+}
+
+impl MediaEnvironment {
+    fn query_viewport(self) -> (f64, f64) {
+        if self.viewport_width > 0.0 && self.viewport_height > 0.0 {
+            (self.viewport_width, self.viewport_height)
+        } else {
+            // The sandbox can intentionally expose a zero-sized Window while
+            // still modelling a rendered Edge surface.  Media queries need a
+            // usable CSS viewport in that state, so they fall back to the
+            // configured screen instead of producing an indeterminate range.
+            (self.device_width, self.device_height)
+        }
+    }
+}
+
 fn evaluate_query(
     query: &str,
-    width: f64,
-    height: f64,
-    device_pixel_ratio: f64,
+    environment: MediaEnvironment,
     preferences: &crate::MediaPreferencesFingerprint,
 ) -> bool {
     let normalized = query.trim().to_ascii_lowercase();
-    normalized.split(',').any(|branch| {
-        evaluate_branch(
-            branch.trim(),
-            width,
-            height,
-            device_pixel_ratio,
-            preferences,
-        )
-    })
+    if normalized.is_empty() {
+        return false;
+    }
+    split_top_level_character(&normalized, ',')
+        .into_iter()
+        .any(|branch| evaluate_branch(branch, environment, preferences))
 }
 
 fn evaluate_branch(
     query: &str,
-    width: f64,
-    height: f64,
-    device_pixel_ratio: f64,
+    environment: MediaEnvironment,
     preferences: &crate::MediaPreferencesFingerprint,
 ) -> bool {
-    if let Some(query) = query.strip_prefix("not ") {
-        return !evaluate_branch(query, width, height, device_pixel_ratio, preferences);
+    let mut query = query.trim();
+    if let Some(rest) = strip_keyword_prefix(query, "only") {
+        query = rest;
     }
-    query.split(" and ").all(|clause| {
-        let clause = clause.trim();
-        if clause == "all" || clause == "screen" {
-            return true;
+    let (negated, query) = if let Some(rest) = strip_keyword_prefix(query, "not") {
+        (true, rest)
+    } else {
+        (false, query)
+    };
+    let matches = evaluate_condition(query, environment, preferences);
+    if negated { !matches } else { matches }
+}
+
+fn evaluate_condition(
+    query: &str,
+    environment: MediaEnvironment,
+    preferences: &crate::MediaPreferencesFingerprint,
+) -> bool {
+    let query = query.trim();
+    if query.is_empty() {
+        return false;
+    }
+    let alternatives = split_top_level_keyword(query, "or");
+    if alternatives.len() > 1 {
+        return alternatives
+            .into_iter()
+            .any(|part| evaluate_condition(part, environment, preferences));
+    }
+    let requirements = split_top_level_keyword(query, "and");
+    if requirements.len() > 1 {
+        return requirements
+            .into_iter()
+            .all(|part| evaluate_condition(part, environment, preferences));
+    }
+    if let Some(rest) = strip_keyword_prefix(query, "not") {
+        return !evaluate_condition(rest, environment, preferences);
+    }
+    if let Some(inner) = fully_parenthesized(query) {
+        if has_top_level_keyword(inner, "and")
+            || has_top_level_keyword(inner, "or")
+            || strip_keyword_prefix(inner, "not").is_some()
+            || fully_parenthesized(inner).is_some()
+        {
+            return evaluate_condition(inner, environment, preferences);
         }
-        if clause == "print" {
-            return false;
-        }
-        let feature = clause
-            .strip_prefix('(')
-            .and_then(|value| value.strip_suffix(')'))
-            .unwrap_or(clause)
-            .trim();
-        evaluate_feature(feature, width, height, device_pixel_ratio, preferences)
-    })
+        return evaluate_feature(inner.trim(), environment, preferences);
+    }
+    match query {
+        "all" | "screen" => true,
+        "print" | "speech" => false,
+        _ => false,
+    }
 }
 
 fn evaluate_feature(
     feature: &str,
-    width: f64,
-    height: f64,
-    device_pixel_ratio: f64,
+    environment: MediaEnvironment,
     preferences: &crate::MediaPreferencesFingerprint,
 ) -> bool {
-    if let Some(value) = pixels_after(feature, "min-width:") {
-        return width >= value;
+    let feature = feature.trim();
+    if feature.is_empty() {
+        return false;
     }
-    if let Some(value) = pixels_after(feature, "max-width:") {
-        return width <= value;
+    if let Some(matches) = evaluate_range_feature(feature, environment, preferences) {
+        return matches;
     }
-    if let Some(value) = pixels_after(feature, "width:") {
-        return approximately_equal(width, value);
+    if let Some((name, value)) = feature.split_once(':') {
+        return evaluate_colon_feature(name.trim(), value.trim(), environment, preferences);
     }
-    if let Some(value) = pixels_after(feature, "min-height:") {
-        return height >= value;
-    }
-    if let Some(value) = pixels_after(feature, "max-height:") {
-        return height <= value;
-    }
-    if let Some(value) = pixels_after(feature, "height:") {
-        return approximately_equal(height, value);
-    }
-    if feature == "orientation: landscape" {
-        return width >= height;
-    }
-    if feature == "orientation: portrait" {
-        return height > width;
-    }
-    if let Some(value) = resolution_after(feature, "min-resolution:") {
-        return device_pixel_ratio >= value;
-    }
-    if let Some(value) = resolution_after(feature, "max-resolution:") {
-        return device_pixel_ratio <= value;
-    }
-    if let Some(value) = resolution_after(feature, "resolution:") {
-        return approximately_equal(device_pixel_ratio, value);
-    }
-    if let Some(value) = number_after(feature, "-webkit-min-device-pixel-ratio:") {
-        return device_pixel_ratio >= value;
-    }
-    if let Some(value) = number_after(feature, "-webkit-max-device-pixel-ratio:") {
-        return device_pixel_ratio <= value;
-    }
-    if let Some(value) = number_after(feature, "-webkit-device-pixel-ratio:") {
-        return approximately_equal(device_pixel_ratio, value);
-    }
-    if let Some(value) = value_after(feature, "prefers-color-scheme:") {
-        return value == preferences.color_scheme;
-    }
-    if let Some(value) = value_after(feature, "prefers-contrast:") {
-        return value == preferences.contrast;
-    }
-    if let Some(value) = value_after(feature, "prefers-reduced-motion:") {
-        return (value == "reduce") == preferences.reduced_motion;
-    }
-    if let Some(value) = value_after(feature, "prefers-reduced-data:") {
-        return (value == "reduce") == preferences.reduced_data;
-    }
-    if let Some(value) = value_after(feature, "forced-colors:") {
-        return (value == "active") == preferences.forced_colors;
-    }
-    if let Some(value) = value_after(feature, "inverted-colors:") {
-        return (value == "inverted") == preferences.inverted_colors;
-    }
-    if let Some(value) = value_after(feature, "color-gamut:") {
-        return gamut_at_least(&preferences.color_gamut, value);
-    }
-    if let Some(value) = value_after(feature, "pointer:") {
-        return value == preferences.pointer;
-    }
-    if let Some(value) = value_after(feature, "any-pointer:") {
-        return value == preferences.any_pointer;
-    }
-    if let Some(value) = value_after(feature, "hover:") {
-        return value == preferences.hover;
-    }
-    if let Some(value) = value_after(feature, "any-hover:") {
-        return value == preferences.any_hover;
-    }
-    if let Some(value) = value_after(feature, "display-mode:") {
-        return value == preferences.display_mode;
-    }
-    if let Some(value) = value_after(feature, "dynamic-range:") {
-        return value == preferences.dynamic_range;
-    }
-    if let Some(value) = value_after(feature, "video-dynamic-range:") {
-        return value == preferences.dynamic_range;
-    }
-    if let Some(value) = value_after(feature, "scripting:") {
-        return value == preferences.scripting;
-    }
-    if feature == "monochrome" {
-        return preferences.monochrome_bits > 0;
-    }
-    if let Some(value) = number_after(feature, "monochrome:") {
-        return preferences.monochrome_bits == value.max(0.0) as u32;
-    }
-    false
+    evaluate_boolean_feature(feature, environment, preferences)
 }
 
-fn value_after<'a>(query: &'a str, marker: &str) -> Option<&'a str> {
-    query
-        .strip_prefix(marker)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+fn evaluate_colon_feature(
+    requested_name: &str,
+    value: &str,
+    environment: MediaEnvironment,
+    preferences: &crate::MediaPreferencesFingerprint,
+) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    let (comparison, name) = if let Some(name) = requested_name.strip_prefix("min-") {
+        (Comparison::GreaterOrEqual, name)
+    } else if let Some(name) = requested_name.strip_prefix("max-") {
+        (Comparison::LessOrEqual, name)
+    } else {
+        (Comparison::Equal, requested_name)
+    };
+    if let Some(actual) = numeric_feature_value(name, environment, preferences) {
+        let Some(requested) = parse_numeric_feature_value(name, value, environment) else {
+            return false;
+        };
+        return compare(actual, requested, comparison);
+    }
+    if comparison != Comparison::Equal {
+        return false;
+    }
+    evaluate_discrete_feature(name, value, environment, preferences)
+}
+
+fn evaluate_boolean_feature(
+    name: &str,
+    environment: MediaEnvironment,
+    preferences: &crate::MediaPreferencesFingerprint,
+) -> bool {
+    if let Some(value) = numeric_feature_value(name, environment, preferences) {
+        return value.is_finite() && value > 0.0;
+    }
+    match name {
+        "orientation" => {
+            let (width, height) = environment.query_viewport();
+            width > 0.0 && height > 0.0
+        }
+        "prefers-color-scheme" => true,
+        "prefers-contrast" => preferences.contrast != "no-preference",
+        "prefers-reduced-motion" => preferences.reduced_motion,
+        "prefers-reduced-data" => preferences.reduced_data,
+        "prefers-reduced-transparency" => false,
+        "forced-colors" => preferences.forced_colors,
+        "inverted-colors" => preferences.inverted_colors,
+        "pointer" => preferences.pointer != "none",
+        "any-pointer" => preferences.any_pointer != "none",
+        "hover" => preferences.hover != "none",
+        "any-hover" => preferences.any_hover != "none",
+        "color-gamut" | "video-color-gamut" => !preferences.color_gamut.is_empty(),
+        "display-mode"
+        | "dynamic-range"
+        | "video-dynamic-range"
+        | "scripting"
+        | "update"
+        | "overflow-block"
+        | "overflow-inline"
+        | "environment-blending"
+        | "device-posture"
+        | "shape"
+        | "nav-controls" => true,
+        _ => false,
+    }
+}
+
+fn evaluate_discrete_feature(
+    name: &str,
+    value: &str,
+    environment: MediaEnvironment,
+    preferences: &crate::MediaPreferencesFingerprint,
+) -> bool {
+    match name {
+        "orientation" => match value {
+            "landscape" => {
+                let (width, height) = environment.query_viewport();
+                width > 0.0 && height > 0.0 && width > height
+            }
+            "portrait" => {
+                let (width, height) = environment.query_viewport();
+                width > 0.0 && height > 0.0 && height >= width
+            }
+            _ => false,
+        },
+        "prefers-color-scheme" => value == preferences.color_scheme,
+        "prefers-contrast" => value == preferences.contrast,
+        "prefers-reduced-motion" => match value {
+            "reduce" => preferences.reduced_motion,
+            "no-preference" => !preferences.reduced_motion,
+            _ => false,
+        },
+        "prefers-reduced-data" => match value {
+            "reduce" => preferences.reduced_data,
+            "no-preference" => !preferences.reduced_data,
+            _ => false,
+        },
+        "prefers-reduced-transparency" => value == "no-preference",
+        "forced-colors" => match value {
+            "active" => preferences.forced_colors,
+            "none" => !preferences.forced_colors,
+            _ => false,
+        },
+        "inverted-colors" => match value {
+            "inverted" => preferences.inverted_colors,
+            "none" => !preferences.inverted_colors,
+            _ => false,
+        },
+        "color-gamut" | "video-color-gamut" => gamut_at_least(&preferences.color_gamut, value),
+        "pointer" => value == preferences.pointer,
+        "any-pointer" => value == preferences.any_pointer,
+        "hover" => value == preferences.hover,
+        "any-hover" => value == preferences.any_hover,
+        "display-mode" => value == preferences.display_mode,
+        "dynamic-range" | "video-dynamic-range" => value == preferences.dynamic_range,
+        "scripting" => value == preferences.scripting,
+        "update" => value == "fast",
+        "overflow-block" => value == "scroll",
+        "overflow-inline" => value == "none",
+        "environment-blending" => value == "opaque",
+        "device-posture" => value == "continuous",
+        "shape" => value == "rect",
+        "nav-controls" => value == "none",
+        "scan" => false,
+        _ => false,
+    }
+}
+
+fn numeric_feature_value(
+    name: &str,
+    environment: MediaEnvironment,
+    preferences: &crate::MediaPreferencesFingerprint,
+) -> Option<f64> {
+    let (viewport_width, viewport_height) = environment.query_viewport();
+    match name {
+        "width" => Some(viewport_width),
+        "height" => Some(viewport_height),
+        "device-width" => Some(environment.device_width),
+        "device-height" => Some(environment.device_height),
+        "aspect-ratio" => ratio(viewport_width, viewport_height),
+        "device-aspect-ratio" => ratio(environment.device_width, environment.device_height),
+        "resolution" | "-webkit-device-pixel-ratio" => Some(environment.device_pixel_ratio),
+        "color" => Some(f64::from(environment.color_depth / 3)),
+        "color-index" | "grid" => Some(0.0),
+        "monochrome" => Some(f64::from(preferences.monochrome_bits)),
+        "horizontal-viewport-segments" | "vertical-viewport-segments" => Some(1.0),
+        "-webkit-transform-3d" => Some(1.0),
+        _ => None,
+    }
+}
+
+fn parse_numeric_feature_value(
+    name: &str,
+    value: &str,
+    environment: MediaEnvironment,
+) -> Option<f64> {
+    match name {
+        "width" | "height" | "device-width" | "device-height" => parse_length(value, environment),
+        "aspect-ratio" | "device-aspect-ratio" => parse_ratio(value),
+        "resolution" => parse_resolution(value),
+        "-webkit-device-pixel-ratio"
+        | "color"
+        | "color-index"
+        | "grid"
+        | "monochrome"
+        | "horizontal-viewport-segments"
+        | "vertical-viewport-segments"
+        | "-webkit-transform-3d" => parse_nonnegative_number(value),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Comparison {
+    Less,
+    LessOrEqual,
+    Equal,
+    GreaterOrEqual,
+    Greater,
+}
+
+fn evaluate_range_feature(
+    feature: &str,
+    environment: MediaEnvironment,
+    preferences: &crate::MediaPreferencesFingerprint,
+) -> Option<bool> {
+    let (parts, operators) = split_comparisons(feature)?;
+    match operators.as_slice() {
+        [operator] => {
+            let left_name = canonical_numeric_feature(parts[0]);
+            let right_name = canonical_numeric_feature(parts[1]);
+            match (left_name, right_name) {
+                (Some(name), None) => {
+                    let actual = numeric_feature_value(name, environment, preferences)?;
+                    let expected = parse_numeric_feature_value(name, parts[1], environment)?;
+                    Some(compare(actual, expected, *operator))
+                }
+                (None, Some(name)) => {
+                    let expected = parse_numeric_feature_value(name, parts[0], environment)?;
+                    let actual = numeric_feature_value(name, environment, preferences)?;
+                    Some(compare(expected, actual, *operator))
+                }
+                _ => Some(false),
+            }
+        }
+        [first, second] => {
+            let Some(name) = canonical_numeric_feature(parts[1]) else {
+                return Some(false);
+            };
+            let actual = numeric_feature_value(name, environment, preferences)?;
+            let lower = parse_numeric_feature_value(name, parts[0], environment)?;
+            let upper = parse_numeric_feature_value(name, parts[2], environment)?;
+            Some(compare(lower, actual, *first) && compare(actual, upper, *second))
+        }
+        _ => Some(false),
+    }
+}
+
+fn split_comparisons(feature: &str) -> Option<(Vec<&str>, Vec<Comparison>)> {
+    let bytes = feature.as_bytes();
+    let mut parts = Vec::new();
+    let mut operators = Vec::new();
+    let mut start = 0usize;
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let operator = match bytes[cursor] {
+            b'<' if bytes.get(cursor + 1) == Some(&b'=') => Some((Comparison::LessOrEqual, 2)),
+            b'>' if bytes.get(cursor + 1) == Some(&b'=') => Some((Comparison::GreaterOrEqual, 2)),
+            b'<' => Some((Comparison::Less, 1)),
+            b'>' => Some((Comparison::Greater, 1)),
+            b'=' => Some((Comparison::Equal, 1)),
+            _ => None,
+        };
+        let Some((operator, length)) = operator else {
+            cursor += 1;
+            continue;
+        };
+        let part = feature[start..cursor].trim();
+        if part.is_empty() {
+            return Some((Vec::new(), Vec::new()));
+        }
+        parts.push(part);
+        operators.push(operator);
+        cursor += length;
+        start = cursor;
+    }
+    if operators.is_empty() {
+        return None;
+    }
+    let tail = feature[start..].trim();
+    if tail.is_empty() {
+        return Some((Vec::new(), Vec::new()));
+    }
+    parts.push(tail);
+    if operators.len() > 2 || parts.len() != operators.len() + 1 {
+        return Some((Vec::new(), Vec::new()));
+    }
+    Some((parts, operators))
+}
+
+fn canonical_numeric_feature(name: &str) -> Option<&str> {
+    match name.trim() {
+        "width"
+        | "height"
+        | "device-width"
+        | "device-height"
+        | "aspect-ratio"
+        | "device-aspect-ratio"
+        | "resolution"
+        | "-webkit-device-pixel-ratio"
+        | "color"
+        | "color-index"
+        | "grid"
+        | "monochrome"
+        | "horizontal-viewport-segments"
+        | "vertical-viewport-segments"
+        | "-webkit-transform-3d" => Some(name.trim()),
+        _ => None,
+    }
+}
+
+fn compare(left: f64, right: f64, comparison: Comparison) -> bool {
+    match comparison {
+        Comparison::Less => left < right && !approximately_equal(left, right),
+        Comparison::LessOrEqual => left < right || approximately_equal(left, right),
+        Comparison::Equal => approximately_equal(left, right),
+        Comparison::GreaterOrEqual => left > right || approximately_equal(left, right),
+        Comparison::Greater => left > right && !approximately_equal(left, right),
+    }
+}
+
+fn ratio(numerator: f64, denominator: f64) -> Option<f64> {
+    (numerator.is_finite() && denominator.is_finite() && numerator > 0.0 && denominator > 0.0)
+        .then_some(numerator / denominator)
+}
+
+fn parse_ratio(value: &str) -> Option<f64> {
+    let value = value.trim();
+    if let Some((numerator, denominator)) = value.split_once('/') {
+        let numerator = parse_nonnegative_number(numerator)?;
+        let denominator = parse_nonnegative_number(denominator)?;
+        return (denominator > 0.0).then_some(numerator / denominator);
+    }
+    parse_nonnegative_number(value)
+}
+
+fn parse_length(value: &str, environment: MediaEnvironment) -> Option<f64> {
+    let value = value.trim();
+    if value == "0" {
+        return Some(0.0);
+    }
+    let (viewport_width, viewport_height) = environment.query_viewport();
+    let units = [
+        ("vmin", viewport_width.min(viewport_height) / 100.0),
+        ("vmax", viewport_width.max(viewport_height) / 100.0),
+        ("dvw", viewport_width / 100.0),
+        ("dvh", viewport_height / 100.0),
+        ("svw", viewport_width / 100.0),
+        ("svh", viewport_height / 100.0),
+        ("lvw", viewport_width / 100.0),
+        ("lvh", viewport_height / 100.0),
+        ("rem", 16.0),
+        ("px", 1.0),
+        ("em", 16.0),
+        ("vw", viewport_width / 100.0),
+        ("vh", viewport_height / 100.0),
+        ("cm", 96.0 / 2.54),
+        ("mm", 96.0 / 25.4),
+        ("q", 96.0 / 101.6),
+        ("in", 96.0),
+        ("pc", 16.0),
+        ("pt", 96.0 / 72.0),
+    ];
+    for (unit, factor) in units {
+        if let Some(number) = value.strip_suffix(unit) {
+            return parse_nonnegative_number(number).map(|number| number * factor);
+        }
+    }
+    None
+}
+
+fn parse_resolution(value: &str) -> Option<f64> {
+    let value = value.trim();
+    if value == "0" {
+        return Some(0.0);
+    }
+    if let Some(value) = value.strip_suffix("dppx") {
+        return parse_nonnegative_number(value);
+    }
+    if let Some(value) = value.strip_suffix("x") {
+        return parse_nonnegative_number(value);
+    }
+    if let Some(value) = value.strip_suffix("dpi") {
+        return parse_nonnegative_number(value).map(|value| value / 96.0);
+    }
+    if let Some(value) = value.strip_suffix("dpcm") {
+        return parse_nonnegative_number(value).map(|value| value * 2.54 / 96.0);
+    }
+    None
+}
+
+fn parse_nonnegative_number(value: &str) -> Option<f64> {
+    let value = value.trim().parse::<f64>().ok()?;
+    (value.is_finite() && value >= 0.0).then_some(value)
+}
+
+fn strip_keyword_prefix<'a>(value: &'a str, keyword: &str) -> Option<&'a str> {
+    let rest = value.strip_prefix(keyword)?;
+    rest.strip_prefix(char::is_whitespace).map(str::trim_start)
+}
+
+fn split_top_level_character(value: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, character) in value.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if character == separator && depth == 0 => {
+                parts.push(value[start..index].trim());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(value[start..].trim());
+    parts
+}
+
+fn split_top_level_keyword<'a>(value: &'a str, keyword: &str) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let bytes = value.as_bytes();
+    let keyword = keyword.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if depth == 0
+            && bytes[cursor..].starts_with(keyword)
+            && cursor > 0
+            && bytes[cursor - 1].is_ascii_whitespace()
+            && bytes
+                .get(cursor + keyword.len())
+                .is_some_and(u8::is_ascii_whitespace)
+        {
+            parts.push(value[start..cursor].trim());
+            cursor += keyword.len();
+            start = cursor;
+            continue;
+        }
+        cursor += 1;
+    }
+    parts.push(value[start..].trim());
+    parts
+}
+
+fn has_top_level_keyword(value: &str, keyword: &str) -> bool {
+    split_top_level_keyword(value, keyword).len() > 1
+}
+
+fn fully_parenthesized(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if !value.starts_with('(') || !value.ends_with(')') {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (index, character) in value.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 && index + 1 != value.len() {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    (depth == 0).then(|| &value[1..value.len() - 1])
 }
 
 fn gamut_at_least(configured: &str, requested: &str) -> bool {
@@ -413,37 +828,140 @@ fn gamut_at_least(configured: &str, requested: &str) -> bool {
     rank(configured) >= rank(requested) && rank(requested) > 0
 }
 
-fn pixels_after(query: &str, marker: &str) -> Option<f64> {
-    let start = query.find(marker)? + marker.len();
-    let tail = query[start..].trim_start();
-    let end = tail.find("px")?;
-    tail[..end].trim().parse().ok()
-}
-
-fn resolution_after(query: &str, marker: &str) -> Option<f64> {
-    let start = query.find(marker)? + marker.len();
-    let tail = query[start..].trim();
-    if let Some(value) = tail.strip_suffix("dppx") {
-        return value.trim().parse().ok();
-    }
-    if let Some(value) = tail.strip_suffix("dpi") {
-        return value.trim().parse::<f64>().ok().map(|value| value / 96.0);
-    }
-    if let Some(value) = tail.strip_suffix("dpcm") {
-        return value
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .map(|value| value * 2.54 / 96.0);
-    }
-    None
-}
-
-fn number_after(query: &str, marker: &str) -> Option<f64> {
-    let start = query.find(marker)? + marker.len();
-    query[start..].trim().parse().ok()
-}
-
 fn approximately_equal(left: f64, right: f64) -> bool {
-    (left - right).abs() <= f64::EPSILON * left.abs().max(right.abs()).max(1.0) * 8.0
+    (left - right).abs() <= f64::EPSILON * left.abs().max(right.abs()).max(1.0) * 16.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MediaEnvironment, evaluate_query};
+
+    fn environment() -> MediaEnvironment {
+        MediaEnvironment {
+            viewport_width: 1440.0,
+            viewport_height: 900.0,
+            device_width: 1512.0,
+            device_height: 982.0,
+            device_pixel_ratio: 2.0,
+            color_depth: 30,
+        }
+    }
+
+    #[test]
+    fn viewport_dimensions_ratios_and_level_four_ranges_are_evaluated() {
+        let preferences = crate::MediaPreferencesFingerprint::default();
+        let environment = environment();
+        for query in [
+            "(width: 1440px)",
+            "(min-width: 90em)",
+            "(height >= 900px)",
+            "(800px < width < 1600px)",
+            "(aspect-ratio: 8/5)",
+            "(min-aspect-ratio: 1/4)",
+            "(max-aspect-ratio: 4/1)",
+            "(0.250 <= aspect-ratio <= 4.000)",
+            "screen and (orientation: landscape)",
+        ] {
+            assert!(
+                evaluate_query(query, environment, &preferences),
+                "{query} should match"
+            );
+        }
+        for query in [
+            "(width: 900px)",
+            "(aspect-ratio: 16/9)",
+            "(aspect-ratio > 2/1)",
+            "(orientation: portrait)",
+        ] {
+            assert!(
+                !evaluate_query(query, environment, &preferences),
+                "{query} should not match"
+            );
+        }
+    }
+
+    #[test]
+    fn deprecated_device_queries_read_screen_instead_of_viewport() {
+        let preferences = crate::MediaPreferencesFingerprint::default();
+        let environment = environment();
+        for query in [
+            "(device-width: 1512px)",
+            "(device-height: 982px)",
+            "(min-device-height: 982px)",
+            "(max-device-height: 982px)",
+            "(device-aspect-ratio: 1512/982)",
+            "(900px <= device-height <= 1000px)",
+        ] {
+            assert!(
+                evaluate_query(query, environment, &preferences),
+                "{query} should match the physical screen"
+            );
+        }
+        assert!(!evaluate_query(
+            "(device-height: 900px)",
+            environment,
+            &preferences
+        ));
+    }
+
+    #[test]
+    fn zero_exposed_viewport_uses_the_configured_screen_for_media_queries() {
+        let preferences = crate::MediaPreferencesFingerprint::default();
+        let environment = MediaEnvironment {
+            viewport_width: 0.0,
+            viewport_height: 0.0,
+            ..environment()
+        };
+        assert!(evaluate_query(
+            "(width: 1512px) and (height: 982px)",
+            environment,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(aspect-ratio: 1512/982)",
+            environment,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(device-height: 982px)",
+            environment,
+            &preferences
+        ));
+    }
+
+    #[test]
+    fn resolution_color_preferences_and_logical_conditions_are_evaluated() {
+        let mut preferences = crate::MediaPreferencesFingerprint::default();
+        preferences.color_scheme = "dark".to_owned();
+        preferences.color_gamut = "p3".to_owned();
+        let environment = environment();
+        for query in [
+            "(resolution: 2dppx)",
+            "(resolution: 192dpi)",
+            "(-webkit-device-pixel-ratio: 2)",
+            "(color: 10)",
+            "(color-gamut: srgb)",
+            "(color-gamut: p3)",
+            "(prefers-color-scheme: dark)",
+            "((prefers-color-scheme: light) or (resolution >= 2dppx))",
+            "not print and (pointer: fine)",
+        ] {
+            assert!(
+                evaluate_query(query, environment, &preferences),
+                "{query} should match"
+            );
+        }
+        for query in [
+            "(resolution: 1dppx)",
+            "(color: 8)",
+            "(color-gamut: rec2020)",
+            "(prefers-color-scheme: invalid)",
+            "(unknown-feature: value)",
+        ] {
+            assert!(
+                !evaluate_query(query, environment, &preferences),
+                "{query} should not match"
+            );
+        }
+    }
 }

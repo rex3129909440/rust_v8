@@ -37,7 +37,24 @@ fn match_media(
     let width = super::window_view_state::inner_width(scope);
     let height = super::window_view_state::inner_height(scope);
     let device_pixel_ratio = super::window_view_state::device_pixel_ratio(scope);
-    match super::media_query_list::create(scope, query, width, height, device_pixel_ratio) {
+    let (device_width, device_height, color_depth) = {
+        let screen = &crate::fingerprint::edge(scope).screen;
+        (
+            f64::from(screen.width),
+            f64::from(screen.height),
+            screen.color_depth.max(0) as u32,
+        )
+    };
+    match super::media_query_list::create(
+        scope,
+        query,
+        width,
+        height,
+        device_width,
+        device_height,
+        device_pixel_ratio,
+        color_depth,
+    ) {
         Ok(list) => result.set(list.into()),
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }
