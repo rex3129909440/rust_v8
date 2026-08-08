@@ -88,7 +88,9 @@ pub(crate) fn create<'s>(
         return Err("cannot create MediaQueryList".to_owned());
     }
     super::event_target::attach(scope, object);
-    let preferences = crate::fingerprint::edge(scope).media_preferences.clone();
+    let fingerprint = crate::fingerprint::edge(scope);
+    let preferences = fingerprint.media_preferences.clone();
+    let device_posture_folded = fingerprint.hardware_devices.device_posture == "folded";
     let matches = evaluate_query(
         &media,
         MediaEnvironment {
@@ -98,6 +100,7 @@ pub(crate) fn create<'s>(
             device_height,
             device_pixel_ratio,
             color_depth,
+            device_posture_folded,
         },
         &preferences,
     );
@@ -263,6 +266,7 @@ struct MediaEnvironment {
     device_height: f64,
     device_pixel_ratio: f64,
     color_depth: u32,
+    device_posture_folded: bool,
 }
 
 impl MediaEnvironment {
@@ -416,7 +420,7 @@ fn evaluate_boolean_feature(
         "prefers-contrast" => preferences.contrast != "no-preference",
         "prefers-reduced-motion" => preferences.reduced_motion,
         "prefers-reduced-data" => preferences.reduced_data,
-        "prefers-reduced-transparency" => false,
+        "prefers-reduced-transparency" => preferences.reduced_transparency,
         "forced-colors" => preferences.forced_colors,
         "inverted-colors" => preferences.inverted_colors,
         "pointer" => preferences.pointer != "none",
@@ -469,7 +473,11 @@ fn evaluate_discrete_feature(
             "no-preference" => !preferences.reduced_data,
             _ => false,
         },
-        "prefers-reduced-transparency" => value == "no-preference",
+        "prefers-reduced-transparency" => match value {
+            "reduce" => preferences.reduced_transparency,
+            "no-preference" => !preferences.reduced_transparency,
+            _ => false,
+        },
         "forced-colors" => match value {
             "active" => preferences.forced_colors,
             "none" => !preferences.forced_colors,
@@ -486,13 +494,18 @@ fn evaluate_discrete_feature(
         "hover" => value == preferences.hover,
         "any-hover" => value == preferences.any_hover,
         "display-mode" => value == preferences.display_mode,
-        "dynamic-range" | "video-dynamic-range" => value == preferences.dynamic_range,
+        "dynamic-range" => value == preferences.dynamic_range,
+        "video-dynamic-range" => value == preferences.video_dynamic_range,
         "scripting" => value == preferences.scripting,
         "update" => value == "fast",
         "overflow-block" => value == "scroll",
         "overflow-inline" => value == "scroll",
         "environment-blending" => value == "opaque",
-        "device-posture" => value == "continuous",
+        "device-posture" => match value {
+            "folded" => environment.device_posture_folded,
+            "continuous" => !environment.device_posture_folded,
+            _ => false,
+        },
         "shape" => value == "rect",
         "nav-controls" => value == "none",
         "scan" => false,
@@ -859,6 +872,7 @@ mod tests {
             device_height: 982.0,
             device_pixel_ratio: 2.0,
             color_depth: 30,
+            device_posture_folded: false,
         }
     }
 

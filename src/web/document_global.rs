@@ -14,6 +14,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     if !html.is_empty() {
         super::document_html_parser::parse_page(scope, document, &html)?;
     }
+    apply_initial_document_profile(scope, document)?;
     super::document::set_content_type(scope, document, crate::page_init::content_type(scope));
     super::document::set_string_value(
         scope,
@@ -36,6 +37,36 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
         .ok_or_else(|| "document global state was not prepared".to_owned())?
         .document = Some(stored_document);
     install_existing(scope)?;
+    Ok(())
+}
+
+fn apply_initial_document_profile(
+    scope: &mut v8::PinScope<'_, '_>,
+    document: v8::Local<'_, v8::Object>,
+) -> Result<(), String> {
+    let Some(target_count) = crate::fingerprint::edge(scope)
+        .document
+        .body_child_element_count
+    else {
+        return Ok(());
+    };
+    let body = super::document_property_support::find_html_element(scope, document, "BODY")
+        .ok_or_else(|| "cannot apply document profile without a BODY element".to_owned())?;
+    let existing_count = super::node::children(scope, body)
+        .into_iter()
+        .filter(|child| super::element::record(scope, *child).is_some())
+        .count();
+    let target_count = target_count as usize;
+    if existing_count >= target_count {
+        return Ok(());
+    }
+    for index in existing_count..target_count {
+        let placeholder = super::document::create_html_element_by_name(scope, "div")?;
+        super::node::set_owner_document(scope, placeholder, document);
+        if !super::node::insert_child(scope, body, placeholder, index) {
+            return Err("cannot materialize document body placeholder".to_owned());
+        }
+    }
     Ok(())
 }
 

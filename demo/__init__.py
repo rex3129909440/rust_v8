@@ -16,9 +16,11 @@ __all__ = [
     "FingerprintVerification",
     "RandomFingerprint",
     "ResourceLoadProfile",
+    "audit_random_fp",
     "get_random_fp",
     "get_random_fp_details",
     "test_random_fp_combinations",
+    "validate_random_fp",
     "verify_random_fp",
 ]
 
@@ -45,6 +47,18 @@ def get_random_fp_details(*args, **kwargs):
     """Lazily compose a profile together with its selection details."""
 
     return _load_composer().get_random_fp_details(*args, **kwargs)
+
+
+def audit_random_fp(*args, **kwargs):
+    """Return cross-surface consistency errors for a generated profile."""
+
+    return _load_composer().audit_random_fp(*args, **kwargs)
+
+
+def validate_random_fp(*args, **kwargs):
+    """Raise if a generated profile violates a consistency invariant."""
+
+    return _load_composer().validate_random_fp(*args, **kwargs)
 
 
 def test_random_fp_combinations(*args, **kwargs):

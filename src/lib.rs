@@ -69,13 +69,14 @@ pub use fingerprint::{
     SpeechVoiceFingerprint, UserAgentBrandFingerprint, UserAgentDataFingerprint,
 };
 pub use fingerprint_environment::{
-    BatteryFingerprint, BluetoothDeviceFingerprint, CssFingerprint, FontFingerprint,
-    FontMetricFingerprint, GamepadFingerprint, GeolocationFingerprint, HardwareDevicesFingerprint,
-    HidDeviceFingerprint, KeyboardLayoutEntryFingerprint, LocalFontFingerprint,
-    MediaDeviceFingerprint, MediaFingerprint, MediaPreferencesFingerprint, MemoryFingerprint,
-    MidiPortFingerprint, MimeTypeFingerprint, PermissionsFingerprint, PluginFingerprint,
-    PluginListFingerprint, RtcCodecFingerprint, RtcHeaderExtensionFingerprint, SensorsFingerprint,
-    SerialPortFingerprint, TimingFingerprint, UsbDeviceFingerprint, XrFingerprint,
+    BatteryFingerprint, BluetoothDeviceFingerprint, CssFingerprint, DocumentFingerprint,
+    FontFingerprint, FontMetricFingerprint, GamepadFingerprint, GeolocationFingerprint,
+    HardwareDevicesFingerprint, HidDeviceFingerprint, KeyboardLayoutEntryFingerprint,
+    LocalFontFingerprint, MediaDeviceFingerprint, MediaFingerprint, MediaPreferencesFingerprint,
+    MemoryFingerprint, MidiPortFingerprint, MimeTypeFingerprint, PermissionsFingerprint,
+    PluginFingerprint, PluginListFingerprint, RtcCodecFingerprint, RtcHeaderExtensionFingerprint,
+    SensorsFingerprint, SerialPortFingerprint, TimingFingerprint, UsbDeviceFingerprint,
+    XrFingerprint,
 };
 pub use fingerprint_surface::{
     AudioFingerprint, CanvasFingerprint, LocaleFingerprint, RenderingFingerprint,

@@ -34,6 +34,13 @@ pub struct CssFingerprint {
     pub input_text: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct DocumentFingerprint {
+    pub body_child_element_count: Option<u32>,
+    pub body_client_height: Option<f64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct LocalFontFingerprint {
     pub postscript_name: String,
@@ -152,10 +159,12 @@ pub struct GeolocationFingerprint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct MediaPreferencesFingerprint {
     pub color_scheme: String,
     pub contrast: String,
     pub reduced_motion: bool,
+    pub reduced_transparency: bool,
     pub reduced_data: bool,
     pub forced_colors: bool,
     pub inverted_colors: bool,
@@ -167,6 +176,7 @@ pub struct MediaPreferencesFingerprint {
     pub any_hover: String,
     pub display_mode: String,
     pub dynamic_range: String,
+    pub video_dynamic_range: String,
     pub scripting: String,
 }
 
@@ -271,6 +281,7 @@ pub struct HardwareDevicesFingerprint {
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct SensorsFingerprint {
+    pub available: bool,
     pub accelerometer: [f64; 3],
     pub gravity: [f64; 3],
     pub linear_acceleration: [f64; 3],
@@ -534,6 +545,7 @@ impl Default for MediaPreferencesFingerprint {
             color_scheme: "light".to_owned(),
             contrast: "no-preference".to_owned(),
             reduced_motion: false,
+            reduced_transparency: false,
             reduced_data: false,
             forced_colors: false,
             inverted_colors: false,
@@ -545,6 +557,7 @@ impl Default for MediaPreferencesFingerprint {
             any_hover: "hover".to_owned(),
             display_mode: "browser".to_owned(),
             dynamic_range: "standard".to_owned(),
+            video_dynamic_range: "standard".to_owned(),
             scripting: "enabled".to_owned(),
         }
     }
@@ -633,6 +646,7 @@ impl Default for HardwareDevicesFingerprint {
 impl Default for SensorsFingerprint {
     fn default() -> Self {
         Self {
+            available: true,
             accelerometer: [0.0, 0.0, 0.0],
             gravity: [0.0, 0.0, 0.0],
             linear_acceleration: [0.0, 0.0, 0.0],
@@ -668,12 +682,12 @@ impl Default for XrFingerprint {
 impl Default for MemoryFingerprint {
     fn default() -> Self {
         Self {
-            performance_js_heap_size_limit: 4_294_705_152,
-            performance_total_js_heap_size: 0,
-            performance_used_js_heap_size: 0,
-            console_js_heap_size_limit: 3_760_000_000,
-            console_total_js_heap_size: 10_000_000,
-            console_used_js_heap_size: 10_000_000,
+            performance_js_heap_size_limit: 4_395_630_592,
+            performance_total_js_heap_size: 8_388_608,
+            performance_used_js_heap_size: 7_002_608,
+            console_js_heap_size_limit: 4_395_630_592,
+            console_total_js_heap_size: 8_388_608,
+            console_used_js_heap_size: 7_002_608,
         }
     }
 }
@@ -782,6 +796,21 @@ impl CssFingerprint {
     }
 }
 
+impl DocumentFingerprint {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if self
+            .body_child_element_count
+            .is_some_and(|count| count > 10_000)
+            || self.body_client_height.is_some_and(|height| {
+                !height.is_finite() || !(0.0..=10_000_000.0).contains(&height)
+            })
+        {
+            return Err("document fingerprint is invalid".to_owned());
+        }
+        Ok(())
+    }
+}
+
 impl MediaFingerprint {
     pub(crate) fn validate(&self) -> Result<(), String> {
         if self.devices.len() > 256
@@ -867,7 +896,7 @@ impl MediaFingerprint {
 
 impl PermissionsFingerprint {
     pub(crate) fn validate(&self) -> Result<(), String> {
-        let values = [
+        let regular_values = [
             &self.accelerometer,
             &self.background_sync,
             &self.camera,
@@ -882,16 +911,22 @@ impl PermissionsFingerprint {
             &self.notifications,
             &self.payment_handler,
             &self.persistent_storage,
-            &self.speaker_selection,
             &self.storage_access,
-            &self.top_level_storage_access,
             &self.window_management,
         ];
-        if values
+        if regular_values
             .iter()
             .any(|state| !matches!(state.as_str(), "granted" | "denied" | "prompt"))
+            || !matches!(
+                self.speaker_selection.as_str(),
+                "granted" | "denied" | "prompt" | "unsupported"
+            )
+            || !matches!(
+                self.top_level_storage_access.as_str(),
+                "granted" | "denied" | "prompt" | "invalid-origin"
+            )
         {
-            return Err("permission state must be granted, denied, or prompt".to_owned());
+            return Err("permission state or configured browser rejection is invalid".to_owned());
         }
         Ok(())
     }
@@ -948,6 +983,7 @@ impl MediaPreferencesFingerprint {
                 "browser" | "fullscreen" | "standalone" | "minimal-ui" | "window-controls-overlay"
             )
             || !matches!(self.dynamic_range.as_str(), "standard" | "high")
+            || !matches!(self.video_dynamic_range.as_str(), "standard" | "high")
             || !matches!(self.scripting.as_str(), "none" | "initial-only" | "enabled")
             || self.monochrome_bits > 64
         {

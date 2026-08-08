@@ -4,12 +4,28 @@ use std::collections::HashMap;
 pub(crate) struct UrlSearchParamsStore {
     constructors: HashMap<i32, v8::Global<v8::Function>>,
     records: HashMap<i32, ParamsRecord>,
+    iterator_prototypes: HashMap<i32, v8::Global<v8::Object>>,
+    iterators: HashMap<i32, ParamsIteratorRecord>,
 }
 
 #[derive(Clone)]
 struct ParamsRecord {
     pairs: Vec<(String, String)>,
     owner_url: Option<i32>,
+}
+
+#[derive(Clone, Copy)]
+enum ParamsIteratorKind {
+    Entries,
+    Keys,
+    Values,
+}
+
+#[derive(Clone)]
+struct ParamsIteratorRecord {
+    params_id: i32,
+    index: usize,
+    kind: ParamsIteratorKind,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -50,6 +66,7 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "keys", 0, keys)?;
     crate::webidl::define_method(scope, prototype, "values", 0, values)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_to_string_tag(scope, prototype, "URLSearchParams")?;
 
     let entries_name = crate::webidl::string(scope, "entries")?;
     let entries_function = prototype
@@ -164,25 +181,28 @@ fn pairs_from_value(
     if value.is_string() || value.is_string_object() {
         return Ok(parse_query(&crate::webidl::value_to_string(scope, value)));
     }
-    let object = v8::Local::<v8::Object>::try_from(value)
-        .map_err(|_| "URLSearchParams initializer is not convertible to an object".to_owned())?;
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+        return Ok(parse_query(&crate::webidl::value_to_string(scope, value)));
+    };
 
-    if value.is_array() {
-        let array = v8::Local::<v8::Array>::try_from(value)
-            .map_err(|_| "URLSearchParams initializer is not an array".to_owned())?;
-        let mut pairs = Vec::with_capacity(array.length() as usize);
-        for index in 0..array.length() {
-            let entry = array
-                .get_index(scope, index)
-                .ok_or_else(|| "Cannot read URLSearchParams sequence entry".to_owned())?;
-            let entry = v8::Local::<v8::Object>::try_from(entry)
-                .map_err(|_| "Each query pair must be a sequence".to_owned())?;
-            let key = entry
-                .get_index(scope, 0)
-                .ok_or_else(|| "Each query pair must contain two items".to_owned())?;
-            let value = entry
-                .get_index(scope, 1)
-                .ok_or_else(|| "Each query pair must contain two items".to_owned())?;
+    let iterator_key = v8::Symbol::get_iterator(scope);
+    let iterator_method = object
+        .get(scope, iterator_key.into())
+        .ok_or_else(|| "Cannot read URLSearchParams initializer iterator".to_owned())?;
+    if !iterator_method.is_undefined() && !iterator_method.is_null() {
+        if v8::Local::<v8::Function>::try_from(iterator_method).is_err() {
+            return Err("The object must have a callable @@iterator property.".to_owned());
+        }
+        let outer = crate::webidl::sequence_values(scope, value)?;
+        let mut pairs = Vec::with_capacity(outer.len());
+        for entry in outer {
+            let entry = v8::Local::new(scope, &entry);
+            let inner = crate::webidl::sequence_values(scope, entry)?;
+            if inner.len() != 2 {
+                return Err("Sequence initializer must only contain pair elements".to_owned());
+            }
+            let key = v8::Local::new(scope, &inner[0]);
+            let value = v8::Local::new(scope, &inner[1]);
             pairs.push((
                 crate::webidl::value_to_string(scope, key),
                 crate::webidl::value_to_string(scope, value),
@@ -192,7 +212,15 @@ fn pairs_from_value(
     }
 
     let names = object
-        .get_own_property_names(scope, v8::GetPropertyNamesArgs::default())
+        .get_own_property_names(
+            scope,
+            v8::GetPropertyNamesArgs {
+                mode: v8::KeyCollectionMode::OwnOnly,
+                property_filter: v8::PropertyFilter::ONLY_ENUMERABLE,
+                index_filter: v8::IndexFilter::IncludeIndices,
+                key_conversion: v8::KeyConversionMode::ConvertToString,
+            },
+        )
         .ok_or_else(|| "Cannot enumerate URLSearchParams record".to_owned())?;
     let mut pairs = Vec::with_capacity(names.length() as usize);
     for index in 0..names.length() {
@@ -468,29 +496,173 @@ fn to_string(
     }
 }
 
+fn ensure_iterator_prototype<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let realm_id = crate::webidl::realm_id(scope);
+    if let Some(prototype) = scope
+        .get_slot::<UrlSearchParamsStore>()
+        .and_then(|store| store.iterator_prototypes.get(&realm_id))
+        .cloned()
+    {
+        return Ok(v8::Local::new(scope, &prototype));
+    }
+
+    let prototype = v8::Object::new(scope);
+    let array = v8::Array::new(scope, 0);
+    let values_key = crate::webidl::string(scope, "values")?;
+    let values = array
+        .get(scope, values_key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        .ok_or_else(|| "Array.prototype.values is unavailable".to_owned())?;
+    let array_iterator = values
+        .call(scope, array.into(), &[])
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+        .ok_or_else(|| "cannot create intrinsic Array Iterator".to_owned())?;
+    let array_iterator_prototype = array_iterator
+        .get_prototype(scope)
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+        .ok_or_else(|| "Array Iterator prototype is unavailable".to_owned())?;
+    let iterator_prototype = array_iterator_prototype
+        .get_prototype(scope)
+        .ok_or_else(|| "Iterator prototype is unavailable".to_owned())?;
+    if prototype.set_prototype(scope, iterator_prototype) != Some(true) {
+        return Err("cannot inherit URLSearchParams Iterator prototype".to_owned());
+    }
+    crate::trace::label_native_value_once(
+        scope,
+        prototype.into(),
+        "URLSearchParams Iterator.prototype",
+    );
+    crate::webidl::define_method(scope, prototype, "next", 0, iterator_next)?;
+    crate::webidl::define_to_string_tag(scope, prototype, "URLSearchParams Iterator")?;
+    let stored = v8::Global::new(scope, prototype);
+    scope
+        .get_slot_mut::<UrlSearchParamsStore>()
+        .ok_or_else(|| "URLSearchParams state was not prepared".to_owned())?
+        .iterator_prototypes
+        .insert(realm_id, stored);
+    Ok(prototype)
+}
+
+fn create_iterator<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    params_id: i32,
+    kind: ParamsIteratorKind,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    if !scope
+        .get_slot::<UrlSearchParamsStore>()
+        .is_some_and(|store| store.records.contains_key(&params_id))
+    {
+        return Err("Illegal invocation".to_owned());
+    }
+    let prototype = ensure_iterator_prototype(scope)?;
+    let iterator = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, iterator, prototype.into()) != Some(true) {
+        return Err("cannot create URLSearchParams Iterator".to_owned());
+    }
+    scope
+        .get_slot_mut::<UrlSearchParamsStore>()
+        .ok_or_else(|| "URLSearchParams state was not prepared".to_owned())?
+        .iterators
+        .insert(
+            iterator.get_identity_hash().get(),
+            ParamsIteratorRecord {
+                params_id,
+                index: 0,
+                kind,
+            },
+        );
+    Ok(iterator)
+}
+
+fn iterator_result<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+    done: bool,
+) -> v8::Local<'s, v8::Object> {
+    let result = v8::Object::new(scope);
+    if let Some(key) = v8::String::new(scope, "value") {
+        let _ = result.create_data_property(scope, key.into(), value);
+    }
+    if let Some(key) = v8::String::new(scope, "done") {
+        let _ =
+            result.create_data_property(scope, key.into(), v8::Boolean::new(scope, done).into());
+    }
+    result
+}
+
+fn iterator_next(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let iterator_id = arguments.this().get_identity_hash().get();
+    let Some(iterator) = scope
+        .get_slot::<UrlSearchParamsStore>()
+        .and_then(|store| store.iterators.get(&iterator_id))
+        .cloned()
+    else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Method URLSearchParams Iterator.prototype.next called on incompatible receiver",
+        );
+        return;
+    };
+    let pair = scope
+        .get_slot::<UrlSearchParamsStore>()
+        .and_then(|store| store.records.get(&iterator.params_id))
+        .and_then(|record| record.pairs.get(iterator.index))
+        .cloned();
+    let Some((name, value)) = pair else {
+        let undefined = v8::undefined(scope);
+        result.set(iterator_result(scope, undefined.into(), true).into());
+        return;
+    };
+    if let Some(record) = scope
+        .get_slot_mut::<UrlSearchParamsStore>()
+        .and_then(|store| store.iterators.get_mut(&iterator_id))
+    {
+        record.index += 1;
+    }
+    let Some(name) = v8::String::new(scope, &name) else {
+        return;
+    };
+    let Some(value) = v8::String::new(scope, &value) else {
+        return;
+    };
+    let output: v8::Local<'_, v8::Value> = match iterator.kind {
+        ParamsIteratorKind::Entries => {
+            let pair = v8::Array::new(scope, 2);
+            let _ = pair.set_index(scope, 0, name.into());
+            let _ = pair.set_index(scope, 1, value.into());
+            pair.into()
+        }
+        ParamsIteratorKind::Keys => name.into(),
+        ParamsIteratorKind::Values => value.into(),
+    };
+    result.set(iterator_result(scope, output, false).into());
+}
+
+fn return_iterator(
+    scope: &mut v8::PinScope<'_, '_>,
+    receiver: v8::Local<'_, v8::Object>,
+    kind: ParamsIteratorKind,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let params_id = receiver.get_identity_hash().get();
+    match create_iterator(scope, params_id, kind) {
+        Ok(iterator) => result.set(iterator.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
+}
+
 fn entries(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, record.pairs.len() as i32);
-    for (index, (name, value)) in record.pairs.iter().enumerate() {
-        let pair = v8::Array::new(scope, 2);
-        if let Some(name) = v8::String::new(scope, name) {
-            let _ = pair.set_index(scope, 0, name.into());
-        }
-        if let Some(value) = v8::String::new(scope, value) {
-            let _ = pair.set_index(scope, 1, value.into());
-        }
-        let _ = array.set_index(scope, index as u32, pair.into());
-    }
-    if let Some(iterator) = array_values_iterator(scope, array) {
-        result.set(iterator);
-    }
+    return_iterator(scope, arguments.this(), ParamsIteratorKind::Entries, result);
 }
 
 fn keys(
@@ -498,19 +670,7 @@ fn keys(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, record.pairs.len() as i32);
-    for (index, (name, _)) in record.pairs.iter().enumerate() {
-        if let Some(name) = v8::String::new(scope, name) {
-            let _ = array.set_index(scope, index as u32, name.into());
-        }
-    }
-    if let Some(iterator) = array_values_iterator(scope, array) {
-        result.set(iterator);
-    }
+    return_iterator(scope, arguments.this(), ParamsIteratorKind::Keys, result);
 }
 
 fn values(
@@ -518,29 +678,7 @@ fn values(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, record.pairs.len() as i32);
-    for (index, (_, value)) in record.pairs.iter().enumerate() {
-        if let Some(value) = v8::String::new(scope, value) {
-            let _ = array.set_index(scope, index as u32, value.into());
-        }
-    }
-    if let Some(iterator) = array_values_iterator(scope, array) {
-        result.set(iterator);
-    }
-}
-
-fn array_values_iterator<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    array: v8::Local<'s, v8::Array>,
-) -> Option<v8::Local<'s, v8::Value>> {
-    let values_key = v8::String::new(scope, "values")?;
-    let values = array.get(scope, values_key.into())?;
-    let values = v8::Local::<v8::Function>::try_from(values).ok()?;
-    values.call(scope, array.into(), &[])
+    return_iterator(scope, arguments.this(), ParamsIteratorKind::Values, result);
 }
 
 fn for_each(
@@ -563,11 +701,22 @@ fn for_each(
     };
     let this_arg = arguments.get(1);
     let receiver = arguments.this();
-    let Some(record) = record(scope, receiver) else {
+    if record(scope, receiver).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
-    };
-    for (name, value) in record.pairs {
+    }
+    let params_id = receiver.get_identity_hash().get();
+    let mut index = 0;
+    loop {
+        let pair = scope
+            .get_slot::<UrlSearchParamsStore>()
+            .and_then(|store| store.records.get(&params_id))
+            .and_then(|record| record.pairs.get(index))
+            .cloned();
+        let Some((name, value)) = pair else {
+            break;
+        };
+        index += 1;
         let Some(name) = v8::String::new(scope, &name) else {
             return;
         };
@@ -590,5 +739,6 @@ fn for_each(
 pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {
     if let Some(store) = scope.get_slot_mut::<UrlSearchParamsStore>() {
         store.constructors.remove(&realm_id);
+        store.iterator_prototypes.remove(&realm_id);
     }
 }

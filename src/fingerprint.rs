@@ -65,6 +65,10 @@ pub struct NavigatorFingerprint {
     pub webdriver: bool,
     pub pdf_viewer_enabled: bool,
     pub do_not_track: Option<String>,
+    #[serde(default)]
+    pub user_activation_has_been_active: bool,
+    #[serde(default)]
+    pub user_activation_is_active: bool,
     pub user_agent_data: UserAgentDataFingerprint,
     pub network: NetworkFingerprint,
 }
@@ -83,6 +87,8 @@ pub struct EdgeFingerprint {
     pub fonts: crate::fingerprint_environment::FontFingerprint,
     #[serde(default)]
     pub css: crate::fingerprint_environment::CssFingerprint,
+    #[serde(default)]
+    pub document: crate::fingerprint_environment::DocumentFingerprint,
     #[serde(default)]
     pub media: crate::fingerprint_environment::MediaFingerprint,
     #[serde(default)]
@@ -233,6 +239,8 @@ impl Default for NavigatorFingerprint {
             webdriver: true,
             pdf_viewer_enabled: true,
             do_not_track: None,
+            user_activation_has_been_active: false,
+            user_activation_is_active: false,
             user_agent_data: UserAgentDataFingerprint::default(),
             network: NetworkFingerprint::default(),
         }
@@ -251,6 +259,7 @@ impl Default for EdgeFingerprint {
             speech: SpeechFingerprint::default(),
             fonts: crate::fingerprint_environment::FontFingerprint::default(),
             css: crate::fingerprint_environment::CssFingerprint::default(),
+            document: crate::fingerprint_environment::DocumentFingerprint::default(),
             media: crate::fingerprint_environment::MediaFingerprint::default(),
             permissions: crate::fingerprint_environment::PermissionsFingerprint::default(),
             battery: crate::fingerprint_environment::BatteryFingerprint::default(),
@@ -288,6 +297,7 @@ impl EdgeFingerprint {
         self.speech.validate()?;
         self.fonts.validate()?;
         self.css.validate()?;
+        self.document.validate()?;
         self.media.validate()?;
         self.permissions.validate()?;
         self.battery.validate()?;
@@ -348,6 +358,9 @@ impl NavigatorFingerprint {
         }
         if self.max_touch_points > 256 {
             return Err("max_touch_points must not exceed 256".to_owned());
+        }
+        if self.user_activation_is_active && !self.user_activation_has_been_active {
+            return Err("navigator.userActivation.isActive requires hasBeenActive".to_owned());
         }
         if let Some(value) = &self.do_not_track
             && value != "0"

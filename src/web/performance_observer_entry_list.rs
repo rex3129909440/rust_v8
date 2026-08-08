@@ -105,6 +105,7 @@ fn get_entries(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(entries) = record(scope, arguments.this()) {
+        let entries = super::performance::chronological_entries(scope, entries);
         result.set(array_from_entries(scope, &entries).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
@@ -135,6 +136,7 @@ fn get_entries_by_name(
             })
         })
         .collect::<Vec<_>>();
+    let matches = super::performance::chronological_entries(scope, matches);
     result.set(array_from_entries(scope, &matches).into());
 }
 
@@ -156,6 +158,7 @@ fn get_entries_by_type(
                 .is_some_and(|record| record.entry_type == entry_type)
         })
         .collect::<Vec<_>>();
+    let matches = super::performance::chronological_entries(scope, matches);
     result.set(array_from_entries(scope, &matches).into());
 }
 

@@ -21,7 +21,7 @@ except ImportError:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ABI_VERSION = 1
-PROFILE_SCHEMA_VERSION = 7
+PROFILE_SCHEMA_VERSION = 8
 OPTIONS_SCHEMA_VERSION = 2
 
 DEMO_JAVASCRIPT = r"""
@@ -318,11 +318,13 @@ def find_native_artifacts(
     # wheel payload so local regression tests cannot silently load a stale DLL.
     # Installed wheels do not contain PROJECT_ROOT/target and therefore still
     # resolve to their packaged native library below.
-    for profile in ("release", "debug"):
-        profile_dir = PROJECT_ROOT / "target" / profile
-        candidate_library = profile_dir / library_name
-        if candidate_library.is_file():
-            return candidate_library, None
+    source_artifacts = tuple(
+        candidate
+        for profile in ("release", "debug")
+        if (candidate := PROJECT_ROOT / "target" / profile / library_name).is_file()
+    )
+    if source_artifacts:
+        return max(source_artifacts, key=lambda item: item.stat().st_mtime_ns), None
 
     packaged_library = Path(__file__).resolve().parent / "_native" / library_name
     if packaged_library.is_file():
@@ -1198,6 +1200,16 @@ class EdgeSandbox:
             self._profile_set_string(
                 handle, field.NAVIGATOR_DO_NOT_TRACK, navigator.do_not_track
             )
+            self._profile_set_bool(
+                handle,
+                field.NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE,
+                navigator.user_activation_has_been_active,
+            )
+            self._profile_set_bool(
+                handle,
+                field.NAVIGATOR_USER_ACTIVATION_IS_ACTIVE,
+                navigator.user_activation_is_active,
+            )
 
             user_agent_data = navigator.user_agent_data
             if user_agent_data is not None:
@@ -1857,6 +1869,11 @@ class EdgeSandbox:
 
         webgpu = profile.webgpu
         if webgpu is not None:
+            self._profile_set_bool(
+                handle,
+                field.WEBGPU_AVAILABLE,
+                webgpu.available,
+            )
             self._profile_set_string(handle, field.WEBGPU_VENDOR, webgpu.vendor)
             self._profile_set_string(
                 handle, field.WEBGPU_ARCHITECTURE, webgpu.architecture
@@ -2290,6 +2307,21 @@ class EdgeSandbox:
             self._profile_set_string(handle, field.CSS_INPUT_FILE, css.input_file)
             self._profile_set_string(handle, field.CSS_INPUT_TEXT, css.input_text)
 
+        document = profile.document
+        if document is not None:
+            self._profile_set_number(
+                "edge_sandbox_profile_set_u32",
+                handle,
+                field.DOCUMENT_BODY_CHILD_ELEMENT_COUNT,
+                document.body_child_element_count,
+            )
+            self._profile_set_number(
+                "edge_sandbox_profile_set_f64",
+                handle,
+                field.DOCUMENT_BODY_CLIENT_HEIGHT,
+                document.body_client_height,
+            )
+
         media = profile.media
         if media is not None:
             if media.devices is not None:
@@ -2632,6 +2664,11 @@ class EdgeSandbox:
             )
             self._profile_set_bool(
                 handle,
+                field.MEDIA_PREFERENCE_REDUCED_TRANSPARENCY,
+                preferences.reduced_transparency,
+            )
+            self._profile_set_bool(
+                handle,
                 field.MEDIA_PREFERENCE_REDUCED_DATA,
                 preferences.reduced_data,
             )
@@ -2683,6 +2720,11 @@ class EdgeSandbox:
                 handle,
                 field.MEDIA_PREFERENCE_DYNAMIC_RANGE,
                 preferences.dynamic_range,
+            )
+            self._profile_set_string(
+                handle,
+                field.MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE,
+                preferences.video_dynamic_range,
             )
             self._profile_set_string(
                 handle,
@@ -2933,6 +2975,11 @@ class EdgeSandbox:
 
         sensors = profile.sensors
         if sensors is not None:
+            self._profile_set_bool(
+                handle,
+                field.SENSORS_AVAILABLE,
+                sensors.available,
+            )
             if sensors.accelerometer is not None:
                 self._profile_set_number(
                     "edge_sandbox_profile_set_f64",

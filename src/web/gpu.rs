@@ -126,6 +126,13 @@ fn request_adapter(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
+    if !crate::fingerprint::edge(scope).rendering.webgpu.available {
+        let null = v8::null(scope);
+        if let Ok(promise) = super::writable_stream::resolved_promise(scope, null.into()) {
+            result.set(promise.into());
+        }
+        return;
+    }
     if let Ok(adapter) = super::gpu_adapter::create(scope)
         && let Ok(promise) = super::writable_stream::resolved_promise(scope, adapter.into())
     {

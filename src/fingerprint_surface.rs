@@ -1,3 +1,7 @@
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct LocaleFingerprint {
     pub locale: String,
@@ -119,6 +123,8 @@ pub struct WebGlFingerprint {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct WebGpuFingerprint {
+    #[serde(default = "default_true")]
+    pub available: bool,
     pub vendor: String,
     pub architecture: String,
     pub device: String,
@@ -374,6 +380,7 @@ impl Default for WebGlFingerprint {
 impl Default for WebGpuFingerprint {
     fn default() -> Self {
         Self {
+            available: true,
             vendor: "Microsoft".to_owned(),
             architecture: "D3D12".to_owned(),
             device: "Edge WebGPU Adapter".to_owned(),

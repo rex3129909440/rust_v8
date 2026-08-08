@@ -866,6 +866,7 @@ def mac_edge_150_profile(
             midi_sysex_enabled=False,
         ),
         sensors=SensorsProfile(
+            available=False,
             accelerometer=(0.0, 0.0, 0.0),
             gravity=(0.0, 0.0, 0.0),
             linear_acceleration=(0.0, 0.0, 0.0),
@@ -875,12 +876,12 @@ def mac_edge_150_profile(
         ),
         xr=XrProfile(supported_session_modes=("inline",)),
         memory=MemoryProfile(
-            performance_js_heap_size_limit=4_294_705_152,
-            performance_total_js_heap_size=13_061_022,
-            performance_used_js_heap_size=12_562_246,
-            console_js_heap_size_limit=4_294_705_152,
-            console_total_js_heap_size=13_061_022,
-            console_used_js_heap_size=12_562_246,
+            performance_js_heap_size_limit=4_395_630_592,
+            performance_total_js_heap_size=189_287_527,
+            performance_used_js_heap_size=180_511_835,
+            console_js_heap_size_limit=4_395_630_592,
+            console_total_js_heap_size=189_287_527,
+            console_used_js_heap_size=180_511_835,
         ),
     )
     primary_language = locale.replace("_", "-").lower()

@@ -20,8 +20,14 @@ Modeling notes:
 from __future__ import annotations
 
 import random
+from copy import deepcopy
 from functools import lru_cache
 from typing import Iterable
+
+try:
+    from .pc_screen_extension_catalog import PC_SCREEN_EXTENSION_ROWS
+except ImportError:  # Support importing this catalog directly.
+    from pc_screen_extension_catalog import PC_SCREEN_EXTENSION_ROWS  # type: ignore
 
 
 # id, css_screen_width, css_screen_height, dpr, weight, tags
@@ -136,6 +142,19 @@ PC_SCREEN_SIZE_ROWS: tuple[tuple[str, int, int, float, int, tuple[str, ...]], ..
     ("pc_5120x2880_2x_5k", 2560, 1440, 2.0, 6, ("desktop", "5k", "hidpi")),
 )
 
+# Preserve the original rows and append the evidence-backed extension. No
+# existing ID, value or weight is replaced.
+BASE_PC_SCREEN_SIZE_ROWS = PC_SCREEN_SIZE_ROWS
+_BASE_PC_SCREEN_IDS = frozenset(row[0] for row in BASE_PC_SCREEN_SIZE_ROWS)
+_EXTENSION_SCREEN_SOURCES = {
+    row[0]: tuple(row[6]) for row in PC_SCREEN_EXTENSION_ROWS
+}
+if _BASE_PC_SCREEN_IDS & _EXTENSION_SCREEN_SOURCES.keys():
+    raise ValueError("PC screen extension attempts to replace an existing profile")
+PC_SCREEN_SIZE_ROWS = BASE_PC_SCREEN_SIZE_ROWS + tuple(
+    row[:6] for row in PC_SCREEN_EXTENSION_ROWS
+)
+
 
 def _maximized_pc_window_rect(
     screen_width: int,
@@ -166,6 +185,12 @@ def build_pc_screen_profile(row: tuple[str, int, int, float, int, tuple[str, ...
     taskbar_height = height - outer_height
     return {
         "id": profile_id,
+        "catalog": (
+            "existing-pc-screen"
+            if profile_id in _BASE_PC_SCREEN_IDS
+            else "public-screen-extension"
+        ),
+        "evidenceSources": _EXTENSION_SCREEN_SOURCES.get(profile_id, ()),
         "deviceClass": "pc",
         "weight": weight,
         "tags": tags,
@@ -293,6 +318,52 @@ def choose_pc_screen_profile_for_hardware(
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
+def materialize_pc_screen_profile_for_windows(
+    profile: dict[str, object],
+    platform_version: str,
+) -> dict[str, object]:
+    """Return an OS-specific copy of a Windows screen profile.
+
+    The immutable catalog remains additive and platform-neutral. Chromium's
+    frozen ``Windows NT 10.0`` UA does not distinguish Windows 10 from 11, but
+    UA-CH platform versions 10 and 15 do. Their default taskbar work areas are
+    modeled separately here so a Windows 10 profile is not paired with the
+    Windows 11 48-CSS-pixel work area.
+    """
+
+    try:
+        platform_major = int(str(platform_version).split(".", 1)[0])
+    except (TypeError, ValueError) as error:
+        raise ValueError("invalid Windows UA-CH platform version") from error
+    taskbar_height = 48 if platform_major >= 13 else 40
+
+    materialized = deepcopy(profile)
+    screen = materialized.get("screen", {})
+    window = materialized.get("window", {})
+    viewport = materialized.get("visualViewport", {})
+    media_viewport = materialized.get("mediaViewport", {})
+    if not isinstance(screen, dict) or not isinstance(window, dict):
+        raise ValueError("selected screen profile is malformed")
+
+    screen_height = int(screen.get("height", 0) or 0)
+    outer_height = max(0, screen_height - taskbar_height)
+    inner_height = max(0, outer_height - 88)
+    screen["availHeight"] = outer_height
+    window["outerHeight"] = outer_height
+    window["innerHeight"] = inner_height
+    if isinstance(viewport, dict):
+        viewport["height"] = inner_height
+    if isinstance(media_viewport, dict):
+        media_viewport["height"] = inner_height
+
+    materialized["taskbarCssHeight"] = taskbar_height
+    materialized["windowsPlatformVersion"] = str(platform_version)
+    materialized["id"] = (
+        f"{profile.get('id', 'pc_screen')}__win{platform_major}_taskbar{taskbar_height}"
+    )
+    return materialized
+
+
 def _compute_compatible_pc_screen_profiles_for_device(
     hardware_profile: dict[str, object] | None,
     tag: str | None = "windows",
@@ -310,7 +381,10 @@ def _compute_compatible_pc_screen_profiles_for_device(
     )
     gpu_tier = str((gpu_profile or {}).get("tier", "") or "").lower()
     gpu_model = str((gpu_profile or {}).get("model", "") or "").lower()
-    portable_gpu = gpu_tier == "laptop" or any(
+    gpu_form_factor = str(
+        (gpu_profile or {}).get("formFactor", "mixed") or "mixed"
+    ).lower()
+    portable_gpu = gpu_form_factor == "portable" or gpu_tier == "laptop" or any(
         needle in gpu_model
         for needle in ("laptop gpu", "max-q", "geforce mx")
     )
@@ -339,14 +413,14 @@ def _compute_compatible_pc_screen_profiles_for_device(
             profile
             for profile in profiles
             if has_any(profile, {"arm64", "surface", "hidpi", "laptop", "scaled"})
-            and not has_any(profile, {"ultrawide", "super_ultrawide", "legacy", "netbook", "5k"})
+            and not has_any(profile, {"ultrawide", "super_ultrawide", "legacy", "netbook", "5k", "6k", "8k"})
         )
     elif portable_gpu or "laptop" in hardware_tags or "surface" in hardware_tags or "touch" in hardware_tags or "convertible" in hardware_tags:
         candidates = tuple(
             profile
             for profile in profiles
             if has_any(profile, {"surface", "laptop", "hidpi", "scaled", "lowend"})
-            and not has_any(profile, {"arm64", "ultrawide", "super_ultrawide", "5k"})
+            and not has_any(profile, {"arm64", "ultrawide", "super_ultrawide", "5k", "6k", "8k"})
             and (
                 "legacy" in hardware_tags
                 or not has_any(profile, {"legacy", "netbook"})
@@ -370,7 +444,7 @@ def _compute_compatible_pc_screen_profiles_for_device(
         candidates = tuple(
             profile
             for profile in profiles
-            if not has_any(profile, {"arm64", "surface", "ultrawide", "super_ultrawide", "qhd", "4k", "5k", "hidpi"})
+            if not has_any(profile, {"arm64", "surface", "ultrawide", "super_ultrawide", "qhd", "4k", "5k", "6k", "8k", "hidpi"})
             and screen_size(profile)[0] <= 1920
             and screen_size(profile)[1] <= 1200
             and dpr(profile) <= 1.5
@@ -379,7 +453,7 @@ def _compute_compatible_pc_screen_profiles_for_device(
         candidates = tuple(
             profile
             for profile in profiles
-            if not has_any(profile, {"arm64", "surface", "super_ultrawide", "5k", "legacy", "netbook", "laptop"})
+            if not has_any(profile, {"arm64", "surface", "super_ultrawide", "5k", "6k", "8k", "legacy", "netbook", "laptop"})
         )
 
     return candidates

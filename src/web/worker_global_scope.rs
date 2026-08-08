@@ -266,7 +266,7 @@ pub(crate) fn create(
         let location = super::worker_location::create(realm_scope)?;
         let navigator = super::worker_navigator::create(realm_scope)?;
         let crypto = super::crypto::create(realm_scope)?;
-        let performance = super::performance::create(realm_scope)?;
+        let performance = super::performance::create(realm_scope, false)?;
         let scheduler = super::scheduler::create(realm_scope)?;
         let trusted_types = super::trusted_type_policy_factory::create(realm_scope)?;
         let caches = super::cache_storage::create(realm_scope)?;

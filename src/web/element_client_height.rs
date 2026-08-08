@@ -10,12 +10,17 @@ fn get_client_height(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if super::element::record(scope, arguments.this()).is_some() {
-        let metrics = super::element_layout::scroll_metrics(scope, arguments.this());
-        result.set(
-            v8::Integer::new(scope, super::element_layout::rounded(metrics.client_height)).into(),
-        );
-    } else {
+    let Some(record) = super::element::record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    if record.tag_name.eq_ignore_ascii_case("BODY")
+        && let Some(height) = crate::fingerprint::edge(scope).document.body_client_height
+    {
+        result.set(v8::Integer::new(scope, super::element_layout::rounded(height)).into());
+        return;
     }
+    let metrics = super::element_layout::scroll_metrics(scope, arguments.this());
+    result
+        .set(v8::Integer::new(scope, super::element_layout::rounded(metrics.client_height)).into());
 }

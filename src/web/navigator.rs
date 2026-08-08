@@ -249,8 +249,15 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(scope, navigator, p.into()) != Some(true) {
         return Err("cannot create Navigator".to_owned());
     }
+    let (has_been_active, is_active) = {
+        let fingerprint = crate::fingerprint::navigator(scope);
+        (
+            fingerprint.user_activation_has_been_active,
+            fingerprint.user_activation_is_active,
+        )
+    };
     let scheduling = super::scheduling::create(scope)?;
-    let user_activation = super::user_activation::create(scope, false, false)?;
+    let user_activation = super::user_activation::create(scope, has_been_active, is_active)?;
     let permissions = super::permissions::create(scope)?;
     let plugins = super::plugin_array::create(scope)?;
     let mime_types = super::mime_type_array::create(scope, plugins)?;

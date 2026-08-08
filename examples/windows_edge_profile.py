@@ -602,6 +602,7 @@ def windows_edge_150_profile(
             midi_sysex_enabled=False,
         ),
         sensors=SensorsProfile(
+            available=True,
             accelerometer=(0.0, 0.0, 0.0),
             gravity=(0.0, 0.0, 0.0),
             linear_acceleration=(0.0, 0.0, 0.0),
@@ -612,11 +613,11 @@ def windows_edge_150_profile(
         timing=TimingProfile(clock_step_ms=1),
         xr=XrProfile(("inline",)),
         memory=MemoryProfile(
-            performance_js_heap_size_limit=4_294_705_152,
-            performance_total_js_heap_size=13_061_022,
-            performance_used_js_heap_size=12_562_246,
-            console_js_heap_size_limit=4_294_705_152,
-            console_total_js_heap_size=13_061_022,
-            console_used_js_heap_size=12_562_246,
+            performance_js_heap_size_limit=4_395_630_592,
+            performance_total_js_heap_size=98_833_423,
+            performance_used_js_heap_size=62_981_207,
+            console_js_heap_size_limit=4_395_630_592,
+            console_total_js_heap_size=98_833_423,
+            console_used_js_heap_size=62_981_207,
         ),
     )

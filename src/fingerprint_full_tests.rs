@@ -124,6 +124,27 @@ fn font_css_and_webgpu_platform_differences_are_profile_driven() {
 }
 
 #[test]
+fn unavailable_webgpu_adapter_resolves_to_null_without_hiding_navigator_gpu() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.rendering.webgpu.available = false;
+    let mut runtime = EdgeRuntime::with_options(options).expect("unavailable WebGPU adapter");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            navigator.gpu.requestAdapter().then(adapter => [
+              "gpu" in navigator,
+              adapter === null,
+              Function.prototype.toString.call(GPU.prototype.requestAdapter)
+            ].join("|"))
+            "#,
+        ),
+        "true|true|function requestAdapter() { [native code] }"
+    );
+}
+
+#[test]
 fn zero_sized_window_viewport_is_independent_from_physical_screen() {
     let mut options = EdgeRuntimeOptions::default();
     options.fingerprint.screen.viewport_width = 0.0;
@@ -291,6 +312,28 @@ fn zero_sized_inline_iframe_still_creates_the_parent_line_box() {
             "#,
         ),
         "18|0|1|0"
+    );
+}
+
+#[test]
+fn standalone_evaluate_materializes_profiled_body_state_before_script_execution() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.document.body_child_element_count = Some(5);
+    options.fingerprint.document.body_client_height = Some(23.0);
+    let mut runtime = EdgeRuntime::with_options(options).expect("profiled default document");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            [
+              document.body.childElementCount,
+              Array.from(document.body.children).every(node => node.tagName === "DIV"),
+              document.body.clientHeight
+            ].join("|")
+            "#,
+        ),
+        "5|true|23"
     );
 }
 

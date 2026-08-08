@@ -1,0 +1,17 @@
+key	value
+captured_at_utc	2026-07-29T08:26:59.301Z
+browser	Microsoft Edge
+browser_version	Edg/150.0.4078.65
+user_agent	Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0
+user_agent_brands	Not;A=Brand/8,Chromium/150,Microsoft Edge/150
+url	https://example.com/
+secure_context	true
+cross_origin_isolated	false
+window_own_property_count	1232
+window_sha256	3d9b8e75b2776b519c0211d8b26565ce059d91f229430b7fe8b616ccf5ff3bda
+interfaces_row_count	9908
+interfaces_sha256	92d7c6996e674d3a68e6c6940282bdefc58fe9b5b21ddb3cb03d901f2951bd4e
+worker_row_count	718
+worker_sha256	cd49ed66ef149e2fdc31dbbeac885c76ad5dde99a798169adb34ae8f0b2bab7c
+targeted_behavior_row_count	246
+targeted_behavior_sha256	26dd0ca2c40a65b64a38c3c30178baa0432173c5e0b41e29a6fdffee05e185eb

@@ -230,6 +230,16 @@ fn start(
     if current.active {
         return;
     }
+    if !crate::fingerprint::edge(scope).sensors.available {
+        update(scope, arguments.this(), |record| {
+            record.active = false;
+            record.has_reading = false;
+            record.timestamp = None;
+        });
+        let refreshed = record(scope, arguments.this()).expect("Sensor state");
+        invoke_unavailable_error(scope, arguments.this(), refreshed.onerror);
+        return;
+    }
     let timestamp = super::performance::now_for_current_realm(scope).unwrap_or_else(|| {
         crate::determinism::high_resolution_milliseconds(crate::determinism::elapsed_milliseconds(
             scope,
@@ -243,6 +253,30 @@ fn start(
     let refreshed = record(scope, arguments.this()).expect("Sensor state");
     invoke(scope, arguments.this(), refreshed.onactivate, "activate");
     invoke(scope, arguments.this(), refreshed.onreading, "reading");
+}
+
+fn invoke_unavailable_error(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+    handler: Option<v8::Global<v8::Value>>,
+) {
+    let Some(handler) = handler else {
+        return;
+    };
+    let Ok(handler) = v8::Local::<v8::Function>::try_from(v8::Local::new(scope, &handler)) else {
+        return;
+    };
+    let Ok(error) = super::dom_exception::create(
+        scope,
+        "Could not connect to a sensor".to_owned(),
+        "NotReadableError".to_owned(),
+    ) else {
+        return;
+    };
+    let Ok(event) = super::sensor_error_event::create(scope, error) else {
+        return;
+    };
+    let _ = handler.call(scope, target.into(), &[event.into()]);
 }
 
 fn stop(

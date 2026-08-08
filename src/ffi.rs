@@ -229,6 +229,7 @@ pub mod profile_field {
     pub const MEDIA_PREFERENCE_DISPLAY_MODE: u32 = 827;
     pub const MEDIA_PREFERENCE_DYNAMIC_RANGE: u32 = 828;
     pub const MEDIA_PREFERENCE_SCRIPTING: u32 = 829;
+    pub const MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE: u32 = 830;
 
     pub const NAVIGATOR_LANGUAGES: u32 = 100;
     pub const UA_FORM_FACTORS: u32 = 101;
@@ -295,6 +296,7 @@ pub mod profile_field {
     pub const SCREEN_ORIENTATION_ANGLE: u32 = 238;
     pub const WEBGPU_SUBGROUP_MIN_SIZE: u32 = 239;
     pub const WEBGPU_SUBGROUP_MAX_SIZE: u32 = 240;
+    pub const DOCUMENT_BODY_CHILD_ELEMENT_COUNT: u32 = 241;
 
     pub const TIME_ZONE_OFFSET_MINUTES: u32 = 300;
     pub const SCREEN_WIDTH: u32 = 301;
@@ -430,6 +432,7 @@ pub mod profile_field {
     pub const VISUAL_VIEWPORT_PAGE_TOP: u32 = 560;
     pub const VISUAL_VIEWPORT_SCALE: u32 = 561;
     pub const WEBGL2_MAX_TEXTURE_LOD_BIAS: u32 = 562;
+    pub const DOCUMENT_BODY_CLIENT_HEIGHT: u32 = 563;
 
     pub const AUDIO_CHANNEL_NOISE_AMPLITUDE: u32 = 600;
     pub const AUDIO_FREQUENCY_NOISE_AMPLITUDE: u32 = 601;
@@ -462,6 +465,11 @@ pub mod profile_field {
     pub const MIDI_SYSEX_ENABLED: u32 = 724;
     pub const WEBGPU_DEVELOPER_FEATURES: u32 = 725;
     pub const WEBGPU_IS_FALLBACK_ADAPTER: u32 = 726;
+    pub const SENSORS_AVAILABLE: u32 = 727;
+    pub const WEBGPU_AVAILABLE: u32 = 728;
+    pub const MEDIA_PREFERENCE_REDUCED_TRANSPARENCY: u32 = 729;
+    pub const NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE: u32 = 730;
+    pub const NAVIGATOR_USER_ACTIVATION_IS_ACTIVE: u32 = 731;
 }
 
 pub struct EdgeSandboxHandle {
@@ -631,7 +639,7 @@ unsafe fn options_ref<'a>(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_profile_schema_version() -> u32 {
-    7
+    8
 }
 
 /// Allocates a profile builder initialized with the fixed Chrome 150 defaults.
@@ -879,6 +887,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_string(
             profile_field::MEDIA_PREFERENCE_SCRIPTING => {
                 fingerprint.media_preferences.scripting = value;
             }
+            profile_field::MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE => {
+                fingerprint.media_preferences.video_dynamic_range = value;
+            }
             _ => return Err(format!("unknown string profile field {field}")),
         }
         Ok(())
@@ -1034,6 +1045,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_u32(
             }
             profile_field::MEDIA_PREFERENCE_MONOCHROME_BITS => {
                 fingerprint.media_preferences.monochrome_bits = value;
+            }
+            profile_field::DOCUMENT_BODY_CHILD_ELEMENT_COUNT => {
+                fingerprint.document.body_child_element_count = Some(value);
             }
             profile_field::WEBGPU_MAX_TEXTURE_DIMENSION_1D => {
                 fingerprint.rendering.webgpu.max_texture_dimension_1d = value;
@@ -1537,6 +1551,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_f64(
             profile_field::WEBGL2_MAX_TEXTURE_LOD_BIAS => {
                 fingerprint.rendering.webgl.webgl2_max_texture_lod_bias = value;
             }
+            profile_field::DOCUMENT_BODY_CLIENT_HEIGHT => {
+                fingerprint.document.body_client_height = Some(value);
+            }
             profile_field::AUDIO_SAMPLE_RATE => {
                 fingerprint.rendering.audio.sample_rate = value;
             }
@@ -1743,6 +1760,15 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_bool(
             profile_field::MEDIA_PREFERENCE_INVERTED_COLORS => {
                 fingerprint.media_preferences.inverted_colors = value;
             }
+            profile_field::MEDIA_PREFERENCE_REDUCED_TRANSPARENCY => {
+                fingerprint.media_preferences.reduced_transparency = value;
+            }
+            profile_field::NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE => {
+                fingerprint.navigator.user_activation_has_been_active = value;
+            }
+            profile_field::NAVIGATOR_USER_ACTIVATION_IS_ACTIVE => {
+                fingerprint.navigator.user_activation_is_active = value;
+            }
             profile_field::WEBGL_CONTEXT_ALPHA => {
                 fingerprint.rendering.webgl.context_alpha = value;
             }
@@ -1784,6 +1810,12 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_bool(
             }
             profile_field::WEBGPU_IS_FALLBACK_ADAPTER => {
                 fingerprint.rendering.webgpu.is_fallback_adapter = value;
+            }
+            profile_field::SENSORS_AVAILABLE => {
+                fingerprint.sensors.available = value;
+            }
+            profile_field::WEBGPU_AVAILABLE => {
+                fingerprint.rendering.webgpu.available = value;
             }
             _ => return Err(format!("unknown bool profile field {field}")),
         }
@@ -4064,3 +4096,81 @@ pub extern "C" fn edge_sandbox_abi_version() -> u32 {
 // Keep the opaque handle ABI visibly pointer-sized in generated bindings.
 const _: () =
     assert!(std::mem::size_of::<*mut EdgeSandboxHandle>() == std::mem::size_of::<*mut c_void>());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_document_media_and_activation_fields_cross_the_typed_ffi() {
+        let mut profile = EdgeSandboxProfile {
+            fingerprint: crate::EdgeFingerprint::default(),
+        };
+        let profile_ptr = &mut profile as *mut EdgeSandboxProfile;
+        let mut error = EdgeSandboxBuffer::default();
+        let high = b"high";
+
+        // SAFETY: profile and error point to live stack values and `high`
+        // remains readable for the duration of the synchronous call.
+        unsafe {
+            assert!(edge_sandbox_profile_set_u32(
+                profile_ptr,
+                profile_field::DOCUMENT_BODY_CHILD_ELEMENT_COUNT,
+                5,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_f64(
+                profile_ptr,
+                profile_field::DOCUMENT_BODY_CLIENT_HEIGHT,
+                23.0,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE,
+                true,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::NAVIGATOR_USER_ACTIVATION_IS_ACTIVE,
+                true,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::MEDIA_PREFERENCE_REDUCED_TRANSPARENCY,
+                true,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_string(
+                profile_ptr,
+                profile_field::MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE,
+                high.as_ptr(),
+                high.len(),
+                &mut error,
+            ));
+        }
+
+        assert_eq!(
+            profile.fingerprint.document.body_child_element_count,
+            Some(5)
+        );
+        assert_eq!(profile.fingerprint.document.body_client_height, Some(23.0));
+        assert!(
+            profile
+                .fingerprint
+                .navigator
+                .user_activation_has_been_active
+        );
+        assert!(profile.fingerprint.navigator.user_activation_is_active);
+        assert!(profile.fingerprint.media_preferences.reduced_transparency);
+        assert_eq!(
+            profile.fingerprint.media_preferences.video_dynamic_range,
+            "high"
+        );
+        assert_eq!(profile.fingerprint.validate(), Ok(()));
+        assert!(error.data.is_null());
+        assert_eq!(error.len, 0);
+    }
+}

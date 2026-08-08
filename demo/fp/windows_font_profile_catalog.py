@@ -6,6 +6,9 @@ from __future__ import annotations
 MICROSOFT_WINDOWS_11_FONT_SOURCE = (
     "https://learn.microsoft.com/en-us/typography/fonts/windows_11_font_list"
 )
+MICROSOFT_WINDOWS_10_FONT_SOURCE = (
+    "https://learn.microsoft.com/en-us/typography/fonts/windows_10_font_list"
+)
 
 WINDOWS_CORE_FONT_FAMILIES: tuple[str, ...] = (
     "Arial",
@@ -233,6 +236,18 @@ WINDOWS_CORE_FONT_METRICS: tuple[tuple[str, float, bool], ...] = (
     ("Yu Gothic UI", 0.984646, False),
 )
 
+
+# These families are part of the Windows 11 stock inventory but not the
+# published Windows 10 2004 desktop set.  Keeping a separate exclusion list
+# lets the shared, much larger Windows inventory remain reviewable while
+# preventing Windows 10 UA-CH profiles from leaking Windows 11 typography.
+WINDOWS_11_ONLY_FONT_FAMILIES: frozenset[str] = frozenset((
+    "Cascadia Code",
+    "Cascadia Mono",
+    "Segoe Fluent Icons",
+    "Segoe UI Variable",
+))
+
 _LANGUAGE_FONT_ADDITIONS: dict[
     str,
     tuple[
@@ -361,22 +376,64 @@ def _language_key(locale: str) -> str:
     return normalized.split("-", 1)[0]
 
 
-def build_windows_font_profile(locale: str) -> dict[str, object]:
+def build_windows_font_profile(
+    locale: str,
+    windows_platform_version: str = "15.0.0",
+) -> dict[str, object]:
     additions = _LANGUAGE_FONT_ADDITIONS.get(_language_key(locale), ((), (), ()))
+    try:
+        platform_major = int(str(windows_platform_version).split(".", 1)[0])
+    except ValueError as error:
+        raise ValueError("windows_platform_version must start with an integer") from error
+    windows_11 = platform_major >= 13
+    core_families = (
+        WINDOWS_CORE_FONT_FAMILIES
+        if windows_11
+        else tuple(
+            family
+            for family in WINDOWS_CORE_FONT_FAMILIES
+            if family not in WINDOWS_11_ONLY_FONT_FAMILIES
+        )
+    )
+    core_local_fonts = (
+        WINDOWS_CORE_LOCAL_FONTS
+        if windows_11
+        else tuple(
+            item
+            for item in WINDOWS_CORE_LOCAL_FONTS
+            if item[2] not in WINDOWS_11_ONLY_FONT_FAMILIES
+        )
+    )
+    core_metrics = (
+        WINDOWS_CORE_FONT_METRICS
+        if windows_11
+        else tuple(
+            item
+            for item in WINDOWS_CORE_FONT_METRICS
+            if item[0] not in WINDOWS_11_ONLY_FONT_FAMILIES
+        )
+    )
+    os_label = "11" if windows_11 else "10"
     return {
-        "id": f"windows-11-{_language_key(locale) or 'default'}",
-        "source": MICROSOFT_WINDOWS_11_FONT_SOURCE,
-        "families": tuple(dict.fromkeys((*WINDOWS_CORE_FONT_FAMILIES, *additions[0]))),
+        "id": f"windows-{os_label}-{_language_key(locale) or 'default'}",
+        "source": (
+            MICROSOFT_WINDOWS_11_FONT_SOURCE
+            if windows_11
+            else MICROSOFT_WINDOWS_10_FONT_SOURCE
+        ),
+        "families": tuple(dict.fromkeys((*core_families, *additions[0]))),
         "allowUnknownFamilies": False,
-        "localFonts": tuple(dict.fromkeys((*WINDOWS_CORE_LOCAL_FONTS, *additions[1]))),
-        "metrics": tuple(dict.fromkeys((*WINDOWS_CORE_FONT_METRICS, *additions[2]))),
+        "localFonts": tuple(dict.fromkeys((*core_local_fonts, *additions[1]))),
+        "metrics": tuple(dict.fromkeys((*core_metrics, *additions[2]))),
     }
 
 
 __all__ = [
+    "MICROSOFT_WINDOWS_10_FONT_SOURCE",
     "MICROSOFT_WINDOWS_11_FONT_SOURCE",
     "WINDOWS_CORE_FONT_FAMILIES",
     "WINDOWS_CORE_FONT_METRICS",
     "WINDOWS_CORE_LOCAL_FONTS",
+    "WINDOWS_11_ONLY_FONT_FAMILIES",
     "build_windows_font_profile",
 ]

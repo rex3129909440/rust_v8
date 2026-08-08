@@ -30,15 +30,24 @@ def create_country_profile(
     ua: str | None = None,
     *,
     seed: int | None = None,
+    body_child_element_count: int | None = 5,
+    body_client_height: float | None = 23.0,
 ) -> EdgeProfile:
     """Return a complete profile from a country code and optional desktop UA.
 
     ``country_code`` must be an ISO 3166-1 alpha-2 code.  A Windows or macOS
     Chromium UA selects the matching platform catalogs.  Omitting ``ua`` uses
-    the fixed Windows Chrome 150 UA.
+    the fixed Windows Chrome 150 UA. The standalone BODY defaults to five
+    children and a 23-pixel client height.
     """
 
-    return get_random_fp(country_code, ua, seed=seed)
+    return get_random_fp(
+        country_code,
+        ua,
+        seed=seed,
+        body_child_element_count=body_child_element_count,
+        body_client_height=body_client_height,
+    )
 
 
 def create_country_profile_details(
@@ -46,10 +55,21 @@ def create_country_profile_details(
     ua: str | None = None,
     *,
     seed: int | None = None,
+    body_child_element_count: int | None = 5,
+    body_client_height: float | None = 23.0,
 ) -> RandomFingerprint:
-    """Return the profile plus selected time-zone and hardware metadata."""
+    """Return the profile plus selected time-zone and hardware metadata.
 
-    return get_random_fp_details(country_code, ua, seed=seed)
+    The standalone BODY defaults to five children and clientHeight 23.
+    """
+
+    return get_random_fp_details(
+        country_code,
+        ua,
+        seed=seed,
+        body_child_element_count=body_child_element_count,
+        body_client_height=body_client_height,
+    )
 
 
 __all__ = [

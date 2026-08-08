@@ -953,7 +953,7 @@ fn performance_timeline_observer_queue_and_measure_options_are_functional() {
         "true|3|1|true|true|2|5|measure-detail|1|true|",
         "function observe() { [native code] }"
     );
-    let expected_callback = "a,b,span,taken|true|0";
+    let expected_callback = "a,span,b,taken|true|0";
 
     let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
     assert_eq!(text(&mut direct, setup), expected_immediate);
@@ -998,6 +998,316 @@ fn performance_timeline_observer_queue_and_measure_options_are_functional() {
             && entry.api.contains("PerformanceObserver")
             && entry.api.ends_with(".takeRecords")
     }));
+}
+
+#[test]
+fn user_timing_matches_edge_errors_clone_semantics_and_chronological_order() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let answer = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const error = callback => {
+            try { callback(); return "ok"; }
+            catch (value) {
+              return [value.name, value.constructor.name, value.code ?? "-"].join(":");
+            }
+          };
+          performance.clearMarks();
+          performance.clearMeasures();
+          const output = [
+            error(() => performance.measure("missing", "absent-mark")),
+            error(() => performance.measure("duration-only", {duration: 1})),
+            error(() => performance.measure("all", {start: 0, duration: 1, end: 2})),
+            error(() => performance.measure("negative", {start: -1, end: 2})),
+            error(() => performance.mark("navigationStart")),
+            error(() => new PerformanceMark("navigationStart")),
+            error(() => performance.mark("nan", {startTime: NaN})),
+            error(() => performance.mark("function-detail", {detail() {}})),
+            error(() => performance.measure("function-detail", {start: 0, end: 1, detail() {}}))
+          ];
+
+          const cycle = {};
+          cycle.self = cycle;
+          const cloned = performance.mark("cycle", {detail: cycle}).detail;
+          output.push(cloned !== cycle && cloned.self === cloned);
+
+          const markOrder = [];
+          const markOptions = {};
+          Object.defineProperties(markOptions, {
+            startTime: {get() { markOrder.push("startTime"); return 3; }},
+            detail: {get() { markOrder.push("detail"); return null; }}
+          });
+          performance.mark("getter-mark", markOptions);
+          output.push(markOrder.join(","));
+
+          const measureOrder = [];
+          const measureOptions = {};
+          for (const [name, value] of [
+            ["start", 1], ["end", 2], ["duration", undefined], ["detail", null]
+          ]) {
+            Object.defineProperty(measureOptions, name, {
+              get() { measureOrder.push(name); return value; }
+            });
+          }
+          performance.measure("getter-measure", measureOptions);
+          output.push(measureOrder.join(","));
+
+          performance.clearMarks();
+          performance.mark("empty-options-end", {startTime: 4});
+          output.push(performance.measure("empty-options", {}, "empty-options-end").duration);
+          performance.clearMarks();
+          performance.mark("sort-late", {startTime: 20});
+          performance.mark("sort-early", {startTime: 10});
+          output.push(performance.getEntriesByType("mark").map(v => v.name).join(","));
+          performance.mark("same", {startTime: 30});
+          performance.mark("same", {startTime: 5});
+          output.push(performance.getEntriesByName("same", "mark").map(v => v.startTime).join(","));
+          output.push(performance.getEntries().filter(v => v.name.startsWith("sort-"))
+            .map(v => v.name).join(","));
+          return output.join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        answer,
+        concat!(
+            "SyntaxError:DOMException:12|TypeError:TypeError:-|TypeError:TypeError:-|",
+            "TypeError:TypeError:-|SyntaxError:DOMException:12|SyntaxError:DOMException:12|",
+            "TypeError:TypeError:-|",
+            "DataCloneError:DOMException:25|DataCloneError:DOMException:25|true|",
+            "detail,startTime|detail,duration,end,start|4|sort-early,sort-late|5,30|",
+            "sort-early,sort-late"
+        )
+    );
+}
+
+#[test]
+fn url_search_params_uses_webidl_union_conversion_and_live_pair_iterators() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let answer = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const errorName = callback => {
+            try { callback(); return "ok"; }
+            catch (error) { return error.name; }
+          };
+          const output = [];
+          output.push(Reflect.ownKeys(URLSearchParams.prototype).map(String).join(","));
+          output.push(new URLSearchParams(new Map([["a", "1"], ["a", "2"]])).toString());
+          output.push(new URLSearchParams((function* () {
+            yield (function* () { yield "x"; yield "7"; })();
+          })()).toString());
+          output.push(errorName(() => new URLSearchParams(["ab"])));
+          output.push(errorName(() => new URLSearchParams([["a", "1", "extra"]])));
+          output.push(errorName(() => new URLSearchParams([["a"]])));
+          output.push(errorName(() => new URLSearchParams([{}])));
+          output.push(new URLSearchParams(null).toString());
+          output.push(new URLSearchParams(12).toString());
+
+          const record = {};
+          Object.defineProperty(record, "hidden", {value: "no", enumerable: false});
+          record.visible = "yes";
+          output.push(new URLSearchParams(record).toString());
+          output.push(errorName(() => new URLSearchParams({[Symbol("key")]: "value"})));
+
+          const live = new URLSearchParams("a=1&b=2");
+          const iterator = live.entries();
+          const prototype = Object.getPrototypeOf(iterator);
+          const next = Object.getOwnPropertyDescriptor(prototype, "next");
+          const tag = Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag);
+          output.push([
+            Object.prototype.toString.call(iterator),
+            Reflect.ownKeys(prototype).map(String).join(","),
+            [next.writable, next.enumerable, next.configurable, next.value.name, next.value.length].join(","),
+            [tag.writable, tag.enumerable, tag.configurable].join(","),
+            iterator[Symbol.iterator]() === iterator,
+            Object.getPrototypeOf(prototype) ===
+              Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())),
+            Function.prototype.toString.call(next.value)
+          ].join("~"));
+          output.push(iterator.next().value.join(":"));
+          live.append("c", "3");
+          output.push(iterator.next().value.join(":"));
+          output.push(iterator.next().value.join(":"));
+
+          const deleted = new URLSearchParams("a=1&b=2");
+          const deletedIterator = deleted.keys();
+          deletedIterator.next();
+          deleted.delete("b");
+          output.push(JSON.stringify(deletedIterator.next()));
+
+          const each = new URLSearchParams("a=1&b=2");
+          const calls = [];
+          each.forEach((value, name, receiver) => {
+            calls.push(`${name}:${value}:${receiver === each}`);
+            if (name === "a") each.append("c", "3");
+          });
+          output.push(calls.join(","));
+
+          const deleteDuringEach = new URLSearchParams("a=1&b=2&c=3");
+          const deleteCalls = [];
+          deleteDuringEach.forEach((value, name) => {
+            deleteCalls.push(name);
+            if (name === "a") deleteDuringEach.delete("b");
+          });
+          output.push(deleteCalls.join(","));
+          return output.join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        answer,
+        concat!(
+            "size,append,delete,get,getAll,has,set,sort,toString,entries,forEach,keys,values,",
+            "constructor,Symbol(Symbol.toStringTag),Symbol(Symbol.iterator)|",
+            "a=2|x=7|TypeError|TypeError|TypeError|TypeError|null=|12=|visible=yes|TypeError|",
+            "[object URLSearchParams Iterator]~next,Symbol(Symbol.toStringTag)~",
+            "true,true,true,next,0~false,false,true~true~true~function next() { [native code] }|",
+            "a:1|b:2|c:3|{\"done\":true}|",
+            "a:1:true,b:2:true,c:3:true|a,c"
+        )
+    );
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(
+        text(
+            &mut traced,
+            "new URLSearchParams('trace=live').entries().next().value.join('=')"
+        ),
+        "trace=live"
+    );
+    let trace = traced.proxy_trace();
+    assert!(trace.iter().any(|entry| {
+        entry.operation == "call"
+            && entry.api.contains("URLSearchParams")
+            && entry.api.ends_with(".entries")
+    }));
+    assert!(
+        trace
+            .iter()
+            .any(|entry| { entry.operation == "call" && entry.api.ends_with(".next") })
+    );
+}
+
+#[test]
+fn headers_validate_bytestrings_and_expose_live_sorted_pair_iterators() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let answer = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const errorName = callback => {
+            try { callback(); return "ok"; }
+            catch (error) { return error.name; }
+          };
+          const output = [];
+          output.push(Reflect.ownKeys(Headers.prototype).map(String).join(","));
+          output.push(JSON.stringify(Array.from(
+            new Headers(new Map([["B", "2"], ["a", "1"]]))
+          )));
+          output.push(JSON.stringify(Array.from(new Headers((function* () {
+            yield (function* () { yield "X-One"; yield "  value\t"; })();
+          })()))));
+          output.push(errorName(() => new Headers([["a", "1", "extra"]])));
+          output.push(errorName(() => new Headers([["a"]])));
+          output.push(errorName(() => new Headers([{}])));
+          output.push(errorName(() => new Headers(null)));
+          output.push(errorName(() => new Headers(12)));
+          output.push(errorName(() => new Headers([[" x ", "1"]])));
+          output.push(errorName(() => new Headers([["x", "a\nb"]])));
+          output.push(errorName(() => new Headers([["x", "a\0b"]])));
+          output.push(errorName(() => new Headers([["😀", "1"]])));
+          output.push(errorName(() => new Headers([["x", "😀"]])));
+          output.push(errorName(() => new Headers().append()));
+          output.push(errorName(() => new Headers().set("x")));
+          output.push(new Headers([["x", "é"]]).get("x"));
+
+          const record = {};
+          Object.defineProperty(record, "hidden", {value: "no", enumerable: false});
+          record.Visible = "  yes\t";
+          output.push(JSON.stringify(Array.from(new Headers(record))));
+          output.push(errorName(() => new Headers({[Symbol("key")]: "value"})));
+
+          const duplicates = new Headers();
+          duplicates.append("X-B", "2");
+          duplicates.append("x-a", "1");
+          duplicates.append("X-B", "3");
+          duplicates.append("Set-Cookie", "a=1");
+          duplicates.append("set-cookie", "b=2");
+          output.push(duplicates.get("x-b"));
+          output.push(duplicates.getSetCookie().join(","));
+          output.push(JSON.stringify(Array.from(duplicates)));
+
+          const live = new Headers([["a", "1"], ["c", "3"]]);
+          const iterator = live.entries();
+          const prototype = Object.getPrototypeOf(iterator);
+          const next = Object.getOwnPropertyDescriptor(prototype, "next");
+          const tag = Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag);
+          output.push([
+            Object.prototype.toString.call(iterator),
+            Reflect.ownKeys(prototype).map(String).join(","),
+            [next.writable, next.enumerable, next.configurable, next.value.name, next.value.length].join(","),
+            [tag.writable, tag.enumerable, tag.configurable].join(","),
+            iterator[Symbol.iterator]() === iterator,
+            Object.getPrototypeOf(prototype) ===
+              Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())),
+            Function.prototype.toString.call(next.value)
+          ].join("~"));
+          output.push(iterator.next().value.join(":"));
+          live.append("b", "2");
+          output.push(iterator.next().value.join(":"));
+          output.push(iterator.next().value.join(":"));
+
+          const each = new Headers([["a", "1"], ["c", "3"]]);
+          const calls = [];
+          each.forEach((value, name, receiver) => {
+            calls.push(`${name}:${value}:${receiver === each}`);
+            if (name === "a") each.append("b", "2");
+          });
+          output.push(calls.join(","));
+          return output.join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        answer,
+        concat!(
+            "append,delete,get,getSetCookie,has,set,entries,forEach,keys,values,constructor,",
+            "Symbol(Symbol.toStringTag),Symbol(Symbol.iterator)|",
+            "[[\"a\",\"1\"],[\"b\",\"2\"]]|[[\"x-one\",\"value\"]]|",
+            "TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|",
+            "TypeError|TypeError|TypeError|TypeError|é|[[\"visible\",\"yes\"]]|",
+            "TypeError|2, 3|a=1,b=2|",
+            "[[\"set-cookie\",\"a=1\"],[\"set-cookie\",\"b=2\"],[\"x-a\",\"1\"],[\"x-b\",\"2, 3\"]]|",
+            "[object Headers Iterator]~next,Symbol(Symbol.toStringTag)~",
+            "true,true,true,next,0~false,false,true~true~true~function next() { [native code] }|",
+            "a:1|b:2|c:3|a:1:true,b:2:true,c:3:true"
+        )
+    );
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(
+        text(
+            &mut traced,
+            "new Headers([['trace','live']]).entries().next().value.join('=')"
+        ),
+        "trace=live"
+    );
+    let trace = traced.proxy_trace();
+    assert!(trace.iter().any(|entry| {
+        entry.operation == "call"
+            && entry.api.contains("Headers")
+            && entry.api.ends_with(".entries")
+    }));
+    assert!(
+        trace
+            .iter()
+            .any(|entry| entry.operation == "call" && entry.api.ends_with(".next"))
+    );
 }
 
 #[test]

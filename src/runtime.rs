@@ -498,6 +498,29 @@ fn value_to_evaluation(
 mod tests {
     use super::{EdgeRuntime, Evaluation};
 
+    #[test]
+    fn embedded_v8_150_heap_limits_match_the_desktop_profile_catalog() {
+        super::initialize_v8();
+        for (physical_gib, expected_limit) in [
+            (1_u64, 562_036_736_usize),
+            (2, 1_124_073_472),
+            (3, 1_711_276_032),
+            (4, 2_248_146_944),
+            (6, 3_321_888_768),
+            (8, 4_395_630_592),
+        ] {
+            let params = v8::CreateParams::default()
+                .heap_limits_from_system_memory(physical_gib * 1024 * 1024 * 1024, 0);
+            let mut isolate = v8::Isolate::new(params);
+            let statistics = isolate.get_heap_statistics();
+            assert_eq!(
+                statistics.heap_size_limit(),
+                expected_limit,
+                "unexpected V8 heap limit for {physical_gib} GiB",
+            );
+        }
+    }
+
     fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
         match runtime.evaluate(source).expect("JavaScript evaluation") {
             Evaluation::String(value) | Evaluation::Other(value) | Evaluation::Number(value) => {

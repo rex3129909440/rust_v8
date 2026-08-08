@@ -76,6 +76,10 @@ fn environment_options() -> EdgeRuntimeOptions {
     fingerprint.geolocation.accuracy = 12.5;
     fingerprint.media_preferences.color_scheme = "dark".to_owned();
     fingerprint.media_preferences.reduced_motion = true;
+    fingerprint.media_preferences.reduced_transparency = true;
+    fingerprint.media_preferences.video_dynamic_range = "high".to_owned();
+    fingerprint.navigator.user_activation_has_been_active = true;
+    fingerprint.navigator.user_activation_is_active = true;
     fingerprint.plugins.plugins = vec![PluginFingerprint {
         name: "Configured Plugin".to_owned(),
         filename: "configured-plugin.dll".to_owned(),
@@ -266,6 +270,12 @@ fn environment_fingerprint_drives_each_exposed_api() {
             document.fonts.check("12px Missing Sans"),
             matchMedia("(prefers-color-scheme: dark)").matches,
             matchMedia("(prefers-reduced-motion: reduce)").matches,
+            matchMedia("(prefers-reduced-transparency: reduce)").matches,
+            matchMedia("(video-dynamic-range: high)").matches,
+            matchMedia("(device-posture: folded)").matches,
+            matchMedia("(device-posture: continuous)").matches,
+            navigator.userActivation.hasBeenActive,
+            navigator.userActivation.isActive,
             navigator.plugins.length,
             navigator.plugins[0].name,
             navigator.mimeTypes[0].type,
@@ -303,7 +313,7 @@ fn environment_fingerprint_drives_each_exposed_api() {
         synchronous,
         concat!(
             "28.555221557617188|1.5|21.216419219970703|10|3|9|2.5|7.25|0.5|-2.5|",
-            "true|true|true|true|",
+            "true|true|true|true|true|true|true|false|true|true|",
             "1|Configured Plugin|application/x-profile|true|",
             "Configured Gamepad|0.25,-0.5|1,0.25|",
             "1|2|3|4|5|6|0.1,0.2,0.3,0.9|default|",
@@ -445,6 +455,54 @@ fn environment_fingerprint_drives_each_exposed_api() {
             "2.1|connected|open|midi-out-profile|Output Manufacturer|",
             "Configured MIDI Output|3.2|disconnected|closed|",
             "midi-in-profile|midi-out-profile"
+        )
+    );
+}
+
+#[test]
+fn unavailable_desktop_sensors_and_permissions_keep_the_captured_error_semantics() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.sensors.available = false;
+    options.fingerprint.permissions.speaker_selection = "unsupported".to_owned();
+    options.fingerprint.permissions.top_level_storage_access = "invalid-origin".to_owned();
+    let mut runtime = EdgeRuntime::with_options(options).expect("unavailable sensor profile");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            Promise.all([
+              navigator.permissions.query({name: "speaker-selection"}).then(
+                value => `ok:${value.state}`,
+                error => `${error.name}:${error.message}`
+              ),
+              navigator.permissions.query({name: "top-level-storage-access"}).then(
+                value => `ok:${value.state}`,
+                error => `${error.name}:${error.message}`
+              )
+            ]).then(values => {
+              let sensorError = "missing";
+              const sensor = new Accelerometer();
+              sensor.onerror = event => {
+                sensorError = `${event.error.name}:${event.error.message}`;
+              };
+              sensor.start();
+              return [
+                ...values,
+                sensorError,
+                sensor.activated,
+                sensor.hasReading,
+                sensor.timestamp
+              ].join("|");
+            })
+            "#,
+        ),
+        concat!(
+            "TypeError:Failed to execute 'query' on 'Permissions': ",
+            "The Speaker Selection API is not enabled.|",
+            "TypeError:Failed to execute 'query' on 'Permissions': ",
+            "The requested origin is invalid.|",
+            "NotReadableError:Could not connect to a sensor|false|false|"
         )
     );
 }
