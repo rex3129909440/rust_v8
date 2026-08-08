@@ -29,6 +29,23 @@ pub(crate) fn create<'s>(
         return Err("cannot define cross-origin Location.href".to_owned());
     }
 
+    for name in [
+        "origin",
+        "protocol",
+        "host",
+        "hostname",
+        "port",
+        "pathname",
+        "search",
+        "hash",
+        "ancestorOrigins",
+    ] {
+        define_blocked_property(scope, object, name, true)?;
+    }
+    for name in ["assign", "reload", "toString", "valueOf"] {
+        define_blocked_property(scope, object, name, false)?;
+    }
+
     let replace = crate::webidl::create_function_with_data(
         scope,
         "replace",
@@ -48,6 +65,65 @@ pub(crate) fn create<'s>(
         return Err("cannot define cross-origin Location.replace".to_owned());
     }
     Ok(object)
+}
+
+fn define_blocked_property(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    name: &str,
+    enumerable: bool,
+) -> Result<(), String> {
+    let data = crate::webidl::string(scope, name)?;
+    let getter = crate::webidl::create_function_with_data(
+        scope,
+        &format!("get {name}"),
+        0,
+        v8::ConstructorBehavior::Throw,
+        get_blocked_property,
+        data.into(),
+    )?;
+    let data = crate::webidl::string(scope, name)?;
+    let setter = crate::webidl::create_function_with_data(
+        scope,
+        &format!("set {name}"),
+        1,
+        v8::ConstructorBehavior::Throw,
+        set_blocked_property,
+        data.into(),
+    )?;
+    let mut descriptor = v8::PropertyDescriptor::new_from_get_set(getter.into(), setter.into());
+    descriptor.set_enumerable(enumerable);
+    descriptor.set_configurable(true);
+    let key = crate::webidl::string(scope, name)?;
+    if object.define_property(scope, key.into(), &descriptor) == Some(true) {
+        Ok(())
+    } else {
+        Err(format!("cannot define cross-origin Location.{name}"))
+    }
+}
+
+fn get_blocked_property(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let property = crate::webidl::value_to_string(
+        scope,
+        crate::trace::native_callback_data(scope, &arguments),
+    );
+    throw_security_error(scope, &property, "Location");
+}
+
+fn set_blocked_property(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let property = crate::webidl::value_to_string(
+        scope,
+        crate::trace::native_callback_data(scope, &arguments),
+    );
+    throw_security_error(scope, &property, "Location");
 }
 
 fn get_href(

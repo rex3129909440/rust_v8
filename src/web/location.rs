@@ -362,12 +362,21 @@ fn set_component(
         }
         _ => false,
     };
-    if accepted
-        && let Some(stored) = scope
+    if accepted {
+        let target = url.as_str().to_owned();
+        if let Some(stored) = scope
             .get_slot_mut::<LocationStore>()
             .and_then(|store| store.records.get_mut(&id))
-    {
-        *stored = url;
+        {
+            *stored = url;
+        }
+        if let Some(Err(message)) = super::html_i_frame_element::navigate_for_location_object(
+            scope,
+            arguments.this(),
+            target,
+        ) {
+            crate::webidl::throw_type_error(scope, &message);
+        }
     }
 }
 
@@ -422,12 +431,19 @@ fn navigate(
         return;
     };
     let target = crate::webidl::value_to_string(scope, value);
-    if let Some(target) = resolve_url(&current, &target)
-        && let Some(stored) = scope
+    if let Some(target) = resolve_url(&current, &target) {
+        let href = target.as_str().to_owned();
+        if let Some(stored) = scope
             .get_slot_mut::<LocationStore>()
             .and_then(|store| store.records.get_mut(&id))
-    {
-        *stored = target;
+        {
+            *stored = target;
+        }
+        if let Some(Err(message)) =
+            super::html_i_frame_element::navigate_for_location_object(scope, object, href)
+        {
+            crate::webidl::throw_type_error(scope, &message);
+        }
     }
 }
 

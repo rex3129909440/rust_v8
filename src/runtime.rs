@@ -120,17 +120,6 @@ impl EdgeRuntime {
             crate::web::document_global::execute_parser_inserted_scripts(context_scope);
             (v8::Global::new(context_scope, context), late_intrinsics)
         };
-        {
-            // Re-enter the finished root realm from a fresh handle scope.
-            // Some API installers create nested realms; capturing here avoids
-            // observing one of those temporary globals as the Window surface.
-            v8::scope!(let scope, &mut isolate);
-            let root_context = v8::Local::new(scope, &context);
-            let root_scope = &mut v8::ContextScope::new(scope, root_context);
-            let root_window = root_context.global(root_scope);
-            crate::web::html_i_frame_element::capture_window_surface(root_scope, root_window);
-        }
-
         Ok(Self {
             isolate,
             context,

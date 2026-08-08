@@ -228,6 +228,38 @@ pub(crate) fn ensure_navigation_entry(
     }
 }
 
+pub(crate) fn replace_navigation_entry(
+    scope: &mut v8::PinScope<'_, '_>,
+    name: String,
+    response_status: u16,
+    body_size: usize,
+    content_type: String,
+) {
+    let realm_id = crate::webidl::realm_id(scope);
+    let current = scope.get_slot::<PerformanceStore>().and_then(|store| {
+        store.records.iter().find_map(|(id, record)| {
+            (record.realm_id == realm_id).then(|| (*id, record.entries.clone()))
+        })
+    });
+    if let Some((id, entries)) = current {
+        let retained = entries
+            .into_iter()
+            .filter(|entry| {
+                let entry = v8::Local::new(scope, entry);
+                !super::performance_entry::record(scope, entry)
+                    .is_some_and(|record| record.entry_type == "navigation")
+            })
+            .collect();
+        if let Some(record) = scope
+            .get_slot_mut::<PerformanceStore>()
+            .and_then(|store| store.records.get_mut(&id))
+        {
+            record.entries = retained;
+        }
+    }
+    ensure_navigation_entry(scope, name, response_status, body_size, content_type);
+}
+
 pub(crate) fn buffered_entries(
     scope: &v8::PinScope<'_, '_>,
     entry_type: &str,

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub(crate) struct IFrameRecord {
@@ -54,9 +54,6 @@ pub(crate) struct HtmlIFrameElementStore {
     pub(crate) constructor: crate::webidl::RealmConstructor,
     pub(crate) records: HashMap<i32, IFrameRecord>,
     next_sequence: u64,
-    window_surface_names: Vec<String>,
-    window_surface_set: HashSet<String>,
-    window_surface_descriptors: HashMap<String, v8::Global<v8::Value>>,
 }
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     isolate.set_slot(HtmlIFrameElementStore::default());
@@ -111,40 +108,6 @@ pub(crate) fn enable_native_trace_for_existing_realms(
 
 pub(crate) fn disable_native_trace_for_existing_realms(_: &mut v8::OwnedIsolate) {}
 
-pub(crate) fn capture_window_surface(
-    scope: &mut v8::PinScope<'_, '_>,
-    global: v8::Local<'_, v8::Object>,
-) {
-    let mut names = Vec::new();
-    let mut descriptors = HashMap::new();
-    let mut property_names = v8::GetPropertyNamesArgsBuilder::new();
-    property_names
-        .property_filter(v8::PropertyFilter::ALL_PROPERTIES | v8::PropertyFilter::SKIP_SYMBOLS)
-        .key_conversion(v8::KeyConversionMode::ConvertToString);
-    if let Some(values) = global.get_own_property_names(scope, property_names.build()) {
-        for index in 0..values.length() {
-            let Some(value) = values.get_index(scope, index) else {
-                continue;
-            };
-            let Some(value) = value.to_string(scope) else {
-                continue;
-            };
-            let name = value.to_rust_string_lossy(scope);
-            if let Some(key) = v8::String::new(scope, &name)
-                && let Some(descriptor) = global.get_own_property_descriptor(scope, key.into())
-            {
-                descriptors.insert(name.clone(), v8::Global::new(scope, descriptor));
-            }
-            names.push(name);
-        }
-    }
-    let set = names.iter().cloned().collect();
-    if let Some(store) = scope.get_slot_mut::<HtmlIFrameElementStore>() {
-        store.window_surface_names = names;
-        store.window_surface_set = set;
-        store.window_surface_descriptors = descriptors;
-    }
-}
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     let constructor = ensure_constructor(scope)?;
     crate::webidl::define_global(scope, "HTMLIFrameElement", constructor.into())
@@ -790,6 +753,52 @@ pub(crate) fn notify_connected_tree(
     }
 }
 
+fn install_iframe_interface_prefix(
+    scope: &mut v8::PinScope<'_, '_>,
+    context: v8::Local<'_, v8::Context>,
+) -> Result<crate::intrinsics::LateIntrinsics, String> {
+    let late_intrinsics = crate::intrinsics::LateIntrinsics::detach(scope, context)?;
+    super::install_window_interfaces(scope)?;
+    Ok(late_intrinsics)
+}
+
+fn install_iframe_window_globals(
+    scope: &mut v8::PinScope<'_, '_>,
+    document: v8::Local<'_, v8::Object>,
+) -> Result<(), String> {
+    // Keep this order identical to install_window_globals().  The document
+    // and location objects are iframe-local, but every remaining global is
+    // installed by the same realm-aware module used by the root Window.
+    super::window_global::install(scope)?;
+    super::self_global::install(scope)?;
+    super::document_global::install_existing(scope)?;
+    super::window_name::install(scope)?;
+    super::location_global::install_existing(scope)?;
+    super::custom_elements_global::install_for_document(scope, document)?;
+    super::history_global::install(scope)?;
+    super::install_context_window_globals(scope)
+}
+
+fn install_iframe_late_globals(
+    scope: &mut v8::PinScope<'_, '_>,
+    late_intrinsics: &crate::intrinsics::LateIntrinsics,
+) -> Result<(), String> {
+    let temporal = v8::Local::new(scope, &late_intrinsics.temporal);
+    super::temporal_global::install(scope, temporal)?;
+    let suppressed_error = v8::Local::new(scope, &late_intrinsics.suppressed_error);
+    super::suppressed_error_global::install(scope, suppressed_error)?;
+    let disposable_stack = v8::Local::new(scope, &late_intrinsics.disposable_stack);
+    super::disposable_stack_global::install(scope, disposable_stack)?;
+    let async_disposable_stack = v8::Local::new(scope, &late_intrinsics.async_disposable_stack);
+    super::async_disposable_stack_global::install(scope, async_disposable_stack)?;
+    let float16_array = v8::Local::new(scope, &late_intrinsics.float16_array);
+    super::float16_array_global::install(scope, float16_array)?;
+    super::install_after_late_intrinsics(scope)?;
+    let web_assembly = v8::Local::new(scope, &late_intrinsics.web_assembly);
+    super::web_assembly_global::install(scope, web_assembly)?;
+    super::install_after_webassembly(scope)
+}
+
 pub(crate) fn ensure_browsing_context(
     scope: &mut v8::PinScope<'_, '_>,
     iframe: v8::Local<'_, v8::Object>,
@@ -869,8 +878,25 @@ pub(crate) fn ensure_browsing_context(
 
     let setup = {
         let child_scope = &mut v8::ContextScope::new(scope, context);
-        super::install_complete_window_interfaces(child_scope, context)?;
-        super::install_iframe_context_singletons(child_scope)?;
+        let late_intrinsics = install_iframe_interface_prefix(child_scope, context)?;
+        let location = super::location::create(child_scope, "about:blank")?;
+        let document = super::document_global::create_document(child_scope, "about:blank")?;
+        super::document::set_string_value(
+            child_scope,
+            document,
+            "fallbackBaseURL",
+            &inherited_base_url,
+        );
+        super::document::set_object_value(child_scope, document, "defaultView", child_window);
+        install_iframe_window_globals(child_scope, document)?;
+        super::performance::replace_navigation_entry(
+            child_scope,
+            "about:blank".to_owned(),
+            0,
+            0,
+            "text/html".to_owned(),
+        );
+        install_iframe_late_globals(child_scope, &late_intrinsics)?;
         super::event_target::install(child_scope)?;
         super::event::install(child_scope)?;
         super::custom_event::install(child_scope)?;
@@ -1003,7 +1029,6 @@ pub(crate) fn ensure_browsing_context(
         super::speech_synthesis_utterance::install(child_scope)?;
         super::speech_synthesis_voice::install(child_scope)?;
         super::speech_synthesis::install(child_scope)?;
-        super::speech_synthesis_global::install(child_scope)?;
         super::offscreen_canvas::install(child_scope)?;
         super::offscreen_canvas_rendering_context_2d::install(child_scope)?;
         super::webgl_rendering_context::install(child_scope)?;
@@ -1011,56 +1036,11 @@ pub(crate) fn ensure_browsing_context(
         super::window::install(child_scope)?;
         super::event_target::attach(child_scope, child_window);
         super::navigator::install(child_scope)?;
-        super::navigator_global::install(child_scope)?;
-        super::client_information::install(child_scope)?;
         super::screen::install(child_scope)?;
-        super::screen_global::install(child_scope)?;
         super::subtle_crypto::install(child_scope)?;
         super::crypto_key::install(child_scope)?;
         super::crypto::install(child_scope)?;
-        super::crypto_global::install(child_scope)?;
-        super::console_edge::install(child_scope)?;
         super::performance::install(child_scope)?;
-        super::performance_global::install(child_scope)?;
-        let location = super::location::create(child_scope, "about:blank")?;
-        super::performance::ensure_navigation_entry(
-            child_scope,
-            "about:blank".to_owned(),
-            0,
-            0,
-            "text/html".to_owned(),
-        );
-        let document = super::document_global::create_document(child_scope, "about:blank")?;
-        super::document::set_string_value(
-            child_scope,
-            document,
-            "fallbackBaseURL",
-            &inherited_base_url,
-        );
-        super::history_global::install(child_scope)?;
-        super::custom_elements_global::install_for_document(child_scope, document)?;
-        super::cookie_store_global::install(child_scope)?;
-        super::scheduler_global::install(child_scope)?;
-        super::trusted_types_global::install(child_scope)?;
-        super::caches_global::install(child_scope)?;
-        super::indexed_db_global::install(child_scope)?;
-        super::local_storage_global::install(child_scope)?;
-        super::session_storage_global::install(child_scope)?;
-        super::document::set_object_value(child_scope, document, "defaultView", child_window);
-        super::window_global::install(child_scope)?;
-        super::self_global::install(child_scope)?;
-        super::frames_global::install(child_scope)?;
-        super::parent_global::install(child_scope)?;
-        super::top_global::install(child_scope)?;
-        super::frame_element_global::install(child_scope)?;
-        super::document_global::install_existing(child_scope)?;
-        super::location_global::install_existing(child_scope)?;
-        super::origin_global::install(child_scope)?;
-        super::window_name::install(child_scope)?;
-        super::window_length::install(child_scope)?;
-        super::closed_global::install(child_scope)?;
-        super::install_window_event_handlers(child_scope)?;
-        super::install_window_functions(child_scope)?;
         crate::locale_runtime::install(child_scope)?;
         crate::determinism::install(child_scope)?;
         crate::iframe_hook::run_for_current_iframe(child_scope, "about:blank")?;
@@ -1239,7 +1219,56 @@ pub(crate) fn navigate_cross_origin_location(
         record.loaded_srcdoc = None;
     }
     let iframe = v8::Local::new(scope, &iframe);
-    load_selected_source(scope, iframe)
+    match load_selected_source(scope, iframe) {
+        Ok(()) => Ok(()),
+        Err(error) if error.starts_with("no deterministic network replay entry for ") => {
+            let snapshot = record(scope, iframe)
+                .ok_or_else(|| "iframe state disappeared during navigation".to_owned())?;
+            let parent_url = parent_document_url(scope, &snapshot);
+            let parent_base_url = parent_document_base_url(scope, &snapshot);
+            let base = url::Url::parse(&parent_base_url)
+                .map_err(|_| "iframe parent base URL is invalid".to_owned())?;
+            let resolved = base
+                .join(&snapshot.src)
+                .map_err(|_| "iframe src is invalid".to_owned())?;
+            if urls_share_origin(&parent_url, resolved.as_str()) {
+                return Err(error);
+            }
+            if let Some(record) = scope
+                .get_slot_mut::<HtmlIFrameElementStore>()
+                .and_then(|store| store.records.get_mut(&iframe_id))
+            {
+                // The sandbox never performs an unconfigured external
+                // request.  It still commits the observable WindowProxy
+                // origin transition so the embedding realm immediately loses
+                // same-origin access, matching a browser navigation commit.
+                record.same_origin = false;
+                record.loaded_src = Some(resolved.as_str().to_owned());
+                record.loaded_srcdoc = None;
+            }
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn navigate_for_location_object(
+    scope: &mut v8::PinScope<'_, '_>,
+    location: v8::Local<'_, v8::Object>,
+    value: String,
+) -> Option<Result<(), String>> {
+    let iframe_id = scope
+        .get_slot::<HtmlIFrameElementStore>()?
+        .records
+        .iter()
+        .find_map(|(id, record)| {
+            record.location.as_ref().and_then(|candidate| {
+                v8::Local::new(scope, candidate)
+                    .strict_equals(location.into())
+                    .then_some(*id)
+            })
+        })?;
+    Some(navigate_cross_origin_location(scope, iframe_id, value))
 }
 
 fn navigate_browsing_context(
@@ -1284,8 +1313,53 @@ fn navigate_browsing_context(
     }
     let prepared = {
         let child_scope = &mut v8::ContextScope::new(scope, context);
-        super::install_complete_window_interfaces(child_scope, context)?;
-        super::install_iframe_context_singletons(child_scope)?;
+        let late_intrinsics = install_iframe_interface_prefix(child_scope, context)?;
+        let location = super::location::create(child_scope, &navigation.url)?;
+        let document = super::document_global::create_document(child_scope, &navigation.url)?;
+        super::document::set_string_value(
+            child_scope,
+            document,
+            "fallbackBaseURL",
+            &navigation.fallback_base_url,
+        );
+        if !navigation.html.is_empty() {
+            super::document_html_parser::parse_page(child_scope, document, &navigation.html)?;
+        }
+        super::document::set_content_type(child_scope, document, navigation.content_type.clone());
+        super::document::set_string_value(child_scope, document, "referrer", &document_referrer);
+        let domain = url::Url::parse(&navigation.url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .or_else(|| {
+                url::Url::parse(parent_url)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_owned))
+            })
+            .unwrap_or_default();
+        super::document::set_string_value(child_scope, document, "domain", &domain);
+        super::document::set_object_value(child_scope, document, "defaultView", child_window);
+        let (ancestor_location, ancestor_descriptors) = if navigation.same_origin {
+            (None, None)
+        } else {
+            let ancestor_location = super::cross_origin_ancestor_location::create(child_scope)?;
+            let ancestor_descriptors = super::cross_origin_window_descriptors::create_ancestor(
+                child_scope,
+                iframe.get_identity_hash().get(),
+            )?;
+            (
+                Some(v8::Global::new(child_scope, ancestor_location)),
+                Some(v8::Global::new(child_scope, ancestor_descriptors)),
+            )
+        };
+        install_iframe_window_globals(child_scope, document)?;
+        super::performance::replace_navigation_entry(
+            child_scope,
+            navigation.url.clone(),
+            navigation.response_status,
+            navigation.html.len(),
+            navigation.content_type.clone(),
+        );
+        install_iframe_late_globals(child_scope, &late_intrinsics)?;
         super::event_target::install(child_scope)?;
         super::event::install(child_scope)?;
         super::custom_event::install(child_scope)?;
@@ -1418,7 +1492,6 @@ fn navigate_browsing_context(
         super::speech_synthesis_utterance::install(child_scope)?;
         super::speech_synthesis_voice::install(child_scope)?;
         super::speech_synthesis::install(child_scope)?;
-        super::speech_synthesis_global::install(child_scope)?;
         super::offscreen_canvas::install(child_scope)?;
         super::offscreen_canvas_rendering_context_2d::install(child_scope)?;
         super::webgl_rendering_context::install(child_scope)?;
@@ -1426,86 +1499,12 @@ fn navigate_browsing_context(
         super::window::install(child_scope)?;
         super::event_target::reset(child_scope, child_window);
         super::navigator::install(child_scope)?;
-        super::navigator_global::install(child_scope)?;
-        super::client_information::install(child_scope)?;
         super::screen::install(child_scope)?;
-        super::screen_global::install(child_scope)?;
         super::subtle_crypto::install(child_scope)?;
         super::crypto_key::install(child_scope)?;
         super::crypto::install(child_scope)?;
-        super::crypto_global::install(child_scope)?;
-        super::console_edge::install(child_scope)?;
         super::performance::install(child_scope)?;
-        super::performance_global::install(child_scope)?;
 
-        let location = super::location::create(child_scope, &navigation.url)?;
-        super::performance::ensure_navigation_entry(
-            child_scope,
-            navigation.url.clone(),
-            navigation.response_status,
-            navigation.html.len(),
-            navigation.content_type.clone(),
-        );
-        let document = super::document_global::create_document(child_scope, &navigation.url)?;
-        super::document::set_string_value(
-            child_scope,
-            document,
-            "fallbackBaseURL",
-            &navigation.fallback_base_url,
-        );
-        super::history_global::install(child_scope)?;
-        super::custom_elements_global::install_for_document(child_scope, document)?;
-        super::cookie_store_global::install(child_scope)?;
-        super::scheduler_global::install(child_scope)?;
-        super::trusted_types_global::install(child_scope)?;
-        super::caches_global::install(child_scope)?;
-        super::indexed_db_global::install(child_scope)?;
-        super::local_storage_global::install(child_scope)?;
-        super::session_storage_global::install(child_scope)?;
-        if !navigation.html.is_empty() {
-            super::document_html_parser::parse_page(child_scope, document, &navigation.html)?;
-        }
-        super::document::set_content_type(child_scope, document, navigation.content_type.clone());
-        super::document::set_string_value(child_scope, document, "referrer", &document_referrer);
-        let domain = url::Url::parse(&navigation.url)
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_owned))
-            .or_else(|| {
-                url::Url::parse(parent_url)
-                    .ok()
-                    .and_then(|url| url.host_str().map(str::to_owned))
-            })
-            .unwrap_or_default();
-        super::document::set_string_value(child_scope, document, "domain", &domain);
-        super::document::set_object_value(child_scope, document, "defaultView", child_window);
-        let (ancestor_location, ancestor_descriptors) = if navigation.same_origin {
-            (None, None)
-        } else {
-            let ancestor_location = super::cross_origin_ancestor_location::create(child_scope)?;
-            let ancestor_descriptors = super::cross_origin_window_descriptors::create_ancestor(
-                child_scope,
-                iframe.get_identity_hash().get(),
-            )?;
-            (
-                Some(v8::Global::new(child_scope, ancestor_location)),
-                Some(v8::Global::new(child_scope, ancestor_descriptors)),
-            )
-        };
-
-        super::window_global::install(child_scope)?;
-        super::self_global::install(child_scope)?;
-        super::frames_global::install(child_scope)?;
-        super::parent_global::install(child_scope)?;
-        super::top_global::install(child_scope)?;
-        super::frame_element_global::install(child_scope)?;
-        super::document_global::install_existing(child_scope)?;
-        super::location_global::install_existing(child_scope)?;
-        super::origin_global::install(child_scope)?;
-        super::window_name::install(child_scope)?;
-        super::window_length::install(child_scope)?;
-        super::closed_global::install(child_scope)?;
-        super::install_window_event_handlers(child_scope)?;
-        super::install_window_functions(child_scope)?;
         crate::locale_runtime::install(child_scope)?;
         crate::determinism::install(child_scope)?;
         crate::iframe_hook::run_for_current_iframe(child_scope, &navigation.url)?;
@@ -2084,19 +2083,7 @@ fn child_window_named_getter(
         result.set(window.into());
         return v8::Intercepted::kYes;
     }
-    if !is_window_surface_property(scope, &name) {
-        return v8::Intercepted::kNo;
-    }
-    let parent = Some(handler_record.parent_window);
-    let Some(parent) = parent else {
-        return v8::Intercepted::kNo;
-    };
-    let parent = v8::Local::new(scope, &parent);
-    let Some(value) = parent.get(scope, key.into()) else {
-        return v8::Intercepted::kNo;
-    };
-    result.set(value);
-    v8::Intercepted::kYes
+    v8::Intercepted::kNo
 }
 
 fn child_window_named_setter(
@@ -2184,11 +2171,7 @@ fn child_window_named_query(
         result.set_int32(0);
         return v8::Intercepted::kYes;
     }
-    if !is_window_surface_property(scope, &name) {
-        return v8::Intercepted::kNo;
-    }
-    result.set_int32(0);
-    v8::Intercepted::kYes
+    v8::Intercepted::kNo
 }
 
 fn child_window_named_deleter(
@@ -2288,10 +2271,7 @@ fn child_window_named_enumerator(
             return;
         }
     }
-    let mut names = scope
-        .get_slot::<HtmlIFrameElementStore>()
-        .map(|store| store.window_surface_names.clone())
-        .unwrap_or_default();
+    let mut names = Vec::new();
     if let Some(window) =
         iframe_record_for_handler(scope, &arguments).and_then(|record| record.content_window)
     {
@@ -2395,18 +2375,7 @@ fn child_window_named_descriptor(
         result.set(descriptor.into());
         return v8::Intercepted::kYes;
     }
-    if !is_window_surface_property(scope, &name) {
-        return v8::Intercepted::kNo;
-    }
-    let descriptor = scope
-        .get_slot::<HtmlIFrameElementStore>()
-        .and_then(|store| store.window_surface_descriptors.get(&name))
-        .cloned();
-    let Some(descriptor) = descriptor else {
-        return v8::Intercepted::kNo;
-    };
-    result.set(v8::Local::new(scope, &descriptor).into());
-    v8::Intercepted::kYes
+    v8::Intercepted::kNo
 }
 
 fn child_window_indexed_getter(
@@ -2863,12 +2832,6 @@ fn is_child_local_property(_scope: &v8::PinScope<'_, '_>, name: &str) -> bool {
             | "closed"
             | "Temporal"
     )
-}
-
-fn is_window_surface_property(scope: &v8::PinScope<'_, '_>, name: &str) -> bool {
-    scope
-        .get_slot::<HtmlIFrameElementStore>()
-        .is_some_and(|store| store.window_surface_set.contains(name))
 }
 
 fn expose_child_window_on_parent(

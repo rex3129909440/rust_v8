@@ -49,6 +49,131 @@ fn iframe_window_has_the_complete_edge_surface_and_stable_navigation_identity() 
 }
 
 #[test]
+fn iframe_window_own_property_order_and_parent_expandos_are_realm_isolated() {
+    let mut runtime = EdgeRuntime::with_options(EdgeRuntimeOptions {
+        page: Some(PageInit {
+            url: "https://app.example.test/root.html".to_owned(),
+            html: concat!(
+                "<!doctype html><html><body>",
+                "<script>window.parserDefinedOnParent = { owner: 'parent' };</script>",
+                "</body></html>"
+            )
+            .to_owned(),
+            referrer: String::new(),
+            content_type: "text/html".to_owned(),
+        }),
+        ..Default::default()
+    })
+    .expect("runtime with a parser-defined parent expando");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              window.beforeFrameOnParent = { owner: "parent" };
+              const rootNames = Object.getOwnPropertyNames(window).filter(
+                name => name !== "parserDefinedOnParent" &&
+                        name !== "beforeFrameOnParent"
+              );
+              const frame = document.createElement("iframe");
+              document.body.appendChild(frame);
+              const child = frame.contentWindow;
+              const firstNames = Object.getOwnPropertyNames(child);
+              const firstMismatch = rootNames.findIndex(
+                (name, index) => firstNames[index] !== name
+              );
+              window.afterFrameOnParent = { owner: "parent" };
+              const secondNames = Object.getOwnPropertyNames(child);
+              return [
+                firstMismatch,
+                rootNames[firstMismatch],
+                firstNames[firstMismatch],
+                JSON.stringify(secondNames) === JSON.stringify(firstNames),
+                firstNames.length,
+                "parserDefinedOnParent" in child,
+                Object.prototype.hasOwnProperty.call(
+                  child,
+                  "parserDefinedOnParent"
+                ),
+                typeof child.parserDefinedOnParent,
+                "beforeFrameOnParent" in child,
+                Object.prototype.hasOwnProperty.call(
+                  child,
+                  "beforeFrameOnParent"
+                ),
+                typeof child.beforeFrameOnParent,
+                "afterFrameOnParent" in child,
+                Object.prototype.hasOwnProperty.call(
+                  child,
+                  "afterFrameOnParent"
+                ),
+                typeof child.afterFrameOnParent,
+                child.Array !== Array,
+                child.TextEncoder !== TextEncoder,
+                child.console !== console
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "-1|||true|1232|false|false|undefined|false|false|undefined|",
+            "false|false|undefined|true|true|true"
+        )
+    );
+}
+
+#[test]
+fn iframe_location_href_navigation_commits_cross_origin_access_restrictions() {
+    let mut runtime = EdgeRuntime::with_options(EdgeRuntimeOptions {
+        page: Some(PageInit {
+            url: "https://app.example.test/root.html".to_owned(),
+            html: "<main>root</main>".to_owned(),
+            referrer: String::new(),
+            content_type: "text/html".to_owned(),
+        }),
+        ..Default::default()
+    })
+    .expect("runtime for an unconfigured cross-origin iframe navigation");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const frame = document.createElement("iframe");
+              document.body.appendChild(frame);
+              const proxy = frame.contentWindow;
+              const capture = callback => {
+                try {
+                  return String(callback());
+                } catch (error) {
+                  return error.name + ":" + error.message;
+                }
+              };
+              proxy.location.href =
+                "https://other.example.test/unconfigured.html";
+              return [
+                proxy === frame.contentWindow,
+                frame.contentDocument === null,
+                capture(() => proxy.location.href),
+                capture(() => proxy.location.origin),
+                capture(() => proxy.document)
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "true|true|",
+            "SecurityError:Failed to read a named property 'href' from 'Location': ",
+            "Blocked a frame with origin \"https://app.example.test\" from accessing a cross-origin frame.|",
+            "SecurityError:Failed to read a named property 'origin' from 'Location': ",
+            "Blocked a frame with origin \"https://app.example.test\" from accessing a cross-origin frame.|",
+            "SecurityError:Failed to read a named property 'document' from 'Window': ",
+            "Blocked a frame with origin \"https://app.example.test\" from accessing a cross-origin frame."
+        )
+    );
+}
+
+#[test]
 fn iframe_srcdoc_and_cross_origin_url_state_match_edge_150() {
     let child_source = br#"
       <script>

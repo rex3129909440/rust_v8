@@ -6032,28 +6032,6 @@ pub(crate) fn install_window_interfaces(scope: &mut v8::PinScope<'_, '_>) -> Res
     Ok(())
 }
 
-pub(crate) fn install_complete_window_interfaces(
-    scope: &mut v8::PinScope<'_, '_>,
-    context: v8::Local<'_, v8::Context>,
-) -> Result<(), String> {
-    let late_intrinsics = crate::intrinsics::LateIntrinsics::detach(scope, context)?;
-    install_window_interfaces(scope)?;
-    let temporal = v8::Local::new(scope, &late_intrinsics.temporal);
-    temporal_global::install(scope, temporal)?;
-    let suppressed_error = v8::Local::new(scope, &late_intrinsics.suppressed_error);
-    suppressed_error_global::install(scope, suppressed_error)?;
-    let disposable_stack = v8::Local::new(scope, &late_intrinsics.disposable_stack);
-    disposable_stack_global::install(scope, disposable_stack)?;
-    let async_disposable_stack = v8::Local::new(scope, &late_intrinsics.async_disposable_stack);
-    async_disposable_stack_global::install(scope, async_disposable_stack)?;
-    let float16_array = v8::Local::new(scope, &late_intrinsics.float16_array);
-    float16_array_global::install(scope, float16_array)?;
-    install_after_late_intrinsics(scope)?;
-    let web_assembly = v8::Local::new(scope, &late_intrinsics.web_assembly);
-    web_assembly_global::install(scope, web_assembly)?;
-    install_after_webassembly(scope)
-}
-
 fn install_window_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     window_global::install(scope)?;
     self_global::install(scope)?;
@@ -6108,21 +6086,6 @@ pub(crate) fn install_context_window_globals(
     style_media_global::install(scope)?;
     install_window_event_handlers(scope)?;
     install_window_service_globals(scope)
-}
-
-pub(crate) fn install_iframe_context_singletons(
-    scope: &mut v8::PinScope<'_, '_>,
-) -> Result<(), String> {
-    navigation_global::install(scope)?;
-    locationbar_global::install(scope)?;
-    menubar_global::install(scope)?;
-    personalbar_global::install(scope)?;
-    scrollbars_global::install(scope)?;
-    statusbar_global::install(scope)?;
-    toolbar_global::install(scope)?;
-    external_global::install(scope)?;
-    visual_viewport_global::install(scope)?;
-    style_media_global::install(scope)
 }
 
 pub(crate) fn install_window_event_handlers(
