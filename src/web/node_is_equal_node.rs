@@ -1,0 +1,17 @@
+pub(crate) fn define(
+    scope: &mut v8::PinScope<'_, '_>,
+    prototype: v8::Local<'_, v8::Object>,
+) -> Result<(), String> {
+    crate::webidl::define_method(scope, prototype, "isEqualNode", 1, call)
+}
+
+fn call(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let equal = v8::Local::<v8::Object>::try_from(arguments.get(0))
+        .ok()
+        .is_some_and(|other| super::node::equal_nodes(scope, arguments.this(), other));
+    result.set(v8::Boolean::new(scope, equal).into());
+}

@@ -1,0 +1,51 @@
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
+    let getter = crate::webidl::create_function(
+        scope,
+        "get offscreenBuffering",
+        0,
+        v8::ConstructorBehavior::Throw,
+        get_offscreen_buffering,
+    )?;
+    let setter = crate::webidl::create_function(
+        scope,
+        "set offscreenBuffering",
+        1,
+        v8::ConstructorBehavior::Throw,
+        set_offscreen_buffering,
+    )?;
+    let mut descriptor = v8::PropertyDescriptor::new_from_get_set(getter.into(), setter.into());
+    descriptor.set_enumerable(false);
+    descriptor.set_configurable(true);
+    let key = crate::webidl::string(scope, "offscreenBuffering")?;
+    let global = scope.get_current_context().global(scope);
+    if global.define_property(scope, key.into(), &descriptor) == Some(true) {
+        Ok(())
+    } else {
+        Err("cannot define window.offscreenBuffering".to_owned())
+    }
+}
+
+fn get_offscreen_buffering(
+    scope: &mut v8::PinScope<'_, '_>,
+    _: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    result.set(v8::Boolean::new(scope, true).into());
+}
+
+fn set_offscreen_buffering(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let global = scope.get_current_context().global(scope);
+    let Some(key) = v8::String::new(scope, "offscreenBuffering") else {
+        return;
+    };
+    let _ = global.define_own_property(
+        scope,
+        key.into(),
+        arguments.get(0),
+        v8::PropertyAttribute::NONE,
+    );
+}
