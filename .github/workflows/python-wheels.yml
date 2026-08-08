@@ -87,7 +87,7 @@ jobs:
           wheels = glob("wheelhouse/*.whl")
           if len(wheels) != 1:
               raise SystemExit(f"expected one wheel, found {wheels!r}")
-          check_call([executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", wheels[0]])
+          check_call([executable, "-m", "pip", "install", "--force-reinstall", wheels[0]])
 
           from edge_sandbox import (
               EdgeSandbox,
@@ -191,7 +191,7 @@ jobs:
         shell: bash
         run: |
           /opt/python/cp311-cp311/bin/python -m pip install \
-            --force-reinstall --no-deps wheelhouse/*.whl
+            --force-reinstall wheelhouse/*.whl
           /opt/python/cp311-cp311/bin/python - <<'PY'
           from edge_sandbox import (
               EdgeSandbox,
