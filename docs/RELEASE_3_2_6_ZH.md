@@ -9,7 +9,7 @@
 1. Windows 随机 profile 现在会按种子组合 `navigator.maxTouchPoints`，并以成对值配置 `screen.colorDepth` 与 `screen.pixelDepth`。Windows 桌面候选覆盖 `0/5/10` 触点及 `24/24`、`32/32` 色深组合，Mac 与 Android 保持各自平台规则。
 2. 隔离 Worker 初始化与重新初始化不再被固定 30 秒窗口错误截断。配置的执行超时大于 30 秒时，初始化等待窗口同步延长并保留 100 ms 收尾宽限；短超时仍保留 30 秒最低启动窗口。
 3. Rust 集成测试从已移除的独立 Worker EXE 迁移到 DLL/SO 自托管进程隔离路径。Linux/macOS 直接覆盖自托管集成测试，Windows 的动态库发布形态由 Python/native wheel 烟测覆盖。
-4. Linux wheel CI 在打包前执行 release 模式完整 Rust 回归，避免仅构建成功但进程隔离、FFI 或网络导出回归未被发现。
+4. Linux wheel CI 在打包前执行 release 模式的 248 项 native 库回归；构建 wheel 后，再对实际安装的 SO 执行进程隔离、profile 重初始化、一次性 Worker 池和 XHR 网络捕获烟测。避免仅构建成功但发布物无法工作，同时避免为多个 V8 集成测试目标重复执行 release LTO 链接。
 
 ## 本地验证
 

@@ -197,9 +197,9 @@ jobs:
           sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain 1.93.0 --no-modify-path
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Run Rust regression suite
+      - name: Run release library regression suite
         shell: bash
-        run: "$CARGO_HOME/bin/cargo test --release --all-targets --locked"
+        run: "$CARGO_HOME/bin/cargo test --release --lib --locked"
 
       - name: Build native library
         shell: bash
@@ -275,6 +275,25 @@ jobs:
                   raise SystemExit("profile reinitialization replaced the worker PID")
               if sandbox.evaluate("navigator.userAgent") != "CI-Reinitialized-UA":
                   raise SystemExit("reinitialized profile did not reach the worker")
+              sandbox.evaluate(
+                  'const request = new XMLHttpRequest();'
+                  'request.open("POST", "https://ci.example/native-capture");'
+                  'request.setRequestHeader("X-CI-Smoke", "present");'
+                  'request.send("native-body");',
+                  source_url="ci://network-capture.js",
+              )
+              captured = sandbox.network_requests()
+              if len(captured) != 1:
+                  raise SystemExit(f"expected one captured request, got {captured!r}")
+              request = captured[0]
+              if (
+                  request.source != "XMLHttpRequest"
+                  or request.method != "POST"
+                  or request.url != "https://ci.example/native-capture"
+                  or request.body != b"native-body"
+                  or ("X-CI-Smoke", "present") not in request.headers
+              ):
+                  raise SystemExit(f"captured request is incomplete: {request!r}")
           if result != "2":
               raise SystemExit(f"unexpected sandbox result: {result!r}")
           with EdgeSandboxPool(
