@@ -236,6 +236,21 @@ _PHYSICAL_MEMORY_WEIGHTS = {
     512: 1, 1024: 1,
 }
 
+# Touch-capable Windows rows used to be drowned out by the much larger
+# desktop/laptop catalog: a 1000-seed composer audit selected only 29 touch
+# profiles.  Keep the CPU/RAM bucket distribution intact, but give the real
+# 5-point and 10-point device rows enough share inside each bucket to remain
+# observable in ordinary random-profile workloads.
+_TOUCH_FORM_FACTOR_WEIGHT_BOOST = 4.0
+
+
+def _catalog_row_sampling_weight(profile: dict[str, object]) -> float:
+    weight = max(1.0, float(profile.get("weight", 1) or 1))
+    tags = {str(item).lower() for item in profile.get("tags", ())}
+    if "touch" in tags:
+        weight *= _TOUCH_FORM_FACTOR_WEIGHT_BOOST
+    return weight
+
 
 def get_pc_navigator_hardware_profile_weight(profile: dict[str, object]) -> int:
     concurrency = int(profile.get("hardwareConcurrency", 0) or 0)
@@ -274,9 +289,9 @@ def get_pc_navigator_hardware_pool_weights(
         cpu = int(profile.get("hardwareConcurrency", 0) or 0)
         memory = int(profile.get("physicalRamHintGb", 0) or 0)
         pair = (cpu, memory)
-        pair_base_totals[pair] = pair_base_totals.get(pair, 0.0) + max(
-            1.0,
-            float(profile.get("weight", 1) or 1),
+        pair_base_totals[pair] = (
+            pair_base_totals.get(pair, 0.0)
+            + _catalog_row_sampling_weight(profile)
         )
         cpu_memory_buckets.setdefault(cpu, set()).add(memory)
 
@@ -288,7 +303,7 @@ def get_pc_navigator_hardware_pool_weights(
     for profile in profiles:
         cpu = int(profile.get("hardwareConcurrency", 0) or 0)
         memory = int(profile.get("physicalRamHintGb", 0) or 0)
-        base = max(1.0, float(profile.get("weight", 1) or 1))
+        base = _catalog_row_sampling_weight(profile)
         cpu_weight = float(_LOGICAL_PROCESSOR_WEIGHTS.get(cpu, 1))
         memory_weight = float(_PHYSICAL_MEMORY_WEIGHTS.get(memory, 1))
         pair_share = base / pair_base_totals[(cpu, memory)]

@@ -191,10 +191,23 @@ class WindowsProfileCatalogTests(unittest.TestCase):
         )
         windows_10 = materialize_pc_screen_profile_for_windows(base, "10.0.0")
         windows_11 = materialize_pc_screen_profile_for_windows(base, "15.0.0")
+        windows_11_depth_32 = materialize_pc_screen_profile_for_windows(
+            base,
+            "15.0.0",
+            color_depth=32,
+        )
         self.assertEqual(windows_10["screen"]["availHeight"], 1_040)
         self.assertEqual(windows_10["taskbarCssHeight"], 40)
         self.assertEqual(windows_11["screen"]["availHeight"], 1_032)
         self.assertEqual(windows_11["taskbarCssHeight"], 48)
+        self.assertEqual(
+            (
+                windows_11_depth_32["screen"]["colorDepth"],
+                windows_11_depth_32["screen"]["pixelDepth"],
+            ),
+            (32, 32),
+        )
+        self.assertTrue(str(windows_11_depth_32["id"]).endswith("_depth32"))
         self.assertEqual(base["screen"]["availHeight"], 1_032)
 
     def test_every_physical_windows_gpu_has_a_large_compatible_space(self) -> None:

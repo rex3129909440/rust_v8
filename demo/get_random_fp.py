@@ -81,6 +81,7 @@ from ua import (  # noqa: E402
 )
 from screen_profile_catalog import (  # noqa: E402
     choose_pc_screen_profile_for_hardware,
+    choose_windows_screen_depth,
     materialize_pc_screen_profile_for_windows,
 )
 from speech_synthesis_voice_catalog import (  # noqa: E402
@@ -421,6 +422,13 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
         issues.append("deviceMemory conflicts with selection metadata")
     if fingerprint.physical_memory_gb <= 0:
         issues.append("physical memory must be positive")
+    allowed_touch_points = {
+        "windows": {0, 5, 10},
+        "macos": {0},
+        "android": {5},
+    }.get(fingerprint.platform, set())
+    if navigator.max_touch_points not in allowed_touch_points:
+        issues.append("maxTouchPoints conflicts with selected device platform")
 
     network = navigator.network
     network_rtt = int(network.rtt) if network.rtt is not None else -1
@@ -476,6 +484,13 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
             issues.append("available screen rectangle exceeds physical screen")
         if screen.color_depth != screen.pixel_depth:
             issues.append("screen colorDepth and pixelDepth differ")
+        allowed_screen_depths = {
+            "windows": {24, 32},
+            "macos": {24, 30},
+            "android": {24},
+        }.get(fingerprint.platform, set())
+        if screen.color_depth not in allowed_screen_depths:
+            issues.append("screen depth conflicts with selected device platform")
         if float(screen.device_pixel_ratio or 0) <= 0:
             issues.append("devicePixelRatio must be positive")
         if float(screen.viewport_width or 0) != 0.0 or float(screen.viewport_height or 0) != 0.0:
@@ -1554,6 +1569,7 @@ def get_random_fp_details(
         screen = materialize_pc_screen_profile_for_windows(
             screen,
             windows_platform_version,
+            color_depth=choose_windows_screen_depth(rng),
         )
         selected_fonts = build_windows_font_profile(
             languages[0],
@@ -2331,6 +2347,8 @@ def _expected_observations(fingerprint: RandomFingerprint) -> tuple[tuple[str, s
         ("screenHeight", str(screen.height)),
         ("availWidth", str(screen.avail_width)),
         ("availHeight", str(screen.avail_height)),
+        ("colorDepth", str(screen.color_depth)),
+        ("pixelDepth", str(screen.pixel_depth)),
         ("innerWidth", _javascript_number(window.inner_width)),
         ("innerHeight", _javascript_number(window.inner_height)),
         ("outerWidth", _javascript_number(window.outer_width)),
@@ -2394,6 +2412,8 @@ _FINGERPRINT_PROBE = r"""
     screen.height,
     screen.availWidth,
     screen.availHeight,
+    screen.colorDepth,
+    screen.pixelDepth,
     innerWidth,
     innerHeight,
     outerWidth,

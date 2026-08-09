@@ -16,6 +16,62 @@ from demo.get_random_fp import (
 
 
 class RandomProfileConsistencyTests(unittest.TestCase):
+    def test_windows_touch_points_and_screen_depth_are_seeded_device_profiles(self) -> None:
+        samples = [
+            get_random_fp_details("US", DEFAULT_WINDOWS_USER_AGENT, seed=seed)
+            for seed in range(2_000)
+        ]
+        combinations = {
+            (
+                sample.profile.navigator.max_touch_points,
+                sample.profile.screen.color_depth,
+                sample.profile.screen.pixel_depth,
+            )
+            for sample in samples
+        }
+
+        self.assertEqual(
+            {sample.profile.navigator.max_touch_points for sample in samples},
+            {0, 5, 10},
+        )
+        self.assertEqual(
+            {
+                (sample.profile.screen.color_depth, sample.profile.screen.pixel_depth)
+                for sample in samples
+            },
+            {(24, 24), (32, 32)},
+        )
+        self.assertIn((10, 32, 32), combinations)
+        self.assertTrue(
+            all(color_depth == pixel_depth for _, color_depth, pixel_depth in combinations)
+        )
+
+        first = get_random_fp_details("US", DEFAULT_WINDOWS_USER_AGENT, seed=913)
+        repeated = get_random_fp_details("US", DEFAULT_WINDOWS_USER_AGENT, seed=913)
+        self.assertEqual(
+            (
+                first.profile.navigator.max_touch_points,
+                first.profile.screen.color_depth,
+                first.profile.screen.pixel_depth,
+                first.screen_profile_id,
+            ),
+            (
+                repeated.profile.navigator.max_touch_points,
+                repeated.profile.screen.color_depth,
+                repeated.profile.screen.pixel_depth,
+                repeated.screen_profile_id,
+            ),
+        )
+
+        mac = get_random_fp_details("US", DEFAULT_MAC_USER_AGENT, seed=913).profile
+        android = get_random_fp_details(
+            "US", DEFAULT_ANDROID_EDGE_USER_AGENT, seed=913
+        ).profile
+        self.assertEqual(mac.navigator.max_touch_points, 0)
+        self.assertIn((mac.screen.color_depth, mac.screen.pixel_depth), {(24, 24), (30, 30)})
+        self.assertEqual(android.navigator.max_touch_points, 5)
+        self.assertEqual((android.screen.color_depth, android.screen.pixel_depth), (24, 24))
+
     def test_network_activation_and_media_preferences_are_seeded_profiles(self) -> None:
         samples = [
             get_random_fp_details("US", DEFAULT_WINDOWS_USER_AGENT, seed=seed)

@@ -2,6 +2,15 @@ name: build Python wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform set to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - linux
   push:
     branches:
       - main
@@ -13,6 +22,7 @@ permissions:
 
 jobs:
   windows-and-macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all'
     name: ${{ matrix.artifact }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -104,6 +114,26 @@ jobs:
           if windows_profile.platform != "windows" or mac_profile.platform != "macos":
               raise SystemExit("packaged country profiles selected wrong platforms")
 
+          generated = [
+              create_country_profile_details("US", seed=seed).profile
+              for seed in range(256)
+          ]
+          touch_depth = {
+              (
+                  profile.navigator.max_touch_points,
+                  profile.screen.color_depth,
+                  profile.screen.pixel_depth,
+              )
+              for profile in generated
+          }
+          if (10, 32, 32) not in touch_depth:
+              raise SystemExit("packaged Windows profiles do not expose 10/32/32")
+          if {
+              (profile.screen.color_depth, profile.screen.pixel_depth)
+              for profile in generated
+          } != {(24, 24), (32, 32)}:
+              raise SystemExit("packaged Windows screen-depth pairs are incomplete")
+
           with EdgeSandbox() as sandbox:
               original_pid = sandbox.process_id()
               result = sandbox.evaluate("1 + 1", source_url="ci://wheel-smoke.js")
@@ -143,6 +173,7 @@ jobs:
           compression-level: 0
 
   linux-manylinux:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'linux'
     name: edge-sandbox-linux-x64
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -207,6 +238,26 @@ jobs:
           )
           if windows_profile.platform != "windows" or mac_profile.platform != "macos":
               raise SystemExit("packaged country profiles selected wrong platforms")
+
+          generated = [
+              create_country_profile_details("US", seed=seed).profile
+              for seed in range(256)
+          ]
+          touch_depth = {
+              (
+                  profile.navigator.max_touch_points,
+                  profile.screen.color_depth,
+                  profile.screen.pixel_depth,
+              )
+              for profile in generated
+          }
+          if (10, 32, 32) not in touch_depth:
+              raise SystemExit("packaged Windows profiles do not expose 10/32/32")
+          if {
+              (profile.screen.color_depth, profile.screen.pixel_depth)
+              for profile in generated
+          } != {(24, 24), (32, 32)}:
+              raise SystemExit("packaged Windows screen-depth pairs are incomplete")
 
           with EdgeSandbox() as sandbox:
               original_pid = sandbox.process_id()

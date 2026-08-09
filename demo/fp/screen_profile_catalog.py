@@ -241,6 +241,21 @@ PC_SCREEN_PROFILES: tuple[dict[str, object], ...] = tuple(
 )
 
 
+# Both pairs are browser observations from real Windows environments.  The
+# pair is atomic: Screen.colorDepth and Screen.pixelDepth must describe the
+# same selected display mode instead of being randomized independently.
+WINDOWS_SCREEN_DEPTH_ROWS: tuple[tuple[int, int], ...] = (
+    (24, 4),
+    (32, 1),
+)
+
+
+def choose_windows_screen_depth(rng: random.Random) -> int:
+    depths = tuple(row[0] for row in WINDOWS_SCREEN_DEPTH_ROWS)
+    weights = tuple(row[1] for row in WINDOWS_SCREEN_DEPTH_ROWS)
+    return int(rng.choices(depths, weights=weights, k=1)[0])
+
+
 # Common browser-exposed CSS screen sizes receive a distribution boost while
 # the complete legacy, HiDPI, and ultrawide tail remains selectable.
 _COMMON_SCREEN_SIZE_BOOSTS: dict[tuple[int, int], int] = {
@@ -321,6 +336,8 @@ def choose_pc_screen_profile_for_hardware(
 def materialize_pc_screen_profile_for_windows(
     profile: dict[str, object],
     platform_version: str,
+    *,
+    color_depth: int | None = None,
 ) -> dict[str, object]:
     """Return an OS-specific copy of a Windows screen profile.
 
@@ -345,6 +362,14 @@ def materialize_pc_screen_profile_for_windows(
     if not isinstance(screen, dict) or not isinstance(window, dict):
         raise ValueError("selected screen profile is malformed")
 
+    if color_depth is not None:
+        if isinstance(color_depth, bool) or not isinstance(color_depth, int):
+            raise ValueError("color_depth must be an integer")
+        if not 1 <= color_depth <= 64:
+            raise ValueError("color_depth must be between 1 and 64")
+        screen["colorDepth"] = color_depth
+        screen["pixelDepth"] = color_depth
+
     screen_height = int(screen.get("height", 0) or 0)
     outer_height = max(0, screen_height - taskbar_height)
     inner_height = max(0, outer_height - 88)
@@ -360,6 +385,7 @@ def materialize_pc_screen_profile_for_windows(
     materialized["windowsPlatformVersion"] = str(platform_version)
     materialized["id"] = (
         f"{profile.get('id', 'pc_screen')}__win{platform_major}_taskbar{taskbar_height}"
+        f"_depth{int(screen.get('colorDepth', 24) or 24)}"
     )
     return materialized
 
