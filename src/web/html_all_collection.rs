@@ -27,6 +27,19 @@ unsafe extern "C" {
     );
 }
 
+#[cfg(not(target_env = "msvc"))]
+unsafe extern "C" {
+    #[link_name = "_ZN2v814ObjectTemplate18MarkAsUndetectableEv"]
+    fn mark_as_undetectable(template: *const v8::ObjectTemplate);
+
+    #[link_name = "_ZN2v814ObjectTemplate24SetCallAsFunctionHandlerEPFvRKNS_20FunctionCallbackInfoINS_5ValueEEEENS_5LocalIS2_EE"]
+    fn set_call_as_function_handler(
+        template: *const v8::ObjectTemplate,
+        callback: v8::FunctionCallback,
+        data: v8::Local<'_, v8::Value>,
+    );
+}
+
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     isolate.set_slot(HtmlAllCollectionStore::default());
 }
@@ -77,7 +90,6 @@ pub(crate) fn create_for_document<'s>(
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
     let template = v8::ObjectTemplate::new(scope);
-    #[cfg(target_env = "msvc")]
     unsafe {
         use v8::MapFnTo;
 

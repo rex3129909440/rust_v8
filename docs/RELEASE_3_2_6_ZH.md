@@ -10,6 +10,7 @@
 2. 隔离 Worker 初始化与重新初始化不再被固定 30 秒窗口错误截断。配置的执行超时大于 30 秒时，初始化等待窗口同步延长并保留 100 ms 收尾宽限；短超时仍保留 30 秒最低启动窗口。
 3. Rust 集成测试从已移除的独立 Worker EXE 迁移到 DLL/SO 自托管进程隔离路径。Linux/macOS 直接覆盖自托管集成测试，Windows 的动态库发布形态由 Python/native wheel 烟测覆盖。
 4. Linux wheel CI 在打包前执行 release 模式的 248 项 native 库回归；构建 wheel 后，再对实际安装的 SO 执行进程隔离、profile 重初始化、一次性 Worker 池和 XHR 网络捕获烟测。避免仅构建成功但发布物无法工作，同时避免为多个 V8 集成测试目标重复执行 release LTO 链接。
+5. `document.all` 的 legacy callable/undetectable V8 模板绑定此前只声明了 MSVC C++ ABI 符号，Linux/macOS 会退化为普通对象。现在补充 Itanium C++ ABI 绑定，使 `typeof document.all === "undefined"`、布尔假值、`== null` 与函数调用语义在 DLL/SO 上一致。
 
 ## 本地验证
 
