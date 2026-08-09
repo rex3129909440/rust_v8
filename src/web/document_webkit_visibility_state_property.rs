@@ -7,7 +7,16 @@ pub(crate) fn define(
 fn get_state(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
 ) {
-    super::document_property_support::get_string(s, a, r, "webkitVisibilityState", "visible")
+    if super::document_property_support::ensure(s, a.this()) {
+        let state = crate::fingerprint::edge(s)
+            .document
+            .visibility_state
+            .as_deref()
+            .unwrap_or("visible");
+        if let Some(value) = v8::String::new(s, state) {
+            r.set(value.into());
+        }
+    }
 }

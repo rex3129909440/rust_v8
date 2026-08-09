@@ -586,6 +586,7 @@ class MacEdgeProfileTests(unittest.TestCase):
                 "profile.navigator.do_not_track",
                 "profile.geolocation",
                 "profile.timing",
+                "profile.performance.entries",
             ],
         )
 

@@ -11,6 +11,10 @@ fn has_focus(
     mut result: v8::ReturnValue<'_>,
 ) {
     if super::document_method_support::ensure(scope, arguments.this()) {
-        result.set(v8::Boolean::new(scope, true).into());
+        let has_focus = crate::fingerprint::edge(scope)
+            .document
+            .has_focus
+            .unwrap_or(true);
+        result.set(v8::Boolean::new(scope, has_focus).into());
     }
 }

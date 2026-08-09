@@ -260,6 +260,7 @@ pub mod profile_field {
     pub const CSS_INPUT_FILE: u32 = 93;
     pub const CSS_INPUT_TEXT: u32 = 94;
     pub const PERFORMANCE_EVALUATED_SCRIPT_CONTENT_ENCODING: u32 = 95;
+    pub const DOCUMENT_VISIBILITY_STATE: u32 = 96;
 
     pub const PERMISSION_ACCELEROMETER: u32 = 800;
     pub const PERMISSION_BACKGROUND_SYNC: u32 = 801;
@@ -531,6 +532,8 @@ pub mod profile_field {
     pub const MEDIA_PREFERENCE_REDUCED_TRANSPARENCY: u32 = 729;
     pub const NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE: u32 = 730;
     pub const NAVIGATOR_USER_ACTIVATION_IS_ACTIVE: u32 = 731;
+    pub const DOCUMENT_HAS_FOCUS: u32 = 732;
+    pub const DOCUMENT_IS_POPUP: u32 = 733;
 }
 
 pub struct EdgeSandboxHandle {
@@ -700,7 +703,7 @@ unsafe fn options_ref<'a>(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_profile_schema_version() -> u32 {
-    10
+    11
 }
 
 fn performance_profile_string(value: EdgeSandboxStringView, name: &str) -> Result<String, String> {
@@ -1002,6 +1005,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_string(
             profile_field::CSS_INPUT_TEXT => fingerprint.css.input_text = value,
             profile_field::PERFORMANCE_EVALUATED_SCRIPT_CONTENT_ENCODING => {
                 fingerprint.performance.evaluated_script_content_encoding = value;
+            }
+            profile_field::DOCUMENT_VISIBILITY_STATE => {
+                fingerprint.document.visibility_state = Some(value);
             }
             profile_field::PERMISSION_ACCELEROMETER => {
                 fingerprint.permissions.accelerometer = value;
@@ -1962,6 +1968,12 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_bool(
             }
             profile_field::NAVIGATOR_USER_ACTIVATION_IS_ACTIVE => {
                 fingerprint.navigator.user_activation_is_active = value;
+            }
+            profile_field::DOCUMENT_HAS_FOCUS => {
+                fingerprint.document.has_focus = Some(value);
+            }
+            profile_field::DOCUMENT_IS_POPUP => {
+                fingerprint.document.is_popup = Some(value);
             }
             profile_field::WEBGL_CONTEXT_ALPHA => {
                 fingerprint.rendering.webgl.context_alpha = value;
@@ -4303,6 +4315,7 @@ mod tests {
         let profile_ptr = &mut profile as *mut EdgeSandboxProfile;
         let mut error = EdgeSandboxBuffer::default();
         let high = b"high";
+        let hidden = b"hidden";
 
         // SAFETY: profile and error point to live stack values and `high`
         // remains readable for the duration of the synchronous call.
@@ -4317,6 +4330,25 @@ mod tests {
                 profile_ptr,
                 profile_field::DOCUMENT_BODY_CLIENT_HEIGHT,
                 23.0,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::DOCUMENT_HAS_FOCUS,
+                false,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_string(
+                profile_ptr,
+                profile_field::DOCUMENT_VISIBILITY_STATE,
+                hidden.as_ptr(),
+                hidden.len(),
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::DOCUMENT_IS_POPUP,
+                true,
                 &mut error,
             ));
             assert!(edge_sandbox_profile_set_bool(
@@ -4351,6 +4383,12 @@ mod tests {
             Some(5)
         );
         assert_eq!(profile.fingerprint.document.body_client_height, Some(23.0));
+        assert_eq!(profile.fingerprint.document.has_focus, Some(false));
+        assert_eq!(
+            profile.fingerprint.document.visibility_state.as_deref(),
+            Some("hidden")
+        );
+        assert_eq!(profile.fingerprint.document.is_popup, Some(true));
         assert!(
             profile
                 .fingerprint

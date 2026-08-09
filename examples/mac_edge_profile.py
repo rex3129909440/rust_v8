@@ -25,6 +25,7 @@ try:
         BatteryProfile,
         CanvasProfile,
         CssProfile,
+        DocumentProfile,
         EdgeProfile,
         FontMetricProfile,
         FontProfile,
@@ -40,6 +41,7 @@ try:
         NavigatorProfile,
         NetworkProfile,
         PermissionsProfile,
+        PerformanceProfile,
         PluginListProfile,
         PluginProfile,
         RtcCodecProfile,
@@ -62,6 +64,7 @@ except ImportError:
         BatteryProfile,
         CanvasProfile,
         CssProfile,
+        DocumentProfile,
         EdgeProfile,
         FontMetricProfile,
         FontProfile,
@@ -77,6 +80,7 @@ except ImportError:
         NavigatorProfile,
         NetworkProfile,
         PermissionsProfile,
+        PerformanceProfile,
         PluginListProfile,
         PluginProfile,
         RtcCodecProfile,
@@ -439,6 +443,8 @@ def mac_edge_150_profile(
             webdriver=False,
             pdf_viewer_enabled=True,
             do_not_track=None,
+            user_activation_has_been_active=False,
+            user_activation_is_active=False,
             user_agent_data=UserAgentDataProfile(
                 brands=(
                     UserAgentBrandProfile("Not;A=Brand", "8", "8.0.0.0"),
@@ -574,6 +580,7 @@ def mac_edge_150_profile(
             context_power_preference="default",
         ),
         webgpu=WebGpuProfile(
+            available=True,
             vendor="apple",
             architecture=APPLE_WEBGPU_ARCHITECTURE,
             device=APPLE_GPU_NAME,
@@ -659,6 +666,13 @@ def mac_edge_150_profile(
             metrics=resolved_font_metrics,
         ),
         css=mac_css_for_device_pixel_ratio(device_pixel_ratio),
+        document=DocumentProfile(
+            body_child_element_count=0,
+            body_client_height=0.0,
+            has_focus=True,
+            visibility_state="visible",
+            is_popup=False,
+        ),
         media=MediaProfile(
             devices=(
                 MediaDeviceProfile("default", "audioinput", "", "mac-audio"),
@@ -815,6 +829,7 @@ def mac_edge_150_profile(
             color_scheme="light",
             contrast="no-preference",
             reduced_motion=False,
+            reduced_transparency=False,
             reduced_data=False,
             forced_colors=False,
             inverted_colors=False,
@@ -826,6 +841,7 @@ def mac_edge_150_profile(
             any_hover="hover",
             display_mode="browser",
             dynamic_range="high",
+            video_dynamic_range="high",
             scripting="enabled",
         ),
         plugins=PluginListProfile(
@@ -882,6 +898,10 @@ def mac_edge_150_profile(
             console_js_heap_size_limit=4_395_630_592,
             console_total_js_heap_size=189_287_527,
             console_used_js_heap_size=180_511_835,
+        ),
+        performance=PerformanceProfile(
+            entries=None,
+            evaluated_script_content_encoding="zstd",
         ),
     )
     primary_language = locale.replace("_", "-").lower()

@@ -39,6 +39,9 @@ pub struct CssFingerprint {
 pub struct DocumentFingerprint {
     pub body_child_element_count: Option<u32>,
     pub body_client_height: Option<f64>,
+    pub has_focus: Option<bool>,
+    pub visibility_state: Option<String>,
+    pub is_popup: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -806,6 +809,13 @@ impl DocumentFingerprint {
             })
         {
             return Err("document fingerprint is invalid".to_owned());
+        }
+        if self
+            .visibility_state
+            .as_deref()
+            .is_some_and(|state| !matches!(state, "visible" | "hidden"))
+        {
+            return Err("document visibility_state must be visible or hidden".to_owned());
         }
         Ok(())
     }

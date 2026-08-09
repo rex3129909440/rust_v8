@@ -1240,6 +1240,14 @@ def _user_activation_values(seed: int) -> tuple[bool, bool]:
     return False, False
 
 
+def _document_has_focus_value(seed: int, configured: bool | None) -> bool:
+    """Choose the initial document focus without perturbing other catalogs."""
+
+    if configured is not None:
+        return configured
+    return random.Random(seed ^ 0x444F43554D454E54).random() < 0.5
+
+
 def _media_preference_values(
     seed: int,
     platform_name: str,
@@ -1432,8 +1440,11 @@ def get_random_fp_details(
     time_zone: str | None = None,
     include_virtual_gpu: bool = False,
     include_external_mac_screen: bool = False,
-    body_child_element_count: int | None = 5,
-    body_client_height: float | None = 18.0,
+    body_child_element_count: int | None = 2,
+    body_client_height: float | None = 0.0,
+    document_has_focus: bool | None = None,
+    document_visibility_state: str | None = "visible",
+    is_popup: bool | None = False,
 ) -> RandomFingerprint:
     """Return a country-aware Windows, macOS, or Android Mobile profile.
 
@@ -1448,7 +1459,7 @@ def get_random_fp_details(
     ``body_child_element_count`` materializes that many real placeholder DIV
     nodes in the default BODY used by standalone ``evaluate``. An explicit
     ``body_client_height`` controls the matching BODY geometry observation.
-    Both default to the fixed workload profile values 5 and 18.
+    Both default to the fixed workload profile values 2 and 0.
     ``seed`` makes every catalog choice deterministic.  Chromium's frozen
     low-entropy Mac UA retains ``MacIntel`` while UA-CH is set to the selected
     Apple-silicon hardware architecture.
@@ -1471,6 +1482,19 @@ def get_random_fp_details(
         body_client_height = float(body_client_height)
         if not math.isfinite(body_client_height) or not 0 <= body_client_height <= 10_000_000:
             raise ValueError("body_client_height must be a finite non-negative number")
+    if document_has_focus is not None and not isinstance(document_has_focus, bool):
+        raise ValueError("document_has_focus must be a bool or None")
+    if document_visibility_state is not None and document_visibility_state not in {
+        "visible",
+        "hidden",
+    }:
+        raise ValueError("document_visibility_state must be visible, hidden, or None")
+    if is_popup is not None and not isinstance(is_popup, bool):
+        raise ValueError("is_popup must be a bool or None")
+    selected_document_has_focus = _document_has_focus_value(
+        resolved_seed,
+        document_has_focus,
+    )
 
     languages = tuple(choose_language_list(rng, country, include_secondary=True))
     if not languages:
@@ -1847,8 +1871,20 @@ def get_random_fp_details(
             DocumentProfile(
                 body_child_element_count=body_child_element_count,
                 body_client_height=body_client_height,
+                has_focus=selected_document_has_focus,
+                visibility_state=document_visibility_state,
+                is_popup=is_popup,
             )
-            if body_child_element_count is not None or body_client_height is not None
+            if any(
+                value is not None
+                for value in (
+                    body_child_element_count,
+                    body_client_height,
+                    selected_document_has_focus,
+                    document_visibility_state,
+                    is_popup,
+                )
+            )
             else None
         ),
         audio=replace(
@@ -2209,13 +2245,16 @@ def get_random_fp(
     time_zone: str | None = None,
     include_virtual_gpu: bool = False,
     include_external_mac_screen: bool = False,
-    body_child_element_count: int | None = 5,
-    body_client_height: float | None = 18.0,
+    body_child_element_count: int | None = 2,
+    body_client_height: float | None = 0.0,
+    document_has_focus: bool | None = None,
+    document_visibility_state: str | None = "visible",
+    is_popup: bool | None = False,
 ) -> EdgeProfile:
     """Return the typed profile expected by ``EdgeSandbox(profile=...)``.
 
-    The default standalone BODY state is fixed at five children and a
-    23-pixel client height unless the caller explicitly overrides it.
+    The default standalone BODY state is fixed at two children and a zero
+    client height unless the caller explicitly overrides it.
     """
 
     return get_random_fp_details(
@@ -2227,6 +2266,9 @@ def get_random_fp(
         include_external_mac_screen=include_external_mac_screen,
         body_child_element_count=body_child_element_count,
         body_client_height=body_client_height,
+        document_has_focus=document_has_focus,
+        document_visibility_state=document_visibility_state,
+        is_popup=is_popup,
     ).profile
 
 

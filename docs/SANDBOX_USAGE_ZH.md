@@ -444,7 +444,7 @@ with EdgeSandbox(profile=fingerprint.profile, options=options) as sandbox:
 
 随机 profile 同时生成相互关联的 `navigator.connection`、显示/无障碍媒体偏好、设备姿态和 `navigator.userActivation` 状态。RTT 使用 50ms 桶并覆盖 0–600ms，downlink 使用 0.05Mbps 桶；`effectiveType` 由同一组 RTT/downlink 推导，`saveData` 与 `(prefers-reduced-data: reduce)` 保持一致。桌面姿态固定为 `continuous`，只有目录中标记为可折叠的 Android 设备才可能生成 `folded`。
 
-不加载 page HTML、只调用一次 `evaluate()` 时，国家随机 profile 默认固定初始 BODY 为5个子元素、`clientHeight=18`，因此以下调用不需要额外传入这两个参数：
+不加载 page HTML、只调用一次 `evaluate()` 时，国家随机 profile 默认固定初始 BODY 为2个子元素、`clientHeight=0`，因此以下调用不需要额外传入这两个参数：
 
 ```python
 from edge_sandbox import create_country_profile_details
@@ -461,10 +461,12 @@ with EdgeSandbox(profile=fingerprint.profile) as sandbox:
         "document.body.children[0].tagName, "
         "document.body.clientHeight].join('|')"
     )
-    assert value == "5|DIV|18"
+    assert value == "2|DIV|0"
 ```
 
-`body_child_element_count=N` 会在脚本运行前创建 N 个真实的占位 `DIV`，不是伪造 getter 返回值；DOM 查询、`children`、`document.all` 和节点遍历都能观察到它们。`body_client_height` 只覆盖 BODY 的初始几何读数。国家随机 profile 未传参数时使用固定的 `5/18`；显式传入其他数值可覆盖，显式传入 `None` 可恢复正常 HTML/CSS 布局计算。如果同时加载 page HTML，沙箱只在现有 BODY 元素数量不足目标值时补足节点，不会删除页面原有节点。
+`body_child_element_count=N` 指定脚本运行前 BODY 应达到的真实子元素总数，不是伪造 getter 返回值；DOM 查询、`children`、`document.all` 和节点遍历都能观察到这些节点。国家随机 profile 未传参数时使用固定的 `2/0`；`body_client_height` 只覆盖 BODY 的初始几何读数。显式传入其他数值可覆盖，显式传入 `None` 可恢复正常 HTML/CSS 布局计算。如果同时加载 page HTML，沙箱只在现有 BODY 元素数量不足目标值时补足占位 `DIV`，不会删除页面原有节点。
+
+同一入口还支持 `document_has_focus`、`document_visibility_state`（`"visible"` 或 `"hidden"`）和 `is_popup`。这三个值分别驱动 `document.hasFocus()`、同源的 `document.hidden/visibilityState/webkitVisibilityState` 与初始 Performance 可见性条目，以及六个 `BarProp.visible`。国家随机 profile 未显式传入 `document_has_focus` 时按独立 seed 流以 50/50 抽取 `True/False`；显式传入布尔值可固定覆盖。同一 seed 可复现，并且不会改变 GPU、屏幕、语言等既有随机序列。可见性和弹窗状态默认仍为 `"visible"/False`，不会把互相关联的 API 独立随机化。
 
 当 `evaluate(..., source_url=...)` 收到 HTTPS 脚本 URL 时，沙箱会在脚本开始执行前加入一条 `PerformanceResourceTiming`：`entryType="resource"`、`initiatorType="script"`、`responseStatus=200`、`contentType="text/javascript"`。Rust 会对本次传入的完整 UTF-8 源码执行真实 HTTP 内容编码，`decodedBodySize` 是源码字节数，`encodedBodySize` 是压缩结果字节数，`transferSize=encodedBodySize+300`。未传入编码时默认使用 `zstd`，可通过 `PerformanceProfile.evaluated_script_content_encoding` 切换为 `gzip`、`deflate`、`br`、`zstd` 或空字符串（不压缩）。因此脚本内部第一次调用 `performance.getEntriesByType("resource")` 就能看到该地址和大小；`source_url` 同时继续作为异常堆栈的 ScriptOrigin。
 

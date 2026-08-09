@@ -72,6 +72,13 @@ pub(crate) fn create<'s>(
     Ok(object)
 }
 
+pub(crate) fn visible_for_current_page(scope: &v8::PinScope<'_, '_>) -> bool {
+    !crate::fingerprint::edge(scope)
+        .document
+        .is_popup
+        .unwrap_or(false)
+}
+
 fn get_visible(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

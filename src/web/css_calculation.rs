@@ -560,8 +560,24 @@ pub(crate) fn computed_system_color(name: &str, value: &str) -> Option<&'static 
 }
 
 pub(crate) fn computed_color(name: &str, value: &str) -> Option<String> {
+    computed_color_with_preferences(name, value, false, "light")
+}
+
+pub(crate) fn computed_color_with_preferences(
+    name: &str,
+    value: &str,
+    forced_colors: bool,
+    color_scheme: &str,
+) -> Option<String> {
     if !is_color_property(name) {
         return None;
+    }
+    if forced_colors
+        && let Some(value) = canonical_system_color(value)
+        && let Some(computed) =
+            forced_system_color(value, color_scheme.eq_ignore_ascii_case("dark"))
+    {
+        return Some(computed.to_owned());
     }
     if let Some(value) = computed_system_color(name, value) {
         return Some(value.to_owned());
@@ -652,6 +668,61 @@ const SYSTEM_COLORS: &[(&str, &str)] = &[
     ("accentcolor", "rgb(0, 117, 255)"),
     ("accentcolortext", "rgb(255, 255, 255)"),
 ];
+
+// CSS Color Adjustment defines these two palettes for forced-colors
+// automation.  The profile's coherent forced-colors + color-scheme state
+// selects one entire palette; individual keywords are never randomized.
+const FORCED_COLORS_LIGHT: &[(&str, &str)] = &[
+    ("accentcolor", "rgb(255, 255, 255)"),
+    ("accentcolortext", "rgb(0, 0, 0)"),
+    ("activetext", "rgb(0, 0, 159)"),
+    ("buttonborder", "rgb(0, 0, 0)"),
+    ("buttonface", "rgb(255, 255, 255)"),
+    ("buttontext", "rgb(0, 0, 0)"),
+    ("canvas", "rgb(255, 255, 255)"),
+    ("canvastext", "rgb(0, 0, 0)"),
+    ("field", "rgb(255, 255, 255)"),
+    ("fieldtext", "rgb(0, 0, 0)"),
+    ("graytext", "rgb(96, 0, 0)"),
+    ("highlight", "rgb(55, 0, 110)"),
+    ("highlighttext", "rgb(255, 255, 255)"),
+    ("linktext", "rgb(0, 0, 159)"),
+    ("selecteditem", "rgb(55, 0, 110)"),
+    ("selecteditemtext", "rgb(255, 255, 255)"),
+    ("visitedtext", "rgb(0, 0, 159)"),
+];
+
+const FORCED_COLORS_DARK: &[(&str, &str)] = &[
+    ("accentcolor", "rgb(0, 0, 0)"),
+    ("accentcolortext", "rgb(255, 255, 255)"),
+    ("activetext", "rgb(255, 255, 0)"),
+    ("buttonborder", "rgb(0, 0, 0)"),
+    ("buttonface", "rgb(0, 0, 0)"),
+    ("buttontext", "rgb(255, 255, 255)"),
+    ("canvas", "rgb(0, 0, 0)"),
+    ("canvastext", "rgb(255, 255, 255)"),
+    ("field", "rgb(0, 0, 0)"),
+    ("fieldtext", "rgb(255, 255, 255)"),
+    ("graytext", "rgb(63, 242, 63)"),
+    ("highlight", "rgb(26, 235, 255)"),
+    ("highlighttext", "rgb(0, 0, 0)"),
+    ("linktext", "rgb(255, 255, 0)"),
+    ("selecteditem", "rgb(26, 235, 255)"),
+    ("selecteditemtext", "rgb(0, 0, 0)"),
+    ("visitedtext", "rgb(255, 255, 0)"),
+];
+
+fn forced_system_color(value: &str, dark: bool) -> Option<&'static str> {
+    let palette = if dark {
+        FORCED_COLORS_DARK
+    } else {
+        FORCED_COLORS_LIGHT
+    };
+    palette
+        .iter()
+        .find(|(name, _)| *name == value)
+        .map(|(_, computed)| *computed)
+}
 
 fn named_color_hex(value: &str) -> Option<&'static str> {
     NAMED_COLORS
@@ -2268,6 +2339,30 @@ mod tests {
             );
             assert!(!supports_property("color", invalid), "{invalid}");
         }
+    }
+
+    #[test]
+    fn forced_colors_use_one_coherent_profile_selected_palette() {
+        assert_eq!(
+            computed_color_with_preferences("color", "CanvasText", true, "light").as_deref(),
+            Some("rgb(0, 0, 0)")
+        );
+        assert_eq!(
+            computed_color_with_preferences("color", "Highlight", true, "light").as_deref(),
+            Some("rgb(55, 0, 110)")
+        );
+        assert_eq!(
+            computed_color_with_preferences("color", "CanvasText", true, "dark").as_deref(),
+            Some("rgb(255, 255, 255)")
+        );
+        assert_eq!(
+            computed_color_with_preferences("color", "Highlight", true, "dark").as_deref(),
+            Some("rgb(26, 235, 255)")
+        );
+        assert_eq!(
+            computed_color_with_preferences("color", "Highlight", false, "dark").as_deref(),
+            Some("rgb(0, 120, 215)")
+        );
     }
 
     #[test]

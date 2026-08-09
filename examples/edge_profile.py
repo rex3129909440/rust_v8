@@ -67,6 +67,7 @@ class ProfileField(IntEnum):
     CSS_INPUT_FILE = 93
     CSS_INPUT_TEXT = 94
     PERFORMANCE_EVALUATED_SCRIPT_CONTENT_ENCODING = 95
+    DOCUMENT_VISIBILITY_STATE = 96
 
     PERMISSION_ACCELEROMETER = 800
     PERMISSION_BACKGROUND_SYNC = 801
@@ -338,6 +339,8 @@ class ProfileField(IntEnum):
     MEDIA_PREFERENCE_REDUCED_TRANSPARENCY = 729
     NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE = 730
     NAVIGATOR_USER_ACTIVATION_IS_ACTIVE = 731
+    DOCUMENT_HAS_FOCUS = 732
+    DOCUMENT_IS_POPUP = 733
 
 
 @dataclass(frozen=True, slots=True)
@@ -662,11 +665,16 @@ class DocumentProfile:
 
     ``body_child_element_count`` is materialized as real placeholder ``div``
     nodes. ``body_client_height`` overrides only the initial BODY clientHeight;
-    omitted values preserve normal HTML/CSS-derived behavior.
+    omitted values preserve normal HTML/CSS-derived behavior. The remaining
+    values describe the initial page/document state shared by the matching
+    document APIs and Performance visibility entry.
     """
 
     body_child_element_count: int | None = None
     body_client_height: float | None = None
+    has_focus: bool | None = None
+    visibility_state: str | None = None
+    is_popup: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

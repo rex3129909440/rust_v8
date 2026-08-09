@@ -14,7 +14,6 @@ permissions:
 jobs:
   windows-and-macos:
     name: ${{ matrix.artifact }}
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:

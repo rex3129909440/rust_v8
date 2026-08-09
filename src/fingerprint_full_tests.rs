@@ -69,6 +69,37 @@ fn configured_options() -> EdgeRuntimeOptions {
 }
 
 #[test]
+fn forced_color_media_state_and_computed_system_palette_stay_coherent() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.media_preferences.forced_colors = true;
+    options.fingerprint.media_preferences.color_scheme = "dark".to_owned();
+    options.fingerprint.media_preferences.contrast = "custom".to_owned();
+    let mut runtime = EdgeRuntime::with_options(options).expect("forced-colors profile");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const canvas = document.createElement("div");
+              canvas.style.color = "CanvasText";
+              const highlight = document.createElement("div");
+              highlight.style.color = "Highlight";
+              document.body.append(canvas, highlight);
+              return [
+                matchMedia("(forced-colors: active)").matches,
+                matchMedia("(prefers-color-scheme: dark)").matches,
+                getComputedStyle(canvas).color,
+                getComputedStyle(highlight).color
+              ].join("|");
+            })()
+            "#,
+        ),
+        "true|true|rgb(255, 255, 255)|rgb(26, 235, 255)"
+    );
+}
+
+#[test]
 fn font_css_and_webgpu_platform_differences_are_profile_driven() {
     let mut options = EdgeRuntimeOptions::default();
     options.fingerprint.fonts.families = vec!["Configured UI".to_owned()];
@@ -335,6 +366,40 @@ fn standalone_evaluate_materializes_profiled_body_state_before_script_execution(
         ),
         "5|true|23"
     );
+}
+
+#[test]
+fn document_initial_state_is_coherent_across_document_performance_and_bar_props() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.document.has_focus = Some(false);
+    options.fingerprint.document.visibility_state = Some("hidden".to_owned());
+    options.fingerprint.document.is_popup = Some(true);
+    let mut runtime = EdgeRuntime::with_options(options).expect("profiled document state");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            [
+              document.hasFocus(),
+              document.hidden,
+              document.visibilityState,
+              document.webkitVisibilityState,
+              performance.getEntriesByType("visibility-state")[0].name,
+              [locationbar, menubar, personalbar, scrollbars, statusbar, toolbar]
+                .every(bar => bar.visible === false)
+            ].join("|")
+            "#,
+        ),
+        "false|true|hidden|hidden|hidden|true"
+    );
+}
+
+#[test]
+fn document_profile_rejects_an_invalid_visibility_state() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.document.visibility_state = Some("prerender".to_owned());
+    assert!(EdgeRuntime::with_options(options).is_err());
 }
 
 #[test]

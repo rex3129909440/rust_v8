@@ -232,7 +232,12 @@ fn ensure_initial_visibility_entry(scope: &mut v8::PinScope<'_, '_>) {
     if !buffered_entries(scope, "visibility-state").is_empty() {
         return;
     }
-    if let Ok(entry) = super::visibility_state_entry::create(scope, "visible", 0.0) {
+    let state = crate::fingerprint::edge(scope)
+        .document
+        .visibility_state
+        .clone()
+        .unwrap_or_else(|| "visible".to_owned());
+    if let Ok(entry) = super::visibility_state_entry::create(scope, &state, 0.0) {
         add_entry_for_current_realm(scope, entry, "visibility-state");
     }
 }

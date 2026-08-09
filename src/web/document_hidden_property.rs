@@ -10,6 +10,11 @@ fn get_hidden(
     mut r: v8::ReturnValue<'_>,
 ) {
     if super::document_property_support::ensure(s, a.this()) {
-        r.set(v8::Boolean::new(s, false).into());
+        let hidden = crate::fingerprint::edge(s)
+            .document
+            .visibility_state
+            .as_deref()
+            .is_some_and(|state| state == "hidden");
+        r.set(v8::Boolean::new(s, hidden).into());
     }
 }

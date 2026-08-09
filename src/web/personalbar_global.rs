@@ -10,7 +10,8 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
-    let bar = super::bar_prop::create(scope, true)?;
+    let visible = super::bar_prop::visible_for_current_page(scope);
+    let bar = super::bar_prop::create(scope, visible)?;
     let stored = v8::Global::new(scope, bar);
     let realm_id = crate::webidl::realm_id(scope);
     scope

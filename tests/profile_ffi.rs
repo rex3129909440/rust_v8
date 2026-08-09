@@ -132,7 +132,7 @@ fn evaluate(runtime: *mut edge_sandbox::ffi::EdgeSandboxHandle, source: &str) ->
 
 #[test]
 fn complete_typed_profile_crosses_native_and_worker_boundaries() {
-    assert_eq!(edge_sandbox_profile_schema_version(), 7);
+    assert_eq!(edge_sandbox_profile_schema_version(), 11);
     let mut error = EdgeSandboxBuffer::default();
     let profile = edge_sandbox_profile_create(&mut error);
     assert!(!profile.is_null(), "{}", take_buffer(&mut error));
@@ -265,6 +265,31 @@ fn complete_typed_profile_crosses_native_and_worker_boundaries() {
         50_000_000,
     );
     set_string(profile, profile_field::DEVICE_POSTURE, "folded");
+    set_u32(profile, profile_field::DOCUMENT_BODY_CHILD_ELEMENT_COUNT, 5);
+    set_f64(profile, profile_field::DOCUMENT_BODY_CLIENT_HEIGHT, 23.0);
+    set_bool(profile, profile_field::DOCUMENT_HAS_FOCUS, false);
+    set_string(profile, profile_field::DOCUMENT_VISIBILITY_STATE, "hidden");
+    set_bool(profile, profile_field::DOCUMENT_IS_POPUP, true);
+    set_bool(
+        profile,
+        profile_field::NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE,
+        true,
+    );
+    set_bool(
+        profile,
+        profile_field::NAVIGATOR_USER_ACTIVATION_IS_ACTIVE,
+        true,
+    );
+    set_bool(
+        profile,
+        profile_field::MEDIA_PREFERENCE_REDUCED_TRANSPARENCY,
+        true,
+    );
+    set_string(
+        profile,
+        profile_field::MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE,
+        "high",
+    );
     set_list(
         profile,
         profile_field::IMAGE_DECODER_TYPES,
@@ -481,6 +506,18 @@ fn complete_typed_profile_crosses_native_and_worker_boundaries() {
             visualViewport.offsetLeft,
             visualViewport.scale,
             navigator.devicePosture.type,
+            matchMedia("(device-posture: folded)").matches,
+            matchMedia("(prefers-reduced-transparency: reduce)").matches,
+            matchMedia("(video-dynamic-range: high)").matches,
+            navigator.userActivation.hasBeenActive,
+            navigator.userActivation.isActive,
+            document.body.childElementCount,
+            document.body.clientHeight,
+            document.hasFocus(),
+            document.hidden,
+            document.visibilityState,
+            [locationbar, menubar, personalbar, scrollbars, statusbar, toolbar]
+              .every(bar => bar.visible === false),
             performance.memory.jsHeapSizeLimit,
             performance.memory.usedJSHeapSize,
             console.memory.jsHeapSizeLimit,
@@ -522,6 +559,7 @@ fn complete_typed_profile_crosses_native_and_worker_boundaries() {
         concat!(
             "true|fr-FR|fr-FR,fr|16|4|false|Windows|151|42|8.5|",
             "1920|1536|1.25|portrait-primary|90|3|1.5|folded|",
+            "true|true|true|true|true|5|23|false|true|hidden|true|",
             "700000000|60000000|650000000|50000000|",
             "27.4|2|Profile GL|Profile GPU Renderer|2048|32768|123456|1.5|",
             "96000|6|0.004|0.017|",

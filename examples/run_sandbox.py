@@ -21,7 +21,7 @@ except ImportError:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ABI_VERSION = 1
-PROFILE_SCHEMA_VERSION = 10
+PROFILE_SCHEMA_VERSION = 11
 OPTIONS_SCHEMA_VERSION = 2
 
 DEMO_JAVASCRIPT = r"""
@@ -2459,6 +2459,21 @@ class EdgeSandbox:
                 handle,
                 field.DOCUMENT_BODY_CLIENT_HEIGHT,
                 document.body_client_height,
+            )
+            self._profile_set_bool(
+                handle,
+                field.DOCUMENT_HAS_FOCUS,
+                document.has_focus,
+            )
+            self._profile_set_string(
+                handle,
+                field.DOCUMENT_VISIBILITY_STATE,
+                document.visibility_state,
+            )
+            self._profile_set_bool(
+                handle,
+                field.DOCUMENT_IS_POPUP,
+                document.is_popup,
             )
 
         media = profile.media

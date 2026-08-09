@@ -7,6 +7,8 @@ on:
 jobs:
   rust:
     runs-on: windows-2025
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
