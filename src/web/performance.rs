@@ -9,6 +9,7 @@ pub(crate) struct PerformanceStore {
 #[derive(Clone)]
 struct PerformanceRecord {
     realm_id: i32,
+    is_window: bool,
     target: v8::Global<v8::Object>,
     time_origin: f64,
     monotonic_origin: f64,
@@ -21,6 +22,7 @@ struct PerformanceRecord {
     memory: v8::Global<v8::Object>,
     event_counts: v8::Global<v8::Object>,
     interaction_count: i32,
+    profile_entries_override: bool,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -119,6 +121,7 @@ fn illegal_constructor(
 #[allow(dead_code)]
 pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    is_window: bool,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
@@ -131,8 +134,12 @@ pub(crate) fn create<'s>(
     let is_root_realm = scope
         .get_slot::<PerformanceStore>()
         .is_some_and(|store| store.records.is_empty());
+    let configured_entries = is_root_realm
+        .then(|| crate::fingerprint::edge(scope).performance.entries.clone())
+        .flatten();
     let monotonic_origin = if is_root_realm { 0.0 } else { elapsed };
     let time_origin = crate::determinism::high_resolution_milliseconds(
+        scope,
         crate::determinism::epoch_milliseconds(scope) - (elapsed - monotonic_origin),
     );
     let timing = super::performance_timing::create(scope, time_origin.floor())?;
@@ -161,6 +168,7 @@ pub(crate) fn create<'s>(
         super::event_counts::create(scope, super::event_counts::edge_150_initial_values())?;
     let record = PerformanceRecord {
         realm_id: crate::webidl::realm_id(scope),
+        is_window,
         target: v8::Global::new(scope, performance),
         time_origin,
         monotonic_origin,
@@ -173,22 +181,130 @@ pub(crate) fn create<'s>(
         memory: v8::Global::new(scope, memory),
         event_counts: v8::Global::new(scope, event_counts),
         interaction_count: 0,
+        profile_entries_override: configured_entries.is_some(),
     };
     scope
         .get_slot_mut::<PerformanceStore>()
         .ok_or_else(|| "Performance state was not prepared".to_owned())?
         .records
         .insert(performance.get_identity_hash().get(), record);
-    if let Some(url) = current_location_href(scope) {
-        ensure_navigation_entry(
-            scope,
-            url,
-            200,
-            crate::page_init::html(scope).len(),
-            crate::page_init::content_type(scope),
-        );
+    if let Some(entries) = configured_entries {
+        for configured in entries {
+            let entry = match configured.entry_type.as_str() {
+                "navigation" => {
+                    super::performance_navigation_timing::create_from_profile(scope, &configured)
+                }
+                "resource" => {
+                    super::performance_resource_timing::create_from_profile(scope, &configured)
+                }
+                "visibility-state" => super::visibility_state_entry::create(
+                    scope,
+                    &configured.name,
+                    configured.start_time,
+                ),
+                "paint" => super::performance_paint_timing::create(
+                    scope,
+                    configured.name.clone(),
+                    configured.start_time,
+                    configured.paint_time,
+                    configured.presentation_time,
+                ),
+                _ => continue,
+            }?;
+            push_entry(scope, performance, entry, &configured.entry_type);
+        }
+    } else {
+        if let Some(url) = current_location_href(scope) {
+            ensure_navigation_entry(
+                scope,
+                url,
+                200,
+                crate::page_init::html(scope).len(),
+                crate::page_init::content_type(scope),
+            );
+        }
+        ensure_initial_visibility_entry(scope);
     }
     Ok(performance)
+}
+
+fn ensure_initial_visibility_entry(scope: &mut v8::PinScope<'_, '_>) {
+    if !buffered_entries(scope, "visibility-state").is_empty() {
+        return;
+    }
+    if let Ok(entry) = super::visibility_state_entry::create(scope, "visible", 0.0) {
+        add_entry_for_current_realm(scope, entry, "visibility-state");
+    }
+}
+
+pub(crate) fn finalize_page_load(scope: &mut v8::PinScope<'_, '_>) {
+    if current_realm_uses_profile_entries(scope) {
+        return;
+    }
+    let completed_at = now_for_current_realm(scope).unwrap_or(0.0).max(0.0);
+    if let Some(navigation) = buffered_entries(scope, "navigation").into_iter().next() {
+        let navigation = v8::Local::new(scope, &navigation);
+        super::performance_navigation_timing::finalize_page_load(scope, navigation, completed_at);
+    }
+
+    if !buffered_entries(scope, "paint").is_empty() || !document_has_contentful_paint(scope) {
+        return;
+    }
+    for name in ["first-paint", "first-contentful-paint"] {
+        if let Ok(entry) = super::performance_paint_timing::create(
+            scope,
+            name.to_owned(),
+            completed_at,
+            completed_at,
+            completed_at,
+        ) {
+            add_entry_for_current_realm(scope, entry, "paint");
+        }
+    }
+}
+
+fn document_has_contentful_paint(scope: &v8::PinScope<'_, '_>) -> bool {
+    if super::window_view_state::inner_width(scope) <= 0.0
+        || super::window_view_state::inner_height(scope) <= 0.0
+    {
+        return false;
+    }
+    let Some(document) = super::document_global::value(scope) else {
+        return false;
+    };
+    subtree_has_contentful_paint(scope, document, true)
+}
+
+fn subtree_has_contentful_paint(
+    scope: &v8::PinScope<'_, '_>,
+    node: v8::Local<'_, v8::Object>,
+    rendered: bool,
+) -> bool {
+    let Some(record) = super::node::record(scope, node) else {
+        return false;
+    };
+    let rendered = rendered
+        && !matches!(
+            record.node_name.as_str(),
+            "HEAD" | "NOSCRIPT" | "SCRIPT" | "STYLE" | "TEMPLATE" | "TITLE"
+        );
+    if rendered
+        && ((record.node_type == super::node::TEXT_NODE
+            && record
+                .node_value
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty()))
+            || (record.node_type == super::node::ELEMENT_NODE
+                && matches!(
+                    record.node_name.as_str(),
+                    "CANVAS" | "IMG" | "PICTURE" | "SVG" | "VIDEO"
+                )))
+    {
+        return true;
+    }
+    super::node::children(scope, node)
+        .into_iter()
+        .any(|child| subtree_has_contentful_paint(scope, child, rendered))
 }
 
 fn current_location_href(scope: &mut v8::PinScope<'_, '_>) -> Option<String> {
@@ -235,6 +351,9 @@ pub(crate) fn replace_navigation_entry(
     body_size: usize,
     content_type: String,
 ) {
+    if current_realm_uses_profile_entries(scope) {
+        return;
+    }
     let realm_id = crate::webidl::realm_id(scope);
     let current = scope.get_slot::<PerformanceStore>().and_then(|store| {
         store.records.iter().find_map(|(id, record)| {
@@ -300,8 +419,10 @@ fn record(
 }
 
 fn now_for_record(scope: &v8::PinScope<'_, '_>, record: &PerformanceRecord) -> f64 {
-    crate::determinism::high_resolution_milliseconds(
-        crate::determinism::elapsed_milliseconds(scope) - record.monotonic_origin,
+    crate::determinism::relative_high_resolution_milliseconds(
+        scope,
+        crate::determinism::elapsed_milliseconds(scope),
+        record.monotonic_origin,
     )
 }
 
@@ -316,6 +437,19 @@ pub(crate) fn now_for_realm(scope: &v8::PinScope<'_, '_>, realm_id: i32) -> Opti
 
 pub(crate) fn now_for_current_realm(scope: &v8::PinScope<'_, '_>) -> Option<f64> {
     now_for_realm(scope, crate::webidl::realm_id(scope))
+}
+
+pub(crate) fn current_realm_is_window(scope: &v8::PinScope<'_, '_>) -> bool {
+    let realm_id = crate::webidl::realm_id(scope);
+    scope
+        .get_slot::<PerformanceStore>()
+        .and_then(|store| {
+            store
+                .records
+                .values()
+                .find(|record| record.realm_id == realm_id)
+        })
+        .is_some_and(|record| record.is_window)
 }
 
 fn get_time_origin(
@@ -460,13 +594,33 @@ fn entries_array<'s>(
     output
 }
 
+pub(crate) fn chronological_entries(
+    scope: &v8::PinScope<'_, '_>,
+    mut entries: Vec<v8::Global<v8::Object>>,
+) -> Vec<v8::Global<v8::Object>> {
+    entries.sort_by(|left, right| {
+        let left = v8::Local::new(scope, left);
+        let right = v8::Local::new(scope, right);
+        let left = super::performance_entry::record(scope, left)
+            .map(|record| record.start_time)
+            .unwrap_or(0.0);
+        let right = super::performance_entry::record(scope, right)
+            .map(|record| record.start_time)
+            .unwrap_or(0.0);
+        left.partial_cmp(&right)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    entries
+}
+
 fn get_entries(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(entries_array(scope, &record.entries).into());
+        let entries = chronological_entries(scope, record.entries);
+        result.set(entries_array(scope, &entries).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -496,6 +650,7 @@ fn get_entries_by_name(
             })
         })
         .collect::<Vec<_>>();
+    let entries = chronological_entries(scope, entries);
     result.set(entries_array(scope, &entries).into());
 }
 
@@ -518,6 +673,7 @@ fn get_entries_by_type(
                 .is_some_and(|record| record.entry_type == entry_type)
         })
         .collect::<Vec<_>>();
+    let entries = chronological_entries(scope, entries);
     result.set(entries_array(scope, &entries).into());
 }
 
@@ -530,30 +686,146 @@ fn property<'s>(
     object.get(scope, key.into())
 }
 
+const LEGACY_TIMING_NAMES: [&str; 21] = [
+    "navigationStart",
+    "unloadEventStart",
+    "unloadEventEnd",
+    "redirectStart",
+    "redirectEnd",
+    "fetchStart",
+    "domainLookupStart",
+    "domainLookupEnd",
+    "connectStart",
+    "connectEnd",
+    "secureConnectionStart",
+    "requestStart",
+    "responseStart",
+    "responseEnd",
+    "domLoading",
+    "domInteractive",
+    "domContentLoadedEventStart",
+    "domContentLoadedEventEnd",
+    "domComplete",
+    "loadEventStart",
+    "loadEventEnd",
+];
+
+pub(crate) fn is_legacy_timing_name(name: &str) -> bool {
+    LEGACY_TIMING_NAMES.contains(&name)
+}
+
+fn non_finite_option_error(scope: &mut v8::PinScope<'_, '_>, member: &str, dictionary: &str) {
+    crate::webidl::throw_type_error(
+        scope,
+        &format!(
+            "Failed to read the '{member}' property from '{dictionary}': The provided double value is non-finite."
+        ),
+    );
+}
+
+fn optional_finite_number(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    member: &str,
+    dictionary: &str,
+) -> Option<Result<Option<f64>, ()>> {
+    if value.is_undefined() {
+        return Some(Ok(None));
+    }
+    let value = value.number_value(scope)?;
+    if !value.is_finite() {
+        non_finite_option_error(scope, member, dictionary);
+        return Some(Err(()));
+    }
+    Some(Ok(Some(value)))
+}
+
 fn mark(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if record(scope, arguments.this()).is_none() {
+    let Some(snapshot) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'mark' on 'Performance': 1 argument required, but only 0 present.",
+        );
         return;
     }
     let name = crate::webidl::value_to_string(scope, arguments.get(0));
-    let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
-    let default_start = record(scope, arguments.this())
-        .map(|record| now_for_record(scope, &record))
-        .unwrap_or(0.0);
-    let start_time = options
-        .map(|options| super::event::number_property(scope, options, "startTime", default_start))
-        .unwrap_or(default_start);
-    if start_time < 0.0 {
-        crate::webidl::throw_type_error(scope, "A mark cannot have a negative start time");
+    if snapshot.is_window && is_legacy_timing_name(&name) {
+        super::node::throw_dom_exception(
+            scope,
+            "SyntaxError",
+            &format!(
+                "Failed to execute 'mark' on 'Performance': '{name}' is part of the PerformanceTiming interface, and cannot be used as a mark name."
+            ),
+        );
         return;
     }
-    let detail = options
-        .and_then(|options| property(scope, options, "detail"))
-        .unwrap_or_else(|| v8::null(scope).into());
+    let options_value = arguments.get(1);
+    let options = if options_value.is_undefined() || options_value.is_null() {
+        None
+    } else {
+        let Ok(options) = v8::Local::<v8::Object>::try_from(options_value) else {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'mark' on 'Performance': parameter 2 is not of type 'Object'.",
+            );
+            return;
+        };
+        Some(options)
+    };
+    // PerformanceMarkOptions members are converted in Web IDL name order.
+    let detail = match options {
+        Some(options) => {
+            let Some(value) = property(scope, options, "detail") else {
+                return;
+            };
+            if value.is_undefined() {
+                v8::null(scope).into()
+            } else {
+                value
+            }
+        }
+        None => v8::null(scope).into(),
+    };
+    let default_start = now_for_record(scope, &snapshot);
+    let start_time = match options {
+        Some(options) => {
+            let Some(value) = property(scope, options, "startTime") else {
+                return;
+            };
+            let Some(converted) =
+                optional_finite_number(scope, value, "startTime", "PerformanceMarkOptions")
+            else {
+                return;
+            };
+            let Ok(converted) = converted else {
+                return;
+            };
+            converted.unwrap_or(default_start)
+        }
+        None => default_start,
+    };
+    if start_time < 0.0 {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'mark' on 'Performance': '{name}' cannot have a negative time stamp."
+            ),
+        );
+        return;
+    }
+    let detail = v8::Global::new(scope, detail);
+    let Some(detail) = super::performance_mark::structured_clone_detail(scope, detail) else {
+        return;
+    };
+    let detail = v8::Local::new(scope, &detail);
     let entry = match super::performance_mark::create(scope, name, start_time, detail) {
         Ok(entry) => entry,
         Err(message) => {
@@ -578,20 +850,88 @@ fn find_mark_time(
     })
 }
 
-fn measure_point(
-    scope: &v8::PinScope<'_, '_>,
-    entries: &[v8::Global<v8::Object>],
+enum MeasurePoint {
+    Mark(String),
+    Timestamp(f64),
+}
+
+fn parse_measure_point(
+    scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
-    fallback: f64,
-) -> f64 {
+    member: &str,
+) -> Option<Result<Option<MeasurePoint>, ()>> {
+    if value.is_undefined() {
+        return Some(Ok(None));
+    }
     if value.is_string() {
-        let name = crate::webidl::value_to_string(scope, value);
-        find_mark_time(scope, entries, &name).unwrap_or(fallback)
-    } else {
-        value
-            .number_value(scope)
-            .filter(|value| value.is_finite())
-            .unwrap_or(fallback)
+        return Some(Ok(Some(MeasurePoint::Mark(
+            crate::webidl::value_to_string(scope, value),
+        ))));
+    }
+    let converted = optional_finite_number(scope, value, member, "PerformanceMeasureOptions")?;
+    Some(converted.map(|value| value.map(MeasurePoint::Timestamp)))
+}
+
+fn resolve_measure_point(
+    scope: &mut v8::PinScope<'_, '_>,
+    snapshot: &PerformanceRecord,
+    measure_name: &str,
+    point: &MeasurePoint,
+) -> Option<f64> {
+    match point {
+        MeasurePoint::Timestamp(value) => {
+            if *value < 0.0 {
+                crate::webidl::throw_type_error(
+                    scope,
+                    &format!(
+                        "Failed to execute 'measure' on 'Performance': '{measure_name}' cannot have a negative time stamp."
+                    ),
+                );
+                None
+            } else {
+                Some(*value)
+            }
+        }
+        MeasurePoint::Mark(mark_name) => {
+            if let Some(value) = find_mark_time(scope, &snapshot.entries, mark_name) {
+                return Some(value);
+            }
+            if is_legacy_timing_name(mark_name) {
+                if !snapshot.is_window {
+                    crate::webidl::throw_type_error(
+                        scope,
+                        "A PerformanceTiming attribute was used in a worker.",
+                    );
+                    return None;
+                }
+                if mark_name == "navigationStart" {
+                    return Some(0.0);
+                }
+                let timing = v8::Local::new(scope, &snapshot.timing);
+                let navigation_start =
+                    super::performance_timing::named_value(scope, timing, "navigationStart")?;
+                let end = super::performance_timing::named_value(scope, timing, mark_name)?;
+                if end == 0.0 {
+                    super::node::throw_dom_exception(
+                        scope,
+                        "InvalidAccessError",
+                        &format!(
+                            "The PerformanceTiming attribute '{mark_name}' has a value of zero."
+                        ),
+                    );
+                    return None;
+                }
+                return Some(end - navigation_start);
+            }
+            super::node::throw_dom_exception(
+                scope,
+                "SyntaxError",
+                &format!(
+                    "Failed to execute 'measure' on 'Performance': The mark '{mark_name}' does not exist."
+                ),
+            );
+            None
+        }
     }
 }
 
@@ -604,39 +944,165 @@ fn measure(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'measure' on 'Performance': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let name = crate::webidl::value_to_string(scope, arguments.get(0));
     let mut start = 0.0;
     let mut end = now_for_record(scope, &snapshot);
     let mut detail: v8::Local<v8::Value> = v8::null(scope).into();
-    if let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(1)) {
-        let start_value = property(scope, options, "start").filter(|value| !value.is_undefined());
-        let end_value = property(scope, options, "end").filter(|value| !value.is_undefined());
-        let duration = property(scope, options, "duration")
-            .filter(|value| !value.is_undefined())
-            .and_then(|value| value.number_value(scope))
-            .filter(|value| value.is_finite());
-        start = start_value
-            .map(|value| measure_point(scope, &snapshot.entries, value, 0.0))
-            .unwrap_or(0.0);
-        if let Some(value) = end_value {
-            end = measure_point(scope, &snapshot.entries, value, end);
-            if start_value.is_none()
-                && let Some(duration) = duration
-            {
-                start = end - duration;
+    let second = arguments.get(1);
+    let options = if second.is_undefined() || second.is_null() {
+        second.is_null().then(|| None)
+    } else {
+        v8::Local::<v8::Object>::try_from(second).ok().map(Some)
+    };
+    if let Some(options) = options {
+        let (detail_present, duration, end_point, start_point) = match options {
+            Some(options) => {
+                // PerformanceMeasureOptions members are converted in Web IDL name order.
+                let Some(detail_value) = property(scope, options, "detail") else {
+                    return;
+                };
+                let detail_present = !detail_value.is_undefined();
+                if detail_present {
+                    detail = detail_value;
+                }
+                let Some(duration_value) = property(scope, options, "duration") else {
+                    return;
+                };
+                let Some(duration) = optional_finite_number(
+                    scope,
+                    duration_value,
+                    "duration",
+                    "PerformanceMeasureOptions",
+                ) else {
+                    return;
+                };
+                let Ok(duration) = duration else {
+                    return;
+                };
+                let Some(end_value) = property(scope, options, "end") else {
+                    return;
+                };
+                let Some(end_point) = parse_measure_point(scope, end_value, "end") else {
+                    return;
+                };
+                let Ok(end_point) = end_point else {
+                    return;
+                };
+                let Some(start_value) = property(scope, options, "start") else {
+                    return;
+                };
+                let Some(start_point) = parse_measure_point(scope, start_value, "start") else {
+                    return;
+                };
+                let Ok(start_point) = start_point else {
+                    return;
+                };
+                (detail_present, duration, end_point, start_point)
             }
-        } else if let Some(duration) = duration {
-            end = start + duration;
+            None => (false, None, None, None),
+        };
+        let non_empty =
+            detail_present || duration.is_some() || end_point.is_some() || start_point.is_some();
+        if non_empty && start_point.is_none() && end_point.is_none() {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'measure' on 'Performance': If a non-empty PerformanceMeasureOptions object was passed, at least one of its 'start' or 'end' properties must be present.",
+            );
+            return;
         }
-        detail = property(scope, options, "detail").unwrap_or(detail);
-    } else if !arguments.get(1).is_undefined() {
+        if start_point.is_some() && end_point.is_some() && duration.is_some() {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'measure' on 'Performance': If a non-empty PerformanceMeasureOptions object was passed, it must not have all of its 'start', 'duration', and 'end' properties defined",
+            );
+            return;
+        }
+        if !arguments.get(2).is_undefined() && non_empty {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'measure' on 'Performance': Cannot specify an end mark when using a PerformanceMeasureOptions object.",
+            );
+            return;
+        }
+        let end_mark = if arguments.get(2).is_undefined() {
+            None
+        } else {
+            Some(MeasurePoint::Mark(crate::webidl::value_to_string(
+                scope,
+                arguments.get(2),
+            )))
+        };
+        if let Some(duration) = duration
+            && duration < 0.0
+        {
+            crate::webidl::throw_type_error(
+                scope,
+                &format!(
+                    "Failed to execute 'measure' on 'Performance': '{name}' cannot have a negative time stamp."
+                ),
+            );
+            return;
+        }
+        let resolved_start = match start_point.as_ref() {
+            Some(point) => match resolve_measure_point(scope, &snapshot, &name, point) {
+                Some(value) => Some(value),
+                None => return,
+            },
+            None => None,
+        };
+        let resolved_end = match end_mark.as_ref().or(end_point.as_ref()) {
+            Some(point) => match resolve_measure_point(scope, &snapshot, &name, point) {
+                Some(value) => Some(value),
+                None => return,
+            },
+            None => None,
+        };
+        match (resolved_start, resolved_end, duration) {
+            (Some(value), Some(end_value), _) => {
+                start = value;
+                end = end_value;
+            }
+            (Some(value), None, Some(duration)) => {
+                start = value;
+                end = value + duration;
+            }
+            (None, Some(value), Some(duration)) => {
+                end = value;
+                start = value - duration;
+            }
+            (Some(value), None, None) => start = value,
+            (None, Some(value), None) => end = value,
+            (None, None, None) => {}
+            (None, None, Some(_)) => unreachable!(),
+        }
+    } else if !second.is_undefined() {
         let start_name = crate::webidl::value_to_string(scope, arguments.get(1));
-        start = find_mark_time(scope, &snapshot.entries, &start_name).unwrap_or(0.0);
+        let start_point = MeasurePoint::Mark(start_name);
+        start = match resolve_measure_point(scope, &snapshot, &name, &start_point) {
+            Some(value) => value,
+            None => return,
+        };
         if !arguments.get(2).is_undefined() {
             let end_name = crate::webidl::value_to_string(scope, arguments.get(2));
-            end = find_mark_time(scope, &snapshot.entries, &end_name).unwrap_or(end);
+            let end_point = MeasurePoint::Mark(end_name);
+            end = match resolve_measure_point(scope, &snapshot, &name, &end_point) {
+                Some(value) => value,
+                None => return,
+            };
         }
     }
+    let detail = v8::Global::new(scope, detail);
+    let Some(detail) = super::performance_mark::structured_clone_detail(scope, detail) else {
+        return;
+    };
+    let detail = v8::Local::new(scope, &detail);
     let entry = match super::performance_measure::create(scope, name, start, end - start, detail) {
         Ok(entry) => entry,
         Err(message) => {
@@ -681,6 +1147,9 @@ pub(crate) fn add_entry_for_current_realm(
     let Some((identity, record)) = snapshot else {
         return;
     };
+    if record.profile_entries_override {
+        return;
+    }
     if entry_type == "resource" {
         let resource_count = record
             .entries
@@ -728,6 +1197,16 @@ pub(crate) fn add_entry_for_current_realm(
     if added {
         super::performance_observer::queue_entry(scope, entry, entry_type);
     }
+}
+
+fn current_realm_uses_profile_entries(scope: &v8::PinScope<'_, '_>) -> bool {
+    let realm_id = crate::webidl::realm_id(scope);
+    scope.get_slot::<PerformanceStore>().is_some_and(|store| {
+        store
+            .records
+            .values()
+            .any(|record| record.realm_id == realm_id && record.profile_entries_override)
+    })
 }
 
 fn set_resource_timing_buffer_size(

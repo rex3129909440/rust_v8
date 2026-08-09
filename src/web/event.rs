@@ -171,9 +171,11 @@ pub(crate) fn attach(
     composed: bool,
 ) {
     let time_stamp = super::performance::now_for_current_realm(scope).unwrap_or_else(|| {
-        crate::determinism::high_resolution_milliseconds(crate::determinism::elapsed_milliseconds(
+        crate::determinism::relative_high_resolution_milliseconds(
             scope,
-        ))
+            crate::determinism::elapsed_milliseconds(scope),
+            0.0,
+        )
     });
     let is_trusted_getter = scope
         .get_slot::<EventStore>()

@@ -10,7 +10,7 @@ struct RenderState {
     delay: HashMap<(i32, u32), VecDeque<f32>>,
     convolver: HashMap<(i32, u32), VecDeque<f32>>,
     convolver_impulses: HashMap<(i32, u32), Arc<Vec<f32>>>,
-    compressor_gain: HashMap<(i32, u32), f64>,
+    compressor: HashMap<(i32, u32), CompressorState>,
 }
 
 #[derive(Default)]
@@ -25,6 +25,46 @@ struct BiquadState {
 struct IirState {
     inputs: VecDeque<f64>,
     outputs: VecDeque<f64>,
+}
+
+struct CompressorState {
+    detector_average: f32,
+    compressor_gain: f32,
+    metering_gain: f32,
+    max_attack_compression_diff_db: f32,
+    pre_delay: Vec<f32>,
+    pre_delay_read_index: usize,
+    pre_delay_write_index: usize,
+    block_frames_remaining: u8,
+    scaled_desired_gain: f32,
+    envelope_rate: f32,
+}
+
+impl CompressorState {
+    fn new(sample_rate: f64) -> Self {
+        Self {
+            detector_average: 0.0,
+            compressor_gain: 1.0,
+            metering_gain: 1.0,
+            max_attack_compression_diff_db: -1.0,
+            pre_delay: vec![0.0; 1_024],
+            pre_delay_read_index: 0,
+            pre_delay_write_index: (0.006 * sample_rate) as usize,
+            block_frames_remaining: 0,
+            scaled_desired_gain: 0.0,
+            envelope_rate: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CompressorCurve {
+    linear_threshold: f32,
+    slope: f32,
+    knee_threshold: f32,
+    knee_threshold_db: f32,
+    yknee_threshold_db: f32,
+    knee: f32,
 }
 
 pub(crate) fn render(
@@ -312,43 +352,193 @@ fn process_compressor(
     input: f32,
     parameters: super::dynamics_compressor_node::CompressorParameters,
 ) -> f32 {
-    let input_db = 20.0 * f64::from(input.abs().max(1.0e-12)).log10();
-    let threshold = f64::from(parameters.threshold);
-    let knee = f64::from(parameters.knee.max(0.0));
-    let ratio = f64::from(parameters.ratio.max(1.0));
-    let over = input_db - threshold;
-    let gain_reduction_db = if knee > 0.0 && over > -knee / 2.0 && over < knee / 2.0 {
-        let position = over + knee / 2.0;
-        (1.0 / ratio - 1.0) * position * position / (2.0 * knee)
-    } else if over >= knee / 2.0 {
-        (1.0 / ratio - 1.0) * over
-    } else {
-        0.0
-    };
-    let desired_gain = 10.0_f64.powf(gain_reduction_db / 20.0);
-    let gain = state
-        .compressor_gain
+    // Blink's DynamicsCompressorKernel is a 32-frame, look-ahead compressor.
+    // Keep the kernel state between samples because the surrounding renderer
+    // evaluates the graph one frame at a time.
+    let sample_rate = state.sample_rate as f32;
+    let curve = compressor_curve(&parameters);
+    let master_linear_gain = (1.0 / compressor_saturate(1.0, curve)).powf(0.6);
+    let compressor = state
+        .compressor
         .entry((identity, channel))
-        .or_insert(1.0);
-    let time = if desired_gain < *gain {
-        f64::from(parameters.attack.max(0.0))
+        .or_insert_with(|| CompressorState::new(f64::from(sample_rate)));
+
+    if compressor.block_frames_remaining == 0 {
+        let desired_gain = if compressor.detector_average.is_finite() {
+            compressor.detector_average
+        } else {
+            1.0
+        };
+        compressor.scaled_desired_gain =
+            desired_gain.clamp(-1.0, 1.0).asin() / std::f32::consts::FRAC_PI_2;
+        let mut compression_diff_db =
+            linear_to_decibels(compressor.compressor_gain / compressor.scaled_desired_gain);
+        if compressor.scaled_desired_gain > compressor.compressor_gain {
+            compressor.max_attack_compression_diff_db = -1.0;
+            if !compression_diff_db.is_finite() {
+                compression_diff_db = -1.0;
+            }
+            let x = 0.25 * (compression_diff_db.clamp(-12.0, 0.0) + 12.0);
+            let release_frames =
+                adaptive_release_frames(sample_rate * parameters.release.max(0.0), x);
+            compressor.envelope_rate = decibels_to_linear(5.0 / release_frames);
+        } else {
+            if !compression_diff_db.is_finite() {
+                compression_diff_db = 1.0;
+            }
+            if compressor.max_attack_compression_diff_db == -1.0
+                || compressor.max_attack_compression_diff_db < compression_diff_db
+            {
+                compressor.max_attack_compression_diff_db = compression_diff_db;
+            }
+            let attack_frames = parameters.attack.max(0.001) * sample_rate;
+            let attenuation = compressor.max_attack_compression_diff_db.max(0.5);
+            compressor.envelope_rate = 1.0 - (0.25 / attenuation).powf(1.0 / attack_frames);
+        }
+        compressor.block_frames_remaining = 32;
+    }
+
+    let delayed = compressor.pre_delay[compressor.pre_delay_read_index];
+    compressor.pre_delay[compressor.pre_delay_write_index] = input;
+    compressor.pre_delay_read_index = (compressor.pre_delay_read_index + 1) & 1_023;
+    compressor.pre_delay_write_index = (compressor.pre_delay_write_index + 1) & 1_023;
+
+    let absolute_input = input.abs();
+    let shaped_input = compressor_saturate(absolute_input, curve);
+    let attenuation = if absolute_input <= 0.0001 {
+        1.0
     } else {
-        f64::from(parameters.release.max(0.0))
+        shaped_input / absolute_input
     };
-    let coefficient = if time <= f64::EPSILON {
-        0.0
+    let attenuation_db = (-linear_to_decibels(attenuation)).max(2.0);
+    let detector_release_frames = 0.0025 * sample_rate;
+    let detector_release_rate = decibels_to_linear(attenuation_db / detector_release_frames) - 1.0;
+    let detector_rate = if attenuation > compressor.detector_average {
+        detector_release_rate
     } else {
-        (-1.0 / (time * state.sample_rate)).exp()
+        1.0
     };
-    *gain = desired_gain + coefficient * (*gain - desired_gain);
-    super::dynamics_compressor_node::set_reduction(scope, node, 20.0 * gain.max(1.0e-12).log10());
-    (f64::from(input) * *gain) as f32
+    compressor.detector_average += (attenuation - compressor.detector_average) * detector_rate;
+    compressor.detector_average = compressor.detector_average.min(1.0);
+    if !compressor.detector_average.is_finite() {
+        compressor.detector_average = 1.0;
+    }
+
+    if compressor.envelope_rate < 1.0 {
+        compressor.compressor_gain += (compressor.scaled_desired_gain - compressor.compressor_gain)
+            * compressor.envelope_rate;
+    } else {
+        compressor.compressor_gain =
+            (compressor.compressor_gain * compressor.envelope_rate).min(1.0);
+    }
+    let post_warp_gain = (std::f32::consts::FRAC_PI_2 * compressor.compressor_gain).sin();
+    let real_gain_db = linear_to_decibels(post_warp_gain);
+    let metering_release = 1.0 - (-1.0 / (sample_rate * 0.325)).exp();
+    if real_gain_db < compressor.metering_gain {
+        compressor.metering_gain = real_gain_db;
+    } else {
+        compressor.metering_gain += (real_gain_db - compressor.metering_gain) * metering_release;
+    }
+    compressor.block_frames_remaining -= 1;
+    super::dynamics_compressor_node::set_reduction(
+        scope,
+        node,
+        f64::from(compressor.metering_gain),
+    );
+    delayed * master_linear_gain * post_warp_gain
+}
+
+fn compressor_curve(
+    parameters: &super::dynamics_compressor_node::CompressorParameters,
+) -> CompressorCurve {
+    let threshold_db = parameters.threshold;
+    let knee_db = parameters.knee.max(0.0);
+    let slope = 1.0 / parameters.ratio.max(1.0);
+    let linear_threshold = decibels_to_linear(threshold_db);
+    let knee_threshold_db = threshold_db + knee_db;
+    let knee_threshold = decibels_to_linear(knee_threshold_db);
+    let knee_curve = |x: f32, knee: f32| {
+        if x < linear_threshold {
+            x
+        } else {
+            linear_threshold + (1.0 - (-knee * (x - linear_threshold)).exp()) / knee
+        }
+    };
+    let slope_at = |x: f32, knee: f32| {
+        let x2 = x * 1.001;
+        (linear_to_decibels(knee_curve(x2, knee)) - linear_to_decibels(knee_curve(x, knee)))
+            / (linear_to_decibels(x2) - linear_to_decibels(x))
+    };
+    let mut minimum_k = 0.1_f32;
+    let mut maximum_k = 10_000.0_f32;
+    let mut knee = 5.0_f32;
+    for _ in 0..15 {
+        if slope_at(knee_threshold, knee) < slope {
+            maximum_k = knee;
+        } else {
+            minimum_k = knee;
+        }
+        knee = (minimum_k * maximum_k).sqrt();
+    }
+    let yknee_threshold_db = linear_to_decibels(knee_curve(knee_threshold, knee));
+    CompressorCurve {
+        linear_threshold,
+        slope,
+        knee_threshold,
+        knee_threshold_db,
+        yknee_threshold_db,
+        knee,
+    }
+}
+
+fn compressor_saturate(input: f32, curve: CompressorCurve) -> f32 {
+    if input < curve.knee_threshold {
+        if input < curve.linear_threshold {
+            input
+        } else {
+            curve.linear_threshold
+                + (1.0 - (-curve.knee * (input - curve.linear_threshold)).exp()) / curve.knee
+        }
+    } else {
+        decibels_to_linear(
+            curve.yknee_threshold_db
+                + curve.slope * (linear_to_decibels(input) - curve.knee_threshold_db),
+        )
+    }
+}
+
+fn adaptive_release_frames(release_frames: f32, x: f32) -> f32 {
+    let y1 = release_frames * 0.09;
+    let y2 = release_frames * 0.16;
+    let y3 = release_frames * 0.42;
+    let y4 = release_frames * 0.98;
+    let a = 0.999_999_999_999_999_8 * y1 + 1.843_221_968_432_392_3e-16 * y2
+        - 1.937_339_435_167_642_3e-16 * y3
+        + 8.824_516_011_816_245e-18 * y4;
+    let b = -1.578_832_035_284_588_8 * y1 + 2.330_583_703_207_428_6 * y2
+        - 0.914_119_420_484_042_9 * y3
+        + 0.162_367_752_561_203_2 * y4;
+    let c = 0.533_414_286_910_642_4 * y1 - 1.272_736_789_213_631 * y2
+        + 0.925_885_604_220_751_2 * y3
+        - 0.186_563_101_917_762_26 * y4;
+    let d = 0.087_834_631_382_072_34 * y1 - 0.169_416_296_792_562_2 * y2
+        + 0.085_880_579_515_952_72 * y3
+        - 0.004_298_914_105_462_83 * y4;
+    let e = -0.042_416_883_008_123_074 * y1 + 0.111_569_382_798_760_2 * y2
+        - 0.097_646_763_252_658_72 * y3
+        + 0.028_494_263_462_021_576 * y4;
+    let x2 = x * x;
+    a + b * x + c * x2 + d * x2 * x + e * x2 * x2
+}
+
+fn decibels_to_linear(decibels: f32) -> f32 {
+    10.0_f32.powf(0.05 * decibels)
+}
+
+fn linear_to_decibels(linear: f32) -> f32 {
+    20.0 * linear.log10()
 }
 
 fn sanitize_sample(sample: f32) -> f32 {
-    if sample.is_finite() {
-        sample.clamp(-1.0, 1.0)
-    } else {
-        0.0
-    }
+    if sample.is_finite() { sample } else { 0.0 }
 }

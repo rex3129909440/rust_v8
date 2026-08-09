@@ -18,12 +18,12 @@ fn can_play_type(
     }
     let media_type = crate::webidl::value_to_string(scope, arguments.get(0));
     let configured = &crate::fingerprint::edge(scope).media;
-    let support = if crate::fingerprint_environment::media_type_matches(
+    let support = if crate::fingerprint_environment::media_capability_matches(
         &configured.can_play_probably_types,
         &media_type,
     ) {
         "probably"
-    } else if crate::fingerprint_environment::media_type_matches(
+    } else if crate::fingerprint_environment::media_capability_matches(
         &configured.can_play_maybe_types,
         &media_type,
     ) {

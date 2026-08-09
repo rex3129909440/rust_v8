@@ -26,8 +26,18 @@ from typing import Iterable, Sequence
 
 try:
     from .windows_pci_device_catalog import WINDOWS_GPU_DEVICE_VARIANTS
+    from .nvidia_open_gpu_extension_catalog import (
+        DAWN_GPU_INFO_SOURCE as NVIDIA_EXTENSION_DAWN_SOURCE,
+        NVIDIA_OPEN_GPU_PRODUCT_ROWS,
+        NVIDIA_OPEN_GPU_SOURCE,
+    )
 except ImportError:  # Support running this catalog directly from demo/fp.
     from windows_pci_device_catalog import WINDOWS_GPU_DEVICE_VARIANTS
+    from nvidia_open_gpu_extension_catalog import (  # type: ignore
+        DAWN_GPU_INFO_SOURCE as NVIDIA_EXTENSION_DAWN_SOURCE,
+        NVIDIA_OPEN_GPU_PRODUCT_ROWS,
+        NVIDIA_OPEN_GPU_SOURCE,
+    )
 
 
 WINDOWS_ANGLE_BACKEND = "Direct3D11 vs_5_0 ps_5_0, D3D11"
@@ -360,7 +370,9 @@ WINDOWS_GPU_MODEL_ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("win_intel_arc_graphics_lunar_lake", "Intel", "xe2", "integrated", "Intel(R) Arc(TM) Graphics", ""),
     ("win_intel_arc_graphics_meteor_lake", "Intel", "xe-lpg", "integrated", "Intel(R) Arc(TM) Graphics", ""),
     ("win_intel_graphics_generic", "Intel", "xe-lpg", "integrated", "Intel(R) Graphics", ""),
-    ("win_intel_iris_xe_max", "Intel", "xe-lp", "integrated", "Intel(R) Iris(R) Xe MAX Graphics", ""),
+    # Iris Xe MAX shipped as a mobile discrete GPU; classifying it as generic
+    # integrated graphics allowed it to pair with desktop-only hardware rows.
+    ("win_intel_iris_xe_max", "Intel", "xe-lp", "laptop", "Intel(R) Iris(R) Xe MAX Graphics", ""),
     ("win_intel_iris_xe_plain", "Intel", "gen-12lp", "integrated", "Intel Iris Xe Graphics", ""),
     ("win_intel_iris_xe", "Intel", "gen-12lp", "integrated", "Intel(R) Iris(R) Xe Graphics", ""),
     ("win_intel_iris_plus", "Intel", "gen-11", "integrated", "Intel(R) Iris(R) Plus Graphics", ""),
@@ -431,6 +443,70 @@ def build_angle_renderer(driver_vendor: str, model: str, device_marker: str = ""
     return f"ANGLE ({driver_vendor}, {model}{marker} {WINDOWS_ANGLE_BACKEND})"
 
 
+_WINDOWS_MOBILE_INTEGRATED_GPU_IDS = frozenset((
+    "win_intel_arc_140v",
+    "win_intel_arc_130v",
+    "win_intel_iris_xe_plain",
+    "win_intel_iris_xe",
+    "win_intel_iris_plus",
+    "win_intel_iris_plus_g7",
+    "win_intel_iris_plus_g4",
+    "win_intel_iris_plus_655",
+    "win_intel_iris_plus_650",
+    "win_intel_iris_plus_640",
+    "win_intel_iris_550",
+    "win_intel_iris_540",
+    "win_intel_uhd_620",
+    "win_intel_uhd_620_plain",
+    "win_intel_uhd_617",
+    "win_intel_uhd_615",
+    "win_intel_uhd_605",
+    "win_intel_uhd_600",
+))
+
+_WINDOWS_DESKTOP_INTEGRATED_GPU_IDS = frozenset((
+    "win_amd_raphael",
+    "win_intel_uhd_770",
+    "win_intel_uhd_750",
+    "win_intel_uhd_730",
+    "win_intel_uhd_710",
+))
+
+# The native sandbox currently models a successful requestAdapter() result.
+# Keep adapters that cannot satisfy Dawn's Windows D3D12 minimum out of the
+# generated pool rather than inventing a successful adapter for them. Intel's
+# own API table lists HD 4000 as DirectX 11 and HD 5300 as DirectX 11.2;
+# Dawn requires D3D12 feature level 11.1 (or 11.0 with binding tier 2).
+_WINDOWS_WEBGPU_UNAVAILABLE_BASE_PROFILE_IDS = frozenset((
+    "win_intel_hd_4000",
+    "win_intel_hd_5300",
+))
+
+
+def _windows_gpu_form_factor(
+    profile_id: str,
+    driver_vendor: str,
+    tier: str,
+    model: str,
+) -> str:
+    """Classify only hardware whose product form factor is unambiguous."""
+
+    model_key = model.lower()
+    if tier == "laptop":
+        return "portable"
+    if driver_vendor == "Qualcomm":
+        return "portable"
+    if profile_id in _WINDOWS_MOBILE_INTEGRATED_GPU_IDS:
+        return "portable"
+    if "geforce mx" in model_key or model_key.endswith("mx"):
+        return "portable"
+    if profile_id in _WINDOWS_DESKTOP_INTEGRATED_GPU_IDS:
+        return "desktop"
+    if tier in {"entry", "mainstream", "high", "enthusiast", "workstation"}:
+        return "desktop"
+    return "mixed"
+
+
 def build_windows_webgl_gpu_candidate(
     row: tuple[str, str, str, str, str, str],
     device_variant: tuple[str, str, str],
@@ -460,7 +536,16 @@ def build_windows_webgl_gpu_candidate(
         "vendor": adapter_vendor,
         "architecture": architecture,
         "webgpuArchitecture": webgpu_architecture,
+        "webgpuSupported": (
+            item_id not in _WINDOWS_WEBGPU_UNAVAILABLE_BASE_PROFILE_IDS
+        ),
         "tier": tier,
+        "formFactor": _windows_gpu_form_factor(
+            item_id,
+            driver_vendor,
+            tier,
+            model,
+        ),
         "model": model,
         "deviceMarker": device_marker,
         "deviceId": canonical_device_id,
@@ -468,6 +553,8 @@ def build_windows_webgl_gpu_candidate(
         "rendererVariantWeight": 0.75 if expose_device_id else 0.25,
         "deviceIdVariantCount": variant_count,
         "evidenceName": evidence_name,
+        "evidenceSource": "https://pci-ids.ucw.cz/",
+        "architectureSource": NVIDIA_EXTENSION_DAWN_SOURCE,
         "gpu": {
             "adapter": {
                 "vendor": adapter_vendor,
@@ -483,7 +570,7 @@ def build_windows_webgl_gpu_candidate(
     }
 
 
-WINDOWS_WEBGL_GPU_CANDIDATES: tuple[dict[str, object], ...] = tuple(
+_BASE_WINDOWS_WEBGL_GPU_CANDIDATES: tuple[dict[str, object], ...] = tuple(
     build_windows_webgl_gpu_candidate(
         row,
         device_variant,
@@ -497,6 +584,76 @@ WINDOWS_WEBGL_GPU_CANDIDATES: tuple[dict[str, object], ...] = tuple(
         WINDOWS_GPU_DEVICE_VARIANTS[row[0]]
     )
     for expose_device_id in (True, False)
+)
+
+
+def _build_nvidia_open_gpu_extension_candidates() -> tuple[dict[str, object], ...]:
+    """Append current NVIDIA evidence without modifying any existing row."""
+
+    existing_pairs = {
+        (
+            str(candidate.get("model", "")).casefold(),
+            str(candidate.get("deviceId", "")).upper(),
+        )
+        for candidate in _BASE_WINDOWS_WEBGL_GPU_CANDIDATES
+    }
+    output: list[dict[str, object]] = []
+    for (
+        profile_id,
+        model,
+        architecture,
+        tier,
+        form_factor,
+        browser_eligible,
+        device_ids,
+    ) in NVIDIA_OPEN_GPU_PRODUCT_ROWS:
+        if not browser_eligible:
+            continue
+        variants = tuple(
+            (
+                str(device_id),
+                str(model),
+                str(architecture),
+            )
+            for device_id in device_ids
+            if (
+                str(model).casefold(),
+                f"0x{int(str(device_id), 16):08X}",
+            ) not in existing_pairs
+        )
+        for variant_index, device_variant in enumerate(variants):
+            for expose_device_id in (True, False):
+                candidate = build_windows_webgl_gpu_candidate(
+                    (
+                        str(profile_id),
+                        "NVIDIA",
+                        str(architecture),
+                        str(tier),
+                        str(model),
+                        "",
+                    ),
+                    device_variant,
+                    variant_index=variant_index,
+                    expose_device_id=expose_device_id,
+                    variant_count=len(variants),
+                )
+                candidate["formFactor"] = str(form_factor)
+                candidate["catalog"] = "nvidia-open-gpu-extension"
+                candidate["evidenceSource"] = NVIDIA_OPEN_GPU_SOURCE
+                candidate["architectureSource"] = NVIDIA_EXTENSION_DAWN_SOURCE
+                output.append(candidate)
+    return tuple(output)
+
+
+NVIDIA_OPEN_GPU_EXTENSION_CANDIDATES = (
+    _build_nvidia_open_gpu_extension_candidates()
+)
+
+# The existing catalog remains byte-for-byte first in the pool. New evidence
+# is additive and de-duplicated by exact browser adapter name + Device ID.
+WINDOWS_WEBGL_GPU_CANDIDATES: tuple[dict[str, object], ...] = (
+    _BASE_WINDOWS_WEBGL_GPU_CANDIDATES
+    + NVIDIA_OPEN_GPU_EXTENSION_CANDIDATES
 )
 
 
@@ -557,6 +714,7 @@ def get_windows_webgl_gpu_candidates(
     architecture: str | None = None,
     tier: str | None = None,
     include_virtual: bool = False,
+    webgpu_supported_only: bool = False,
 ) -> tuple[dict[str, object], ...]:
     vendor_key = str(vendor or "").strip().lower()
     architecture_key = str(architecture or "").strip().lower()
@@ -564,6 +722,8 @@ def get_windows_webgl_gpu_candidates(
     output = []
     for item in WINDOWS_WEBGL_GPU_CANDIDATES:
         if not include_virtual and str(item.get("tier", "")).lower() == "virtual":
+            continue
+        if webgpu_supported_only and not bool(item.get("webgpuSupported", False)):
             continue
         if vendor_key and str(item.get("vendor", "")).lower() != vendor_key:
             continue
@@ -581,15 +741,20 @@ def choose_windows_webgl_gpu_candidate(
     architecture: str | None = None,
     tier: str | None = None,
     include_virtual: bool = False,
+    webgpu_supported_only: bool = False,
 ) -> dict[str, object]:
     candidates = get_windows_webgl_gpu_candidates(
         vendor=vendor,
         architecture=architecture,
         tier=tier,
         include_virtual=include_virtual,
+        webgpu_supported_only=webgpu_supported_only,
     )
     if not candidates:
-        candidates = get_windows_webgl_gpu_candidates(include_virtual=include_virtual)
+        candidates = get_windows_webgl_gpu_candidates(
+            include_virtual=include_virtual,
+            webgpu_supported_only=webgpu_supported_only,
+        )
     if not candidates:
         raise ValueError("no Windows WebGL GPU candidates available")
     return choose_weighted_windows_webgl_gpu_candidate(rng, candidates)

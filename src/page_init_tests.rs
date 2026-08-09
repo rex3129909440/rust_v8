@@ -1,4 +1,4 @@
-use crate::{EdgeRuntime, EdgeRuntimeOptions, Evaluation, PageInit};
+use crate::{EdgeRuntime, EdgeRuntimeOptions, Evaluation, NetworkReplayEntry, PageInit};
 
 fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
     match runtime.evaluate(source).expect("JavaScript evaluation") {
@@ -103,6 +103,63 @@ fn parser_inserted_scripts_run_after_window_globals_are_installed() {
     assert_eq!(
         text(&mut runtime, "pageGlobalEvidence"),
         "[object Navigator]|Win32|function|function|BODY"
+    );
+}
+
+#[test]
+fn parser_inserted_external_script_uses_network_replay_and_sees_complete_body() {
+    let script_url = "https://assets.example.test/runtime.js";
+    let mut runtime = EdgeRuntime::with_options(EdgeRuntimeOptions {
+        page: Some(PageInit {
+            url: "https://www.example.test/app/index.html".to_owned(),
+            html: concat!(
+                "<!DOCTYPE html><html><head></head><body>",
+                "<script>window.KPSDK={};KPSDK.start=performance.now();",
+                "window.parserExecution=['inline'];</script>",
+                "<script src=\"HTTPS://ASSETS.EXAMPLE.TEST:443/runtime.js#local-fragment\"></script>",
+                "</body></html>"
+            )
+            .to_owned(),
+            ..PageInit::default()
+        }),
+        network_replay: vec![NetworkReplayEntry::get(
+            script_url,
+            concat!(
+                "parserExecution.push('external');",
+                "for(let index=0;index<3;index++){",
+                "const marker=document.createElement('div');",
+                "marker.style.height=index===0?'23px':'0';",
+                "document.body.appendChild(marker);",
+                "}",
+                "window.externalScriptEvidence=[",
+                "document.body.childElementCount,",
+                "document.body.clientHeight,",
+                "document.currentScript.src,",
+                "document.currentScript.isConnected,",
+                "typeof KPSDK.start",
+                "].join('|');",
+                "window.externalScriptStack=String(new Error('external marker').stack);"
+            )
+            .as_bytes()
+            .to_vec(),
+        )],
+        ..EdgeRuntimeOptions::default()
+    })
+    .expect("HTML page with replayed parser script");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            "parserExecution.join(',') + '||' + externalScriptEvidence"
+        ),
+        "inline,external||5|23|https://assets.example.test/runtime.js#local-fragment|true|number"
+    );
+    assert_eq!(
+        text(
+            &mut runtime,
+            "externalScriptStack.includes('https://assets.example.test/runtime.js')"
+        ),
+        "true"
     );
 }
 

@@ -1,4 +1,5 @@
 mod console_capture;
+mod content_encoding;
 #[cfg(test)]
 mod crypto_full_tests;
 mod determinism;
@@ -16,6 +17,7 @@ mod fingerprint_environment;
 mod fingerprint_environment_tests;
 #[cfg(test)]
 mod fingerprint_full_tests;
+mod fingerprint_performance;
 mod fingerprint_surface;
 mod iframe_hook;
 #[cfg(test)]
@@ -69,14 +71,16 @@ pub use fingerprint::{
     SpeechVoiceFingerprint, UserAgentBrandFingerprint, UserAgentDataFingerprint,
 };
 pub use fingerprint_environment::{
-    BatteryFingerprint, BluetoothDeviceFingerprint, CssFingerprint, FontFingerprint,
-    FontMetricFingerprint, GamepadFingerprint, GeolocationFingerprint, HardwareDevicesFingerprint,
-    HidDeviceFingerprint, KeyboardLayoutEntryFingerprint, LocalFontFingerprint,
-    MediaDeviceFingerprint, MediaFingerprint, MediaPreferencesFingerprint, MemoryFingerprint,
-    MidiPortFingerprint, MimeTypeFingerprint, PermissionsFingerprint, PluginFingerprint,
-    PluginListFingerprint, RtcCodecFingerprint, RtcHeaderExtensionFingerprint, SensorsFingerprint,
-    SerialPortFingerprint, TimingFingerprint, UsbDeviceFingerprint, XrFingerprint,
+    BatteryFingerprint, BluetoothDeviceFingerprint, CssFingerprint, DocumentFingerprint,
+    FontFingerprint, FontMetricFingerprint, GamepadFingerprint, GeolocationFingerprint,
+    HardwareDevicesFingerprint, HidDeviceFingerprint, KeyboardLayoutEntryFingerprint,
+    LocalFontFingerprint, MediaDeviceFingerprint, MediaFingerprint, MediaPreferencesFingerprint,
+    MemoryFingerprint, MidiPortFingerprint, MimeTypeFingerprint, PermissionsFingerprint,
+    PluginFingerprint, PluginListFingerprint, RtcCodecFingerprint, RtcHeaderExtensionFingerprint,
+    SensorsFingerprint, SerialPortFingerprint, TimingFingerprint, UsbDeviceFingerprint,
+    XrFingerprint,
 };
+pub use fingerprint_performance::{PerformanceEntryFingerprint, PerformanceFingerprint};
 pub use fingerprint_surface::{
     AudioFingerprint, CanvasFingerprint, LocaleFingerprint, RenderingFingerprint,
     ScreenFingerprint, StorageFingerprint, WebGlFingerprint, WebGpuFingerprint,

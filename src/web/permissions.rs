@@ -115,6 +115,27 @@ fn query(
         .state(&name)
         .expect("validated permission name")
         .to_owned();
+    let Some(resolver) = v8::PromiseResolver::new(scope) else {
+        return;
+    };
+    let promise = resolver.get_promise(scope);
+    let rejection_message = match state.as_str() {
+        "unsupported" => Some(
+            "Failed to execute 'query' on 'Permissions': The Speaker Selection API is not enabled.",
+        ),
+        "invalid-origin" => {
+            Some("Failed to execute 'query' on 'Permissions': The requested origin is invalid.")
+        }
+        _ => None,
+    };
+    if let Some(message) = rejection_message {
+        if let Some(message) = v8::String::new(scope, message) {
+            let error = v8::Exception::type_error(scope, message);
+            let _ = resolver.reject(scope, error);
+            result.set(promise.into());
+        }
+        return;
+    }
     let status = match super::permission_status::create(scope, name, state) {
         Ok(status) => status,
         Err(message) => {
@@ -122,10 +143,6 @@ fn query(
             return;
         }
     };
-    let Some(resolver) = v8::PromiseResolver::new(scope) else {
-        return;
-    };
-    let promise = resolver.get_promise(scope);
     let _ = resolver.resolve(scope, status.into());
     result.set(promise.into());
 }

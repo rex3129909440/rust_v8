@@ -74,6 +74,17 @@ fn ensure_constructor<'s>(
     )?;
     let p = crate::webidl::prototype(scope, c)?;
     crate::webidl::reset_constructor_order(scope, p)?;
+    // Chromium 148 exposed windowControlsOverlay after vibrate.  Chromium
+    // 150 moved it before hardwareConcurrency.  Preserve the evidenced order
+    // selected by the configured UA instead of imposing one prototype shape
+    // on every supported browser version.
+    let chromium_148_order = crate::fingerprint::navigator(scope)
+        .user_agent
+        .split("Chrome/")
+        .nth(1)
+        .and_then(|tail| tail.split('.').next())
+        .and_then(|major| major.parse::<u32>().ok())
+        == Some(148);
     super::navigator_vendor_sub_property::define(scope, p)?;
     super::navigator_product_sub_property::define(scope, p)?;
     super::navigator_vendor_property::define(scope, p)?;
@@ -94,12 +105,14 @@ fn ensure_constructor<'s>(
         "webkitPersistentStorage",
         get_persistent_storage,
     )?;
-    crate::webidl::define_readonly_accessor(
-        scope,
-        p,
-        "windowControlsOverlay",
-        get_window_controls_overlay,
-    )?;
+    if !chromium_148_order {
+        crate::webidl::define_readonly_accessor(
+            scope,
+            p,
+            "windowControlsOverlay",
+            get_window_controls_overlay,
+        )?;
+    }
     super::navigator_hardware_concurrency_property::define(scope, p)?;
     super::navigator_cookie_enabled_property::define(scope, p)?;
     super::navigator_app_code_name_property::define(scope, p)?;
@@ -120,6 +133,14 @@ fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, p, "javaEnabled", 0, java_enabled)?;
     crate::webidl::define_method(scope, p, "sendBeacon", 1, send_beacon)?;
     crate::webidl::define_method(scope, p, "vibrate", 1, vibrate)?;
+    if chromium_148_order {
+        crate::webidl::define_readonly_accessor(
+            scope,
+            p,
+            "windowControlsOverlay",
+            get_window_controls_overlay,
+        )?;
+    }
     crate::webidl::finish_constructor(scope, p, c)?;
     crate::webidl::define_readonly_accessor(
         scope,
@@ -249,8 +270,15 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(scope, navigator, p.into()) != Some(true) {
         return Err("cannot create Navigator".to_owned());
     }
+    let (has_been_active, is_active) = {
+        let fingerprint = crate::fingerprint::navigator(scope);
+        (
+            fingerprint.user_activation_has_been_active,
+            fingerprint.user_activation_is_active,
+        )
+    };
     let scheduling = super::scheduling::create(scope)?;
-    let user_activation = super::user_activation::create(scope, false, false)?;
+    let user_activation = super::user_activation::create(scope, has_been_active, is_active)?;
     let permissions = super::permissions::create(scope)?;
     let plugins = super::plugin_array::create(scope)?;
     let mime_types = super::mime_type_array::create(scope, plugins)?;

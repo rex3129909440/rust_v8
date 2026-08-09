@@ -376,7 +376,7 @@ def windows_edge_150_profile(
             webgl2_max_combined_uniform_blocks=24,
             webgl2_max_uniform_buffer_bindings=24,
             webgl2_max_uniform_block_size=65_536,
-            webgl2_max_combined_vertex_uniform_components=212_992,
+            webgl2_max_combined_vertex_uniform_components=212_988,
             webgl2_max_combined_fragment_uniform_components=200_704,
             webgl2_max_transform_feedback_separate_attribs=4,
             webgl2_max_transform_feedback_interleaved_components=120,
@@ -487,8 +487,31 @@ def windows_edge_150_profile(
                 MediaDeviceProfile("", "audiooutput", "", ""),
             ),
             supported_constraints=("width", "height"),
-            can_play_probably_types=("audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "video/mp4", "video/webm"),
-            can_play_maybe_types=("audio/*", "video/*"),
+            # Exact Chromium desktop codec records.  Do not use audio/* or
+            # video/* here: canPlayType() must return an empty string for an
+            # unknown codec even when its container is otherwise supported.
+            can_play_probably_types=(
+                "video/ogg;codecs=opus",
+                "video/webm;codecs=vorbis,vp9",
+                "video/mp4;codecs=mp4a.40.2",
+                "video/mp4;codecs=avc1.42e01e",
+                "audio/wav;codecs=1",
+                "video/mp4;codecs=avc1.42c00d",
+                "video/mp4;codecs=avc1.64001e,mp4a.40.2",
+                "video/webm;codecs=vorbis",
+                "audio/ogg;codecs=vorbis",
+                "audio/aac",
+                "audio/mp4;codecs=mp4a.40.2",
+                "audio/mpeg",
+                "video/webm;codecs=vp8,vorbis",
+            ),
+            can_play_maybe_types=(
+                "audio/webm",
+                "video/mp4",
+                "audio/wav",
+                "audio/x-mpegurl",
+                "audio/x-m4a",
+            ),
             media_source_types=(
                 "audio/mpeg",
                 "audio/webm;codecs=opus*",
@@ -602,6 +625,7 @@ def windows_edge_150_profile(
             midi_sysex_enabled=False,
         ),
         sensors=SensorsProfile(
+            available=True,
             accelerometer=(0.0, 0.0, 0.0),
             gravity=(0.0, 0.0, 0.0),
             linear_acceleration=(0.0, 0.0, 0.0),
@@ -612,11 +636,11 @@ def windows_edge_150_profile(
         timing=TimingProfile(clock_step_ms=1),
         xr=XrProfile(("inline",)),
         memory=MemoryProfile(
-            performance_js_heap_size_limit=4_294_705_152,
-            performance_total_js_heap_size=13_061_022,
-            performance_used_js_heap_size=12_562_246,
-            console_js_heap_size_limit=4_294_705_152,
-            console_total_js_heap_size=13_061_022,
-            console_used_js_heap_size=12_562_246,
+            performance_js_heap_size_limit=4_395_630_592,
+            performance_total_js_heap_size=98_833_423,
+            performance_used_js_heap_size=62_981_207,
+            console_js_heap_size_limit=4_395_630_592,
+            console_total_js_heap_size=98_833_423,
+            console_used_js_heap_size=62_981_207,
         ),
     )

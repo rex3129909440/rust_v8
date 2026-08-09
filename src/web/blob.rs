@@ -72,21 +72,16 @@ fn construct(
     }
     let mut output = Vec::new();
     if !arguments.get(0).is_undefined() {
-        let Ok(parts) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-            crate::webidl::throw_type_error(scope, "Blob parts must be a sequence");
+        let Ok(parts) = crate::webidl::sequence_values(scope, arguments.get(0)) else {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'Blob': The object must have a callable @@iterator property.",
+            );
             return;
         };
-        let Some(length_key) = v8::String::new(scope, "length") else {
-            return;
-        };
-        let length = parts
-            .get(scope, length_key.into())
-            .and_then(|value| value.uint32_value(scope))
-            .unwrap_or(0);
-        for index in 0..length {
-            if let Some(part) = parts.get_index(scope, index) {
-                append_part(scope, part, &mut output);
-            }
+        for part in parts {
+            let part = v8::Local::new(scope, &part);
+            append_part(scope, part, &mut output);
         }
     }
     let media_type = v8::Local::<v8::Object>::try_from(arguments.get(1))

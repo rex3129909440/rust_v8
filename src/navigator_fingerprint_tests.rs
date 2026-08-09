@@ -34,6 +34,69 @@ Not_A Brand:99,Chromium:150,Google Chrome:150"
     assert!(!values.contains("HeadlessChrome/"), "{values}");
 }
 
+#[test]
+fn navigator_prototype_keeps_window_controls_overlay_in_blink_order() {
+    let mut runtime = EdgeRuntime::new().expect("navigator order runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const names = Object.getOwnPropertyNames(Navigator.prototype);
+              return names.slice(
+                names.indexOf("webkitPersistentStorage"),
+                names.indexOf("constructor") + 1
+              ).join(",");
+            })()
+            "#,
+        ),
+        concat!(
+            "webkitPersistentStorage,windowControlsOverlay,hardwareConcurrency,",
+            "cookieEnabled,",
+            "appCodeName,appName,appVersion,platform,product,userAgent,language,",
+            "languages,onLine,webdriver,plugins,mimeTypes,pdfViewerEnabled,",
+            "connection,getGamepads,javaEnabled,sendBeacon,vibrate,constructor"
+        )
+    );
+}
+
+#[test]
+fn navigator_prototype_uses_evidenced_chromium_148_property_order() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.navigator.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.7778.217 Safari/537.36"
+        .to_owned();
+    fingerprint.navigator.app_version = fingerprint
+        .navigator
+        .user_agent
+        .strip_prefix("Mozilla/")
+        .expect("Mozilla prefix")
+        .to_owned();
+    let mut runtime =
+        EdgeRuntime::with_fingerprint(fingerprint).expect("Chromium 148 navigator order runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const names = Object.getOwnPropertyNames(Navigator.prototype);
+              return names.slice(
+                names.indexOf("webkitPersistentStorage"),
+                names.indexOf("constructor") + 1
+              ).join(",");
+            })()
+            "#,
+        ),
+        concat!(
+            "webkitPersistentStorage,hardwareConcurrency,cookieEnabled,",
+            "appCodeName,appName,appVersion,platform,product,userAgent,language,",
+            "languages,onLine,webdriver,plugins,mimeTypes,pdfViewerEnabled,",
+            "connection,getGamepads,javaEnabled,sendBeacon,vibrate,",
+            "windowControlsOverlay,constructor"
+        )
+    );
+}
+
 fn custom_fingerprint() -> EdgeFingerprint {
     let mut fingerprint = EdgeFingerprint {
         id: "windows-11-edge-149-custom".to_owned(),

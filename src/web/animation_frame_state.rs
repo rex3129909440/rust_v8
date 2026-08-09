@@ -87,8 +87,10 @@ pub(crate) fn run_ready(scope: &mut v8::PinScope<'_, '_>) -> bool {
             .into();
         let timestamp =
             super::performance::now_for_current_realm(callback_scope).unwrap_or_else(|| {
-                crate::determinism::high_resolution_milliseconds(
+                crate::determinism::relative_high_resolution_milliseconds(
+                    callback_scope,
                     crate::determinism::elapsed_milliseconds(callback_scope),
+                    0.0,
                 )
             });
         let timestamp: v8::Local<v8::Value> = v8::Number::new(callback_scope, timestamp).into();

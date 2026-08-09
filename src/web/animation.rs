@@ -208,13 +208,11 @@ fn construct(
     result.set(arguments.this().into());
 }
 
-fn default_timeline<'s>(scope: &v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Value>> {
-    let global = scope.get_current_context().global(scope);
-    let document_key = v8::String::new(scope, "document")?;
-    let document = global.get(scope, document_key.into())?;
-    let document = v8::Local::<v8::Object>::try_from(document).ok()?;
-    let timeline_key = v8::String::new(scope, "timeline")?;
-    document.get(scope, timeline_key.into())
+fn default_timeline<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Value>> {
+    let document = super::document_global::value(scope)?;
+    super::document_timeline_property::value(scope, document)
+        .ok()
+        .map(Into::into)
 }
 
 fn record(
@@ -286,6 +284,27 @@ pub(crate) fn for_document(
         })
         .map(|(_, animation, _)| animation)
         .collect()
+}
+
+pub(crate) fn current_time_for_effect(
+    scope: &v8::PinScope<'_, '_>,
+    effect: v8::Local<'_, v8::Object>,
+) -> Option<f64> {
+    let effect_id = effect.get_identity_hash().get();
+    let store = scope.get_slot::<AnimationStore>()?;
+    for animation in store.records.values() {
+        let Some(candidate) = animation.effect.as_ref() else {
+            continue;
+        };
+        let candidate = v8::Local::new(scope, candidate);
+        let Ok(candidate) = v8::Local::<v8::Object>::try_from(candidate) else {
+            continue;
+        };
+        if candidate.get_identity_hash().get() == effect_id {
+            return animation.current_time;
+        }
+    }
+    None
 }
 
 fn set_record(
@@ -666,6 +685,9 @@ fn play(
     set_record(scope, a.this(), |v| {
         v.play_state = "running".to_owned();
         v.pending = false;
+        if v.current_time.is_none() && v.effect.is_some() && v.timeline.is_some() {
+            v.current_time = Some(0.0);
+        }
     });
 }
 fn reverse(
@@ -697,10 +719,19 @@ fn get_overall_progress(
     mut result: v8::ReturnValue<'_>,
 ) {
     match record(scope, arguments.this()) {
-        Some(record) => match record.current_time {
-            Some(value) => result.set(v8::Number::new(scope, value.max(0.0)).into()),
-            None => result.set(v8::null(scope).into()),
-        },
+        Some(record) => {
+            let progress = record.current_time.and_then(|current_time| {
+                let effect = record.effect.as_ref()?;
+                let effect = v8::Local::new(scope, effect);
+                let effect = v8::Local::<v8::Object>::try_from(effect).ok()?;
+                super::animation_effect::overall_progress(scope, effect, current_time)
+            });
+            if let Some(progress) = progress {
+                result.set(v8::Number::new(scope, progress).into());
+            } else {
+                result.set(v8::null(scope).into());
+            }
+        }
         None => crate::webidl::throw_type_error(scope, "Illegal invocation"),
     }
 }

@@ -265,15 +265,36 @@ fn execute_classic(
     scope: &mut v8::PinScope<'_, '_>,
     element: v8::Local<'_, v8::Object>,
     source: &str,
+    source_url: Option<&str>,
 ) {
     let Some(document) = super::node::owner_document(scope, element) else {
         return;
     };
     let prior = super::document::swap_current_script(scope, document, Some(element));
-    if let Some(source) = v8::String::new(scope, source)
-        && let Some(script) = v8::Script::compile(scope, source, None)
-    {
-        let _ = script.run(scope);
+    if let Some(source) = v8::String::new(scope, source) {
+        let script = if let Some(source_url) = source_url {
+            v8::String::new(scope, source_url).and_then(|resource_name| {
+                let origin = v8::ScriptOrigin::new(
+                    scope,
+                    resource_name.into(),
+                    0,
+                    0,
+                    false,
+                    -1,
+                    None,
+                    false,
+                    false,
+                    false,
+                    None,
+                );
+                v8::Script::compile(scope, source, Some(&origin))
+            })
+        } else {
+            v8::Script::compile(scope, source, None)
+        };
+        if let Some(script) = script {
+            let _ = script.run(scope);
+        }
     }
     let prior = prior.map(|script| v8::Local::new(scope, &script));
     super::document::swap_current_script(scope, document, prior);
@@ -344,7 +365,7 @@ fn prepare_script(scope: &mut v8::PinScope<'_, '_>, element: v8::Local<'_, v8::O
             enqueue_external(scope, element, source, url, true);
         } else if record.is_some_and(|record| record.parser_inserted) {
             if let Some(source) = source {
-                execute_classic(scope, element, &source);
+                execute_classic(scope, element, &source, Some(&url));
                 dispatch_completion(scope, element, "load");
             } else {
                 dispatch_completion(scope, element, "error");
@@ -366,7 +387,14 @@ fn prepare_script(scope: &mut v8::PinScope<'_, '_>, element: v8::Local<'_, v8::O
             .unwrap_or_else(|| crate::page_init::url(scope));
         enqueue_external(scope, element, Some(source), url, true);
     } else {
-        execute_classic(scope, element, &source);
+        let source_url = super::node::owner_document(scope, element)
+            .and_then(|document| super::document::stored_value(scope, document, "URL"))
+            .map(|value| {
+                let value = v8::Local::new(scope, &value);
+                crate::webidl::value_to_string(scope, value)
+            })
+            .unwrap_or_else(|| crate::page_init::url(scope));
+        execute_classic(scope, element, &source, Some(&source_url));
     }
 }
 
@@ -408,7 +436,7 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
         let success = if pending.module {
             execute_module(script_scope, &pending.url, &source)
         } else {
-            execute_classic(script_scope, element, &source);
+            execute_classic(script_scope, element, &source, Some(&pending.url));
             true
         };
         dispatch_completion(

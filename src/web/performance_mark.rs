@@ -61,10 +61,69 @@ fn construct(
         return;
     }
     let name = crate::webidl::value_to_string(scope, arguments.get(0));
-    let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
-    let start_time = options
-        .map(|options| super::event::number_property(scope, options, "startTime", 0.0))
-        .unwrap_or(0.0);
+    if super::performance::current_realm_is_window(scope)
+        && super::performance::is_legacy_timing_name(&name)
+    {
+        super::node::throw_dom_exception(
+            scope,
+            "SyntaxError",
+            &format!(
+                "Failed to construct 'PerformanceMark': '{name}' is part of the PerformanceTiming interface, and cannot be used as a mark name."
+            ),
+        );
+        return;
+    }
+    let options_value = arguments.get(1);
+    let options = if options_value.is_undefined() || options_value.is_null() {
+        None
+    } else {
+        let Ok(options) = v8::Local::<v8::Object>::try_from(options_value) else {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'PerformanceMark': parameter 2 is not of type 'Object'.",
+            );
+            return;
+        };
+        Some(options)
+    };
+    // Web IDL converts dictionary members in lexicographic order.
+    let detail = match options {
+        Some(options) => {
+            let Some(value) = property(scope, options, "detail") else {
+                return;
+            };
+            if value.is_undefined() {
+                v8::null(scope).into()
+            } else {
+                value
+            }
+        }
+        None => v8::null(scope).into(),
+    };
+    let default_start = super::performance::now_for_current_realm(scope).unwrap_or(0.0);
+    let start_time = match options {
+        Some(options) => {
+            let Some(value) = property(scope, options, "startTime") else {
+                return;
+            };
+            if value.is_undefined() {
+                default_start
+            } else {
+                let Some(value) = value.number_value(scope) else {
+                    return;
+                };
+                if !value.is_finite() {
+                    crate::webidl::throw_type_error(
+                        scope,
+                        "Failed to construct 'PerformanceMark': Failed to read the 'startTime' property from 'PerformanceMarkOptions': The provided double value is non-finite.",
+                    );
+                    return;
+                }
+                value
+            }
+        }
+        None => default_start,
+    };
     if start_time < 0.0 {
         crate::webidl::throw_type_error(
             scope,
@@ -72,10 +131,11 @@ fn construct(
         );
         return;
     }
-    let detail = options
-        .and_then(|options| property(scope, options, "detail"))
-        .map(|value| clone_value(scope, value))
-        .unwrap_or_else(|| v8::null(scope).into());
+    let detail = v8::Global::new(scope, detail);
+    let Some(detail) = structured_clone_detail(scope, detail) else {
+        return;
+    };
+    let detail = v8::Local::new(scope, &detail);
     attach(scope, arguments.this(), name, start_time, detail);
     result.set(arguments.this().into());
 }
@@ -95,9 +155,28 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(scope, mark, prototype.into()) != Some(true) {
         return Err("cannot create PerformanceMark".to_owned());
     }
-    let detail = clone_value(scope, detail);
     attach(scope, mark, name, start_time, detail);
     Ok(mark)
+}
+
+pub(crate) fn structured_clone_detail(
+    scope: &mut v8::PinScope<'_, '_>,
+    detail: v8::Global<v8::Value>,
+) -> Option<v8::Global<v8::Value>> {
+    let context = scope.get_current_context();
+    let detail = v8::Local::new(scope, &detail);
+    match super::structured_clone::clone_into(
+        scope,
+        context,
+        detail,
+        super::structured_clone::TransferList::default(),
+    ) {
+        Ok(output) => Some(output.value),
+        Err(message) => {
+            super::structured_clone::throw_data_clone_error(scope, &message);
+            None
+        }
+    }
 }
 
 fn attach(

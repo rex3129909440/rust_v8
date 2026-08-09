@@ -37,9 +37,14 @@ pub(crate) fn execute<'s>(
         .as_ref()
         .map(|request| request.url.clone())
         .unwrap_or_else(|| crate::webidl::value_to_string(scope, input));
+    let init = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
     let url = match resolve_request_url(scope, &input_url) {
         Ok(url) => url,
         Err(_) => {
+            // RequestInit is a Web IDL dictionary. Chromium converts it before
+            // rejecting an invalid URL, so its observable getters must still
+            // run even though no network request can be created.
+            super::request::observe_request_init(scope, init);
             reject_type_error(
                 scope,
                 &format!("Failed to parse URL from {input_url}"),
@@ -48,7 +53,6 @@ pub(crate) fn execute<'s>(
             return;
         }
     };
-    let init = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
     let method = init
         .and_then(|init| {
             v8::String::new(scope, "method")

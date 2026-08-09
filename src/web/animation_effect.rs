@@ -126,7 +126,7 @@ fn get_timing(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    result.set(timing_object(scope, &record, false).into());
+    result.set(timing_object(scope, &record, false, None).into());
 }
 
 fn get_computed_timing(
@@ -138,7 +138,8 @@ fn get_computed_timing(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    result.set(timing_object(scope, &record, true).into());
+    let local_time = super::animation::current_time_for_effect(scope, arguments.this());
+    result.set(timing_object(scope, &record, true, local_time).into());
 }
 
 fn update_timing(
@@ -210,6 +211,7 @@ fn timing_object<'s>(
     scope: &v8::PinScope<'s, '_>,
     timing: &TimingRecord,
     computed: bool,
+    local_time: Option<f64>,
 ) -> v8::Local<'s, v8::Object> {
     let object = v8::Object::new(scope);
     define_number(scope, object, "delay", timing.delay);
@@ -243,17 +245,95 @@ fn timing_object<'s>(
             "activeDuration",
             duration * timing.iterations,
         );
-        define_null(scope, object, "currentIteration");
         define_number(
             scope,
             object,
             "endTime",
             timing.delay + duration * timing.iterations + timing.end_delay,
         );
-        define_null(scope, object, "localTime");
-        define_null(scope, object, "progress");
+        if let Some(local_time) = local_time {
+            define_number(scope, object, "localTime", local_time);
+        } else {
+            define_null(scope, object, "localTime");
+        }
+        let computed = local_time.and_then(|value| computed_progress(timing, value));
+        if let Some((iteration, progress)) = computed {
+            define_number(scope, object, "currentIteration", iteration);
+            define_number(scope, object, "progress", progress);
+        } else {
+            define_null(scope, object, "currentIteration");
+            define_null(scope, object, "progress");
+        }
     }
     object
+}
+
+pub(crate) fn overall_progress(
+    scope: &v8::PinScope<'_, '_>,
+    effect: v8::Local<'_, v8::Object>,
+    local_time: f64,
+) -> Option<f64> {
+    let timing = record(scope, effect)?;
+    active_time(&timing, local_time).map(|active| {
+        let duration = timing.duration.unwrap_or(0.0);
+        if duration > 0.0 {
+            timing.iteration_start + active / duration
+        } else {
+            timing.iteration_start + timing.iterations
+        }
+    })
+}
+
+fn active_time(timing: &TimingRecord, local_time: f64) -> Option<f64> {
+    let duration = timing.duration.unwrap_or(0.0).max(0.0);
+    let active_duration = duration * timing.iterations.max(0.0);
+    let start = timing.delay;
+    let end = start + active_duration;
+    let fill = if timing.fill == "auto" {
+        "none"
+    } else {
+        timing.fill.as_str()
+    };
+    if local_time < start {
+        matches!(fill, "backwards" | "both").then_some(0.0)
+    } else if local_time > end {
+        matches!(fill, "forwards" | "both").then_some(active_duration)
+    } else {
+        Some((local_time - start).clamp(0.0, active_duration))
+    }
+}
+
+fn computed_progress(timing: &TimingRecord, local_time: f64) -> Option<(f64, f64)> {
+    let active = active_time(timing, local_time)?;
+    let duration = timing.duration.unwrap_or(0.0).max(0.0);
+    let iterations = timing.iterations.max(0.0);
+    let (iteration, simple_progress) = if duration == 0.0 {
+        (0.0, 1.0)
+    } else {
+        let overall = timing.iteration_start + active / duration;
+        let at_end = active == duration * iterations && iterations > 0.0;
+        let iteration = if at_end {
+            (overall.ceil() - 1.0).max(0.0)
+        } else {
+            overall.floor().max(0.0)
+        };
+        let progress = if at_end { 1.0 } else { overall.fract() };
+        (iteration, progress)
+    };
+    let reverse = match timing.direction.as_str() {
+        "reverse" => true,
+        "alternate" => iteration as i64 % 2 != 0,
+        "alternate-reverse" => iteration as i64 % 2 == 0,
+        _ => false,
+    };
+    Some((
+        iteration,
+        if reverse {
+            1.0 - simple_progress
+        } else {
+            simple_progress
+        },
+    ))
 }
 
 fn value_property<'s>(

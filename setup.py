@@ -85,10 +85,10 @@ setup(
     long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     license=METADATA["license"],
-    url="https://github.com/heshengqing/rust_v8",
+    url="https://github.com/rex3129909440/rust_v8",
     project_urls={
-        "Source": "https://github.com/heshengqing/rust_v8",
-        "Issues": "https://github.com/heshengqing/rust_v8/issues",
+        "Source": "https://github.com/rex3129909440/rust_v8",
+        "Issues": "https://github.com/rex3129909440/rust_v8/issues",
     },
     python_requires=">=3.11",
     install_requires=[

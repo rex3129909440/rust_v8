@@ -197,7 +197,18 @@ pub(crate) fn scroll_metrics(
     let content_origin_y = layout.y + layout.border_top;
     let mut extent_width = base_client_width;
     let mut extent_height = base_client_height;
+    let mut has_inline_line_box = false;
     for child in super::node::children(scope, element) {
+        let Some(child_record) = super::node::record(scope, child) else {
+            continue;
+        };
+        if child_record.node_type == super::node::TEXT_NODE {
+            has_inline_line_box |= child_record
+                .node_value
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty());
+            continue;
+        }
         if super::element::record(scope, child).is_none() {
             continue;
         }
@@ -205,6 +216,7 @@ pub(crate) fn scroll_metrics(
         if !child_layout.rendered {
             continue;
         }
+        has_inline_line_box |= participates_in_inline_line_box(scope, child);
         extent_width = extent_width
             .max(child_layout.x - content_origin_x + scroll_left + child_layout.border_width());
         extent_height = extent_height
@@ -212,6 +224,9 @@ pub(crate) fn scroll_metrics(
     }
 
     if tag.eq_ignore_ascii_case("BODY") {
+        if has_inline_line_box {
+            extent_height = extent_height.max(line_box_height(scope, element));
+        }
         if property_length(scope, element, "width").is_none() {
             base_client_width = base_client_width.max(extent_width);
         }
@@ -255,6 +270,48 @@ pub(crate) fn scroll_metrics(
         scroll_width: extent_width.max(client_width),
         scroll_height: extent_height.max(client_height),
     }
+}
+
+fn participates_in_inline_line_box(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+) -> bool {
+    let display = property(scope, element, "display");
+    if display.eq_ignore_ascii_case("none") {
+        return false;
+    }
+    if !display.is_empty() {
+        return display
+            .split_whitespace()
+            .next()
+            .is_some_and(|outer| outer.eq_ignore_ascii_case("inline"));
+    }
+    super::element::record(scope, element).is_some_and(|record| {
+        matches!(
+            record.tag_name.to_ascii_uppercase().as_str(),
+            "AUDIO"
+                | "BUTTON"
+                | "CANVAS"
+                | "EMBED"
+                | "IFRAME"
+                | "IMG"
+                | "INPUT"
+                | "OBJECT"
+                | "SELECT"
+                | "TEXTAREA"
+                | "VIDEO"
+        )
+    })
+}
+
+fn line_box_height(scope: &v8::PinScope<'_, '_>, element: v8::Local<'_, v8::Object>) -> f64 {
+    property_length(scope, element, "line-height").unwrap_or_else(|| {
+        let (font_size, _) = font_sizes(scope, element);
+        // Chromium's default 16px Times/Arial metrics produce an 18px normal
+        // line box. Keep the ratio tied to the inherited font size so custom
+        // page CSS continues to affect layout.
+        super::css_calculation::layout_unit(font_size * 1.125)
+    })
 }
 
 pub(crate) fn offset_parent<'s>(

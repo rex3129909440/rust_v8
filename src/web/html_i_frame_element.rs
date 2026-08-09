@@ -1571,6 +1571,7 @@ fn navigate_browsing_context(
         );
         super::html_script_element::execute_parser_inserted_tree(try_catch, document);
         try_catch.perform_microtask_checkpoint();
+        super::performance::finalize_page_load(try_catch);
     }
     if let Ok(event) = super::event::create(scope, "load") {
         super::event_target::dispatch(scope, iframe, event);

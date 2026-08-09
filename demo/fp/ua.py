@@ -8,31 +8,39 @@ MAX_SUPPORTED_CHROMIUM_MAJOR = 150
 
 
 CHROME_VERSION_MAP = {
-    "140": "140.0.7301.21",
-    "141": "141.0.7350.44",
-    "142": "142.0.7399.78",
-    "143": "143.0.7445.112",
-    "144": "144.0.7492.33",
-    "145": "145.0.7541.65",
-    "146": "146.0.7590.99",
-    "147": "147.0.7640.22",
-    "148": "148.0.7778.97",
+    # Released Stable branch versions.  The previous table incremented an
+    # invented build number and produced full-version UA-CH values that never
+    # existed in Chrome.  Where desktop patches differ by one across systems,
+    # use the release value common to Linux and at least one Windows/macOS
+    # rollout.
+    "140": "140.0.7339.80",
+    "141": "141.0.7390.54",
+    "142": "142.0.7444.59",
+    "143": "143.0.7499.40",
+    "144": "144.0.7559.225",
+    "145": "145.0.7632.116",
+    "146": "146.0.7680.177",
+    "147": "147.0.7727.137",
+    "148": "148.0.7778.216",
     "149": "149.0.7827.54",
-    "150": "150.0.7879.54",
+    "150": "150.0.7871.187",
 }
 
 EDGE_VERSION_MAP = {
-    "140": "140.0.3451.12",
-    "141": "141.0.3498.44",
-    "142": "142.0.3545.78",
-    "143": "143.0.3592.112",
-    "144": "144.0.3639.33",
-    "145": "145.0.3686.65",
-    "146": "146.0.3733.99",
-    "147": "147.0.3780.22",
-    "148": "148.0.3967.54",
-    "149": "149.0.4022.52",
-    "150": "150.0.4078.48",
+    # Microsoft-published Stable/Extended Stable versions, one real version
+    # per supported major.  UA strings supplied with an explicit full version
+    # continue to take precedence over this reduced-UA fallback table.
+    "140": "140.0.3485.94",
+    "141": "141.0.3537.85",
+    "142": "142.0.3595.90",
+    "143": "143.0.3650.139",
+    "144": "144.0.3719.151",
+    "145": "145.0.3800.97",
+    "146": "146.0.3856.130",
+    "147": "147.0.3912.98",
+    "148": "148.0.3967.96",
+    "149": "149.0.4022.98",
+    "150": "150.0.4078.99",
 }
 
 GREASED_CHARS = [" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"]

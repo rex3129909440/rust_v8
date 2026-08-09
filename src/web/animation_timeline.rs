@@ -9,6 +9,7 @@ pub(crate) struct AnimationTimelineStore {
 #[derive(Clone)]
 struct AnimationTimelineRecord {
     current_time: Option<f64>,
+    document_origin: Option<f64>,
     duration: Option<f64>,
 }
 
@@ -75,7 +76,25 @@ pub(crate) fn attach(
             object.get_identity_hash().get(),
             AnimationTimelineRecord {
                 current_time,
+                document_origin: None,
                 duration,
+            },
+        );
+    }
+}
+
+pub(crate) fn attach_document(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    origin: f64,
+) {
+    if let Some(store) = scope.get_slot_mut::<AnimationTimelineStore>() {
+        store.records.insert(
+            object.get_identity_hash().get(),
+            AnimationTimelineRecord {
+                current_time: None,
+                document_origin: Some(origin),
+                duration: None,
             },
         );
     }
@@ -112,9 +131,22 @@ fn return_optional_number(
 fn get_current_time(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
 ) {
-    return_optional_number(s, a, r, |record| record.current_time)
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    let current_time = if let Some(origin) = record.document_origin {
+        super::performance::now_for_current_realm(s).map(|now| now - origin)
+    } else {
+        record.current_time
+    };
+    if let Some(value) = current_time {
+        r.set(v8::Number::new(s, value).into());
+    } else {
+        r.set(v8::null(s).into());
+    }
 }
 fn get_duration(
     s: &mut v8::PinScope<'_, '_>,

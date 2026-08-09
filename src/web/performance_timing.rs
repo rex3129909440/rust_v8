@@ -189,6 +189,38 @@ fn record(
         .cloned()
 }
 
+pub(crate) fn named_value(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Option<f64> {
+    let record = record(scope, object)?;
+    Some(match name {
+        "navigationStart" => record.navigation_start,
+        "unloadEventStart" => record.unload_event_start,
+        "unloadEventEnd" => record.unload_event_end,
+        "redirectStart" => record.redirect_start,
+        "redirectEnd" => record.redirect_end,
+        "fetchStart" => record.fetch_start,
+        "domainLookupStart" => record.domain_lookup_start,
+        "domainLookupEnd" => record.domain_lookup_end,
+        "connectStart" => record.connect_start,
+        "connectEnd" => record.connect_end,
+        "secureConnectionStart" => record.secure_connection_start,
+        "requestStart" => record.request_start,
+        "responseStart" => record.response_start,
+        "responseEnd" => record.response_end,
+        "domLoading" => record.dom_loading,
+        "domInteractive" => record.dom_interactive,
+        "domContentLoadedEventStart" => record.dom_content_loaded_event_start,
+        "domContentLoadedEventEnd" => record.dom_content_loaded_event_end,
+        "domComplete" => record.dom_complete,
+        "loadEventStart" => record.load_event_start,
+        "loadEventEnd" => record.load_event_end,
+        _ => return None,
+    })
+}
+
 fn return_number(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

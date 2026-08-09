@@ -118,6 +118,7 @@ impl EdgeRuntime {
             crate::determinism::install(context_scope)?;
             crate::iframe_hook::install_for_root(context_scope)?;
             crate::web::document_global::execute_parser_inserted_scripts(context_scope);
+            crate::web::performance::finalize_page_load(context_scope);
             (v8::Global::new(context_scope, context), late_intrinsics)
         };
         Ok(Self {
@@ -153,6 +154,7 @@ impl EdgeRuntime {
         source: &str,
         source_url: Option<&str>,
     ) -> Result<Evaluation, String> {
+        let decoded_source = source.as_bytes();
         if self
             .limits
             .max_source_bytes
@@ -174,6 +176,11 @@ impl EdgeRuntime {
             crate::trace::start_recording(try_catch)?;
         }
         let value = if let Some(source_url) = source_url {
+            crate::web::performance_resource_timing::record_evaluated_script(
+                try_catch,
+                source_url,
+                decoded_source,
+            );
             let resource_name = v8::String::new(try_catch, source_url)
                 .ok_or_else(|| "JavaScript source URL exceeds V8 limits".to_owned())?;
             let origin = v8::ScriptOrigin::new(
@@ -491,6 +498,29 @@ fn value_to_evaluation(
 mod tests {
     use super::{EdgeRuntime, Evaluation};
 
+    #[test]
+    fn embedded_v8_150_heap_limits_match_the_desktop_profile_catalog() {
+        super::initialize_v8();
+        for (physical_gib, expected_limit) in [
+            (1_u64, 562_036_736_usize),
+            (2, 1_124_073_472),
+            (3, 1_711_276_032),
+            (4, 2_248_146_944),
+            (6, 3_321_888_768),
+            (8, 4_395_630_592),
+        ] {
+            let params = v8::CreateParams::default()
+                .heap_limits_from_system_memory(physical_gib * 1024 * 1024 * 1024, 0);
+            let mut isolate = v8::Isolate::new(params);
+            let statistics = isolate.get_heap_statistics();
+            assert_eq!(
+                statistics.heap_size_limit(),
+                expected_limit,
+                "unexpected V8 heap limit for {physical_gib} GiB",
+            );
+        }
+    }
+
     fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
         match runtime.evaluate(source).expect("JavaScript evaluation") {
             Evaluation::String(value) | Evaluation::Other(value) | Evaluation::Number(value) => {
@@ -555,6 +585,140 @@ mod tests {
             rejection.contains(source_url),
             "missing rejection URL: {rejection}"
         );
+    }
+
+    #[test]
+    fn explicit_https_source_url_is_visible_as_a_script_resource_during_execution() {
+        let mut runtime = EdgeRuntime::new().expect("runtime");
+        let source_url = "https://assets.example.test/session/ips.js?profile=150";
+        let observed = runtime
+            .evaluate_with_source_url(
+                r#"
+                (() => {
+                  const resources = performance.getEntriesByType("resource");
+                  const entry = resources[resources.length - 1];
+                  return [
+                    entry.name,
+                    entry.entryType,
+                    entry.initiatorType,
+                    entry.responseStatus,
+                    entry.contentType
+                  ].join("|");
+                })()
+                "#,
+                source_url,
+            )
+            .expect("named resource evaluation")
+            .to_string();
+        assert_eq!(
+            observed,
+            format!("{source_url}|resource|script|200|text/javascript")
+        );
+    }
+
+    #[test]
+    fn evaluated_script_resource_sizes_use_real_http_compression() {
+        for encoding in ["gzip", "deflate", "br", "zstd"] {
+            let mut options = crate::EdgeRuntimeOptions::default();
+            options
+                .fingerprint
+                .performance
+                .evaluated_script_content_encoding = encoding.to_owned();
+            let mut runtime = EdgeRuntime::with_options(options).expect("runtime");
+            let source = r#"
+                (() => {
+                  const repeated = "resource timing payload ".repeat(256);
+                  const resources = performance.getEntriesByType("resource");
+                  const entry = resources[resources.length - 1];
+                  return [
+                    entry.contentEncoding,
+                    entry.encodedBodySize,
+                    entry.decodedBodySize,
+                    entry.transferSize,
+                    repeated.length
+                  ].join("|");
+                })()
+                "#;
+            let expected_encoded =
+                crate::content_encoding::encoded_http_body_size(source.as_bytes(), encoding)
+                    .expect("compress source");
+            let observed = runtime
+                .evaluate_with_source_url(source, "https://assets.example.test/ips.js")
+                .expect("compressed source evaluation")
+                .to_string();
+            assert_eq!(
+                observed,
+                format!(
+                    "{encoding}|{expected_encoded}|{}|{}|6144",
+                    source.len(),
+                    expected_encoded + 300
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn evaluated_script_uses_zstd_when_encoding_is_not_overridden() {
+        let mut runtime = EdgeRuntime::new().expect("runtime");
+        let observed = runtime
+            .evaluate_with_source_url(
+                "performance.getEntriesByType('resource').at(-1).contentEncoding",
+                "https://assets.example.test/default.js",
+            )
+            .expect("default encoded source evaluation")
+            .to_string();
+        assert_eq!(observed, "zstd");
+    }
+
+    #[test]
+    fn replay_resource_sizes_follow_the_content_encoding_header() {
+        let script_url = "https://assets.example.test/replayed.js";
+        let decoded_script = b"globalThis.replayLoaded = 'loaded from decoded replay body';";
+        for encoding in ["gzip", "deflate", "br", "zstd"] {
+            let mut options = crate::EdgeRuntimeOptions {
+                page: Some(crate::PageInit {
+                    url: "https://assets.example.test/page".to_owned(),
+                    html: format!("<!doctype html><script src=\"{script_url}\"></script>"),
+                    ..crate::PageInit::default()
+                }),
+                ..crate::EdgeRuntimeOptions::default()
+            };
+            let mut replay = crate::NetworkReplayEntry::get(script_url, decoded_script.to_vec());
+            replay.headers = vec![
+                ("content-type".to_owned(), "text/javascript".to_owned()),
+                ("content-encoding".to_owned(), encoding.to_owned()),
+            ];
+            options.network_replay.push(replay);
+            let expected_encoded =
+                crate::content_encoding::encoded_http_body_size(decoded_script, encoding)
+                    .expect("compress replay body");
+            let mut runtime = EdgeRuntime::with_options(options).expect("runtime");
+            let observed = runtime
+                .evaluate(&format!(
+                    r#"
+                    (() => {{
+                      const entry = performance.getEntriesByName({script_url:?}, "resource")[0];
+                      return [
+                        replayLoaded,
+                        entry.contentEncoding,
+                        entry.encodedBodySize,
+                        entry.decodedBodySize,
+                        entry.transferSize
+                      ].join("|");
+                    }})()
+                    "#
+                ))
+                .expect("inspect replay resource")
+                .to_string();
+            assert_eq!(
+                observed,
+                format!(
+                    "loaded from decoded replay body|{encoding}|{expected_encoded}|{}|{}",
+                    decoded_script.len(),
+                    expected_encoded + 300
+                )
+            );
+        }
     }
 
     #[test]

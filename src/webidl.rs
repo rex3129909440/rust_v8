@@ -34,6 +34,66 @@ pub(crate) fn value_to_string(
         .unwrap_or_default()
 }
 
+/// Converts a Web IDL `sequence<T>` by using the JavaScript iterator protocol.
+/// A sequence is not array-like: observable conversion must start by reading
+/// `@@iterator`, and must not inspect `length` or indexed properties directly.
+pub(crate) fn sequence_values(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+) -> Result<Vec<v8::Global<v8::Value>>, String> {
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+        return Err("The provided value cannot be converted to a sequence".to_owned());
+    };
+    let iterator_key = v8::Symbol::get_iterator(scope);
+    let Some(iterator_method) = object.get(scope, iterator_key.into()) else {
+        return Err("The provided value cannot be converted to a sequence".to_owned());
+    };
+    let Ok(iterator_method) = v8::Local::<v8::Function>::try_from(iterator_method) else {
+        return Err("The provided value is not iterable".to_owned());
+    };
+    let Some(iterator_value) = iterator_method.call(scope, object.into(), &[]) else {
+        return Err("The sequence iterator could not be created".to_owned());
+    };
+    let Ok(iterator) = v8::Local::<v8::Object>::try_from(iterator_value) else {
+        return Err("The sequence iterator is not an object".to_owned());
+    };
+    let next_key = v8::String::new(scope, "next")
+        .ok_or_else(|| "The sequence iterator is invalid".to_owned())?;
+    let Some(next) = iterator
+        .get(scope, next_key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+    else {
+        return Err("The sequence iterator has no callable next method".to_owned());
+    };
+    let done_key = v8::String::new(scope, "done")
+        .ok_or_else(|| "The sequence iterator is invalid".to_owned())?;
+    let value_key = v8::String::new(scope, "value")
+        .ok_or_else(|| "The sequence iterator is invalid".to_owned())?;
+    let mut values = Vec::new();
+    loop {
+        let Some(step_value) = next.call(scope, iterator.into(), &[]) else {
+            return Err("The sequence iterator failed".to_owned());
+        };
+        let Ok(step) = v8::Local::<v8::Object>::try_from(step_value) else {
+            return Err("The sequence iterator result is not an object".to_owned());
+        };
+        if step
+            .get(scope, done_key.into())
+            .is_some_and(|value| value.boolean_value(scope))
+        {
+            break;
+        }
+        let Some(item) = step.get(scope, value_key.into()) else {
+            return Err("The sequence iterator result has no value".to_owned());
+        };
+        values.push(v8::Global::new(scope, item));
+        if values.len() >= 65_536 {
+            return Err("The sequence is too large".to_owned());
+        }
+    }
+    Ok(values)
+}
+
 pub(crate) fn realm_id(scope: &v8::PinScope<'_, '_>) -> i32 {
     let global = scope.get_current_context().global(scope);
     let object = v8::String::new(scope, "Object")

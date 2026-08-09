@@ -21,7 +21,7 @@ except ImportError:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ABI_VERSION = 1
-PROFILE_SCHEMA_VERSION = 7
+PROFILE_SCHEMA_VERSION = 10
 OPTIONS_SCHEMA_VERSION = 2
 
 DEMO_JAVASCRIPT = r"""
@@ -52,6 +52,62 @@ class _NativeStringView(ctypes.Structure):
     _fields_ = [
         ("data", ctypes.POINTER(ctypes.c_ubyte)),
         ("len", ctypes.c_size_t),
+    ]
+
+
+class _NativePerformanceEntryProfile(ctypes.Structure):
+    _fields_ = [
+        ("name", _NativeStringView),
+        ("entry_type", _NativeStringView),
+        ("initiator_type", _NativeStringView),
+        ("delivery_type", _NativeStringView),
+        ("next_hop_protocol", _NativeStringView),
+        ("render_blocking_status", _NativeStringView),
+        ("content_type", _NativeStringView),
+        ("content_encoding", _NativeStringView),
+        ("worker_matched_source_type", _NativeStringView),
+        ("worker_final_source_type", _NativeStringView),
+        ("navigation_type", _NativeStringView),
+        ("start_time", ctypes.c_double),
+        ("duration", ctypes.c_double),
+        ("worker_start", ctypes.c_double),
+        ("worker_router_evaluation_start", ctypes.c_double),
+        ("worker_cache_lookup_start", ctypes.c_double),
+        ("redirect_start", ctypes.c_double),
+        ("redirect_end", ctypes.c_double),
+        ("fetch_start", ctypes.c_double),
+        ("domain_lookup_start", ctypes.c_double),
+        ("domain_lookup_end", ctypes.c_double),
+        ("connect_start", ctypes.c_double),
+        ("secure_connection_start", ctypes.c_double),
+        ("connect_end", ctypes.c_double),
+        ("request_start", ctypes.c_double),
+        ("response_start", ctypes.c_double),
+        ("first_interim_response_start", ctypes.c_double),
+        ("final_response_headers_start", ctypes.c_double),
+        ("response_end", ctypes.c_double),
+        ("unload_event_start", ctypes.c_double),
+        ("unload_event_end", ctypes.c_double),
+        ("dom_interactive", ctypes.c_double),
+        ("dom_content_loaded_event_start", ctypes.c_double),
+        ("dom_content_loaded_event_end", ctypes.c_double),
+        ("dom_complete", ctypes.c_double),
+        ("load_event_start", ctypes.c_double),
+        ("load_event_end", ctypes.c_double),
+        ("critical_ch_restart", ctypes.c_double),
+        ("activation_start", ctypes.c_double),
+        ("paint_time", ctypes.c_double),
+        ("presentation_time", ctypes.c_double),
+        ("transfer_size", ctypes.c_uint64),
+        ("encoded_body_size", ctypes.c_uint64),
+        ("decoded_body_size", ctypes.c_uint64),
+        ("redirect_count", ctypes.c_uint32),
+        ("response_status", ctypes.c_uint16),
+        ("has_transfer_size", ctypes.c_uint8),
+        ("has_encoded_body_size", ctypes.c_uint8),
+        ("has_decoded_body_size", ctypes.c_uint8),
+        ("has_response_status", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8 * 8),
     ]
 
 
@@ -318,11 +374,13 @@ def find_native_artifacts(
     # wheel payload so local regression tests cannot silently load a stale DLL.
     # Installed wheels do not contain PROJECT_ROOT/target and therefore still
     # resolve to their packaged native library below.
-    for profile in ("release", "debug"):
-        profile_dir = PROJECT_ROOT / "target" / profile
-        candidate_library = profile_dir / library_name
-        if candidate_library.is_file():
-            return candidate_library, None
+    source_artifacts = tuple(
+        candidate
+        for profile in ("release", "debug")
+        if (candidate := PROJECT_ROOT / "target" / profile / library_name).is_file()
+    )
+    if source_artifacts:
+        return max(source_artifacts, key=lambda item: item.stat().st_mtime_ns), None
 
     packaged_library = Path(__file__).resolve().parent / "_native" / library_name
     if packaged_library.is_file():
@@ -527,6 +585,17 @@ class EdgeSandbox:
         library.edge_sandbox_profile_create.restype = ctypes.c_void_p
         library.edge_sandbox_profile_destroy.argtypes = [ctypes.c_void_p]
         library.edge_sandbox_profile_destroy.restype = None
+        library.edge_sandbox_profile_clear_performance_entries.argtypes = [
+            ctypes.c_void_p,
+            buffer_pointer,
+        ]
+        library.edge_sandbox_profile_clear_performance_entries.restype = ctypes.c_bool
+        library.edge_sandbox_profile_append_performance_entry.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(_NativePerformanceEntryProfile),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_profile_append_performance_entry.restype = ctypes.c_bool
 
         library.edge_sandbox_profile_set_string.argtypes = [
             ctypes.c_void_p,
@@ -1113,6 +1182,78 @@ class EdgeSandbox:
                 len(encoded),
             )
 
+    def _profile_append_performance_entry(
+        self, handle: int, entry: object
+    ) -> None:
+        buffers: list[ctypes.Array[ctypes.c_ubyte]] = []
+
+        def view(value: str) -> _NativeStringView:
+            encoded = value.encode("utf-8")
+            buffer = (ctypes.c_ubyte * len(encoded)).from_buffer_copy(encoded)
+            buffers.append(buffer)
+            return _NativeStringView(
+                ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                len(encoded),
+            )
+
+        native = _NativePerformanceEntryProfile(
+            name=view(entry.name),
+            entry_type=view(entry.entry_type),
+            initiator_type=view(entry.initiator_type),
+            delivery_type=view(entry.delivery_type),
+            next_hop_protocol=view(entry.next_hop_protocol),
+            render_blocking_status=view(entry.render_blocking_status),
+            content_type=view(entry.content_type),
+            content_encoding=view(entry.content_encoding),
+            worker_matched_source_type=view(entry.worker_matched_source_type),
+            worker_final_source_type=view(entry.worker_final_source_type),
+            navigation_type=view(entry.navigation_type),
+            start_time=entry.start_time,
+            duration=entry.duration,
+            worker_start=entry.worker_start,
+            worker_router_evaluation_start=entry.worker_router_evaluation_start,
+            worker_cache_lookup_start=entry.worker_cache_lookup_start,
+            redirect_start=entry.redirect_start,
+            redirect_end=entry.redirect_end,
+            fetch_start=entry.fetch_start,
+            domain_lookup_start=entry.domain_lookup_start,
+            domain_lookup_end=entry.domain_lookup_end,
+            connect_start=entry.connect_start,
+            secure_connection_start=entry.secure_connection_start,
+            connect_end=entry.connect_end,
+            request_start=entry.request_start,
+            response_start=entry.response_start,
+            first_interim_response_start=entry.first_interim_response_start,
+            final_response_headers_start=entry.final_response_headers_start,
+            response_end=entry.response_end,
+            unload_event_start=entry.unload_event_start,
+            unload_event_end=entry.unload_event_end,
+            dom_interactive=entry.dom_interactive,
+            dom_content_loaded_event_start=entry.dom_content_loaded_event_start,
+            dom_content_loaded_event_end=entry.dom_content_loaded_event_end,
+            dom_complete=entry.dom_complete,
+            load_event_start=entry.load_event_start,
+            load_event_end=entry.load_event_end,
+            critical_ch_restart=entry.critical_ch_restart,
+            activation_start=entry.activation_start,
+            paint_time=entry.paint_time,
+            presentation_time=entry.presentation_time,
+            transfer_size=entry.transfer_size or 0,
+            encoded_body_size=entry.encoded_body_size or 0,
+            decoded_body_size=entry.decoded_body_size or 0,
+            redirect_count=entry.redirect_count,
+            response_status=entry.response_status or 0,
+            has_transfer_size=entry.transfer_size is not None,
+            has_encoded_body_size=entry.encoded_body_size is not None,
+            has_decoded_body_size=entry.decoded_body_size is not None,
+            has_response_status=entry.response_status is not None,
+        )
+        self._profile_call(
+            "edge_sandbox_profile_append_performance_entry",
+            handle,
+            ctypes.byref(native),
+        )
+
     def _apply_profile(self, handle: int, profile: EdgeProfile) -> None:
         field = ProfileField
         self._profile_set_string(handle, field.ID, profile.id)
@@ -1197,6 +1338,16 @@ class EdgeSandbox:
             )
             self._profile_set_string(
                 handle, field.NAVIGATOR_DO_NOT_TRACK, navigator.do_not_track
+            )
+            self._profile_set_bool(
+                handle,
+                field.NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE,
+                navigator.user_activation_has_been_active,
+            )
+            self._profile_set_bool(
+                handle,
+                field.NAVIGATOR_USER_ACTIVATION_IS_ACTIVE,
+                navigator.user_activation_is_active,
             )
 
             user_agent_data = navigator.user_agent_data
@@ -1857,6 +2008,11 @@ class EdgeSandbox:
 
         webgpu = profile.webgpu
         if webgpu is not None:
+            self._profile_set_bool(
+                handle,
+                field.WEBGPU_AVAILABLE,
+                webgpu.available,
+            )
             self._profile_set_string(handle, field.WEBGPU_VENDOR, webgpu.vendor)
             self._profile_set_string(
                 handle, field.WEBGPU_ARCHITECTURE, webgpu.architecture
@@ -2290,6 +2446,21 @@ class EdgeSandbox:
             self._profile_set_string(handle, field.CSS_INPUT_FILE, css.input_file)
             self._profile_set_string(handle, field.CSS_INPUT_TEXT, css.input_text)
 
+        document = profile.document
+        if document is not None:
+            self._profile_set_number(
+                "edge_sandbox_profile_set_u32",
+                handle,
+                field.DOCUMENT_BODY_CHILD_ELEMENT_COUNT,
+                document.body_child_element_count,
+            )
+            self._profile_set_number(
+                "edge_sandbox_profile_set_f64",
+                handle,
+                field.DOCUMENT_BODY_CLIENT_HEIGHT,
+                document.body_client_height,
+            )
+
         media = profile.media
         if media is not None:
             if media.devices is not None:
@@ -2632,6 +2803,11 @@ class EdgeSandbox:
             )
             self._profile_set_bool(
                 handle,
+                field.MEDIA_PREFERENCE_REDUCED_TRANSPARENCY,
+                preferences.reduced_transparency,
+            )
+            self._profile_set_bool(
+                handle,
                 field.MEDIA_PREFERENCE_REDUCED_DATA,
                 preferences.reduced_data,
             )
@@ -2683,6 +2859,11 @@ class EdgeSandbox:
                 handle,
                 field.MEDIA_PREFERENCE_DYNAMIC_RANGE,
                 preferences.dynamic_range,
+            )
+            self._profile_set_string(
+                handle,
+                field.MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE,
+                preferences.video_dynamic_range,
             )
             self._profile_set_string(
                 handle,
@@ -2933,6 +3114,11 @@ class EdgeSandbox:
 
         sensors = profile.sensors
         if sensors is not None:
+            self._profile_set_bool(
+                handle,
+                field.SENSORS_AVAILABLE,
+                sensors.available,
+            )
             if sensors.accelerometer is not None:
                 self._profile_set_number(
                     "edge_sandbox_profile_set_f64",
@@ -3129,6 +3315,21 @@ class EdgeSandbox:
                 field.CONSOLE_USED_JS_HEAP_SIZE,
                 memory.console_used_js_heap_size,
             )
+
+        performance = profile.performance
+        if performance is not None:
+            self._profile_set_string(
+                handle,
+                field.PERFORMANCE_EVALUATED_SCRIPT_CONTENT_ENCODING,
+                performance.evaluated_script_content_encoding,
+            )
+            if performance.entries is not None:
+                self._profile_call(
+                    "edge_sandbox_profile_clear_performance_entries",
+                    handle,
+                )
+                for entry in performance.entries:
+                    self._profile_append_performance_entry(handle, entry)
 
         self._profile_call("edge_sandbox_profile_validate", handle)
 

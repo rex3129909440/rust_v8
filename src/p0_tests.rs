@@ -1,7 +1,72 @@
 use crate::{
     EdgeRuntime, EdgeRuntimeOptions, Evaluation, NetworkReplayEntry, PageInit,
-    SpeechVoiceFingerprint,
+    PerformanceEntryFingerprint, SpeechVoiceFingerprint,
 };
+
+#[test]
+fn typed_performance_profile_preserves_order_subtypes_and_compressed_body_sizes() {
+    let mut navigation = PerformanceEntryFingerprint {
+        name: "https://profile.example/page".to_owned(),
+        entry_type: "navigation".to_owned(),
+        duration: 3368.9,
+        initiator_type: "navigation".to_owned(),
+        next_hop_protocol: "h2".to_owned(),
+        content_type: "text/html".to_owned(),
+        content_encoding: "zstd".to_owned(),
+        encoded_body_size: Some(587),
+        decoded_body_size: Some(847),
+        response_status: Some(429),
+        dom_complete: 3368.9,
+        load_event_end: 3368.9,
+        ..PerformanceEntryFingerprint::default()
+    };
+    navigation.response_end = 425.9;
+    let visible = PerformanceEntryFingerprint {
+        name: "visible".to_owned(),
+        entry_type: "visibility-state".to_owned(),
+        ..PerformanceEntryFingerprint::default()
+    };
+    let resource = PerformanceEntryFingerprint {
+        name: "https://profile.example/ips.js".to_owned(),
+        entry_type: "resource".to_owned(),
+        start_time: 431.3,
+        duration: 2121.2,
+        initiator_type: "script".to_owned(),
+        next_hop_protocol: "h2".to_owned(),
+        content_type: "text/javascript".to_owned(),
+        content_encoding: "zstd".to_owned(),
+        encoded_body_size: Some(291181),
+        decoded_body_size: Some(609863),
+        response_status: Some(200),
+        response_end: 2552.5,
+        ..PerformanceEntryFingerprint::default()
+    };
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.performance.entries = Some(vec![navigation, visible, resource]);
+    let mut runtime = EdgeRuntime::with_options(options).expect("profiled performance runtime");
+    let value = runtime
+        .evaluate_with_source_url(
+            r#"
+            performance.getEntries().map(entry => [
+              entry.constructor.name,
+              entry.entryType,
+              entry.transferSize ?? "-",
+              entry.encodedBodySize ?? "-",
+              entry.decodedBodySize ?? "-",
+              entry.contentEncoding ?? "-"
+            ].join(",")).join("|")
+            "#,
+            "https://profile.example/ips.js",
+        )
+        .expect("profiled performance evaluation")
+        .to_string();
+    assert_eq!(
+        value,
+        "PerformanceNavigationTiming,navigation,887,587,847,zstd|\
+         VisibilityStateEntry,visibility-state,-,-,-,-|\
+         PerformanceResourceTiming,resource,291481,291181,609863,zstd"
+    );
+}
 
 fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
     match runtime.evaluate(source).expect("JavaScript evaluation") {
@@ -340,6 +405,327 @@ fn offline_audio_context_renders_connected_sources_and_audio_param_automation() 
 }
 
 #[test]
+fn offline_audio_triangle_compressor_matches_edge_rendering_kernel() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let _ = runtime
+        .evaluate(
+            r#"
+            globalThis.offlineAudioFingerprintAnswer = "pending";
+            const context = new OfflineAudioContext(1, 44100, 44100);
+            const oscillator = context.createOscillator();
+            oscillator.type = "triangle";
+            oscillator.frequency.setValueAtTime(10000, 0);
+            const compressor = context.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-50, 0);
+            compressor.knee.setValueAtTime(40, 0);
+            compressor.ratio.setValueAtTime(12, 0);
+            compressor.attack.setValueAtTime(0, 0);
+            compressor.release.setValueAtTime(0.25, 0);
+            oscillator.connect(compressor).connect(context.destination);
+            oscillator.start(0);
+            context.startRendering().then(buffer => {
+              const samples = buffer.getChannelData(0);
+              let sum = 0;
+              for (let index = 4500; index < 5000; ++index)
+                sum += Math.abs(samples[index]);
+              offlineAudioFingerprintAnswer = sum;
+            });
+            "#,
+        )
+        .expect("Offline Web Audio fingerprint setup");
+    let actual = text(&mut runtime, "offlineAudioFingerprintAnswer")
+        .parse::<f64>()
+        .expect("numeric audio fingerprint");
+    assert!(
+        (actual - 124.043_446_115_174_45).abs() < 0.000_01,
+        "unexpected Web Audio fingerprint: {actual}"
+    );
+}
+
+#[test]
+fn oscillator_triangle_uses_the_edge_band_limited_waveform() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let _ = runtime
+        .evaluate(
+            r#"
+            globalThis.bandLimitedTriangleAnswer = "pending";
+            const context = new OfflineAudioContext(1, 64, 44100);
+            const oscillator = context.createOscillator();
+            oscillator.type = "triangle";
+            oscillator.frequency.setValueAtTime(10000, 0);
+            oscillator.connect(context.destination);
+            oscillator.start(0);
+            context.startRendering().then(buffer => {
+              bandLimitedTriangleAnswer = Array.from(
+                buffer.getChannelData(0).slice(0, 4)
+              ).join(",");
+            });
+            "#,
+        )
+        .expect("band-limited triangle setup");
+    let samples = text(&mut runtime, "bandLimitedTriangleAnswer")
+        .split(',')
+        .map(|value| value.parse::<f64>().expect("numeric oscillator sample"))
+        .collect::<Vec<_>>();
+    let edge = [
+        0.0,
+        0.802_099_764_347_076_4,
+        0.233_441_948_890_686_04,
+        -0.734_159_171_581_268_3,
+    ];
+    for (actual, expected) in samples.iter().zip(edge) {
+        assert!(
+            (actual - expected).abs() < 0.000_001,
+            "{actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn input_event_uses_webidl_dictionary_and_sequence_conversion_order() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const log = [];
+              const sequence = new Proxy({
+                [Symbol.iterator]() { return [][Symbol.iterator](); }
+              }, {
+                get(target, key, receiver) {
+                  log.push(String(key));
+                  return Reflect.get(target, key, receiver);
+                }
+              });
+              const init = new Proxy({targetRanges: sequence}, {
+                get(target, key, receiver) {
+                  log.push(String(key));
+                  return Reflect.get(target, key, receiver);
+                }
+              });
+              new InputEvent("input", init);
+              return log.join(",");
+            })()
+            "#,
+        ),
+        "bubbles,cancelable,composed,detail,sourceCapabilities,view,data,dataTransfer,inputType,isComposing,targetRanges,Symbol(Symbol.iterator)"
+    );
+}
+
+#[test]
+fn blob_uses_webidl_sequence_conversion_before_blob_property_bag() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const log = [];
+              const parts = new Proxy({}, {
+                get(target, key, receiver) {
+                  log.push(`g:${String(key)}`);
+                  return Reflect.get(target, key, receiver);
+                }
+              });
+              const options = new Proxy({}, {
+                get(target, key, receiver) {
+                  log.push(`o:${String(key)}`);
+                  return Reflect.get(target, key, receiver);
+                }
+              });
+              try { new Blob(parts, options); } catch (_) {}
+              return log.join(",");
+            })()
+            "#,
+        ),
+        "g:Symbol(Symbol.iterator)"
+    );
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const blob = new Blob(["edge", new Uint8Array([33])], {type: "TEXT/PLAIN"});
+              return `${blob.size}|${blob.type}`;
+            })()
+            "#,
+        ),
+        "5|text/plain"
+    );
+}
+
+#[test]
+fn request_init_is_snapshotted_before_url_validation_in_webidl_order() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const log = [];
+              const init = new Proxy({}, {
+                get(target, key, receiver) {
+                  log.push(`g:${String(key)}`);
+                  return Reflect.get(target, key, receiver);
+                },
+                has(target, key) {
+                  log.push(`h:${String(key)}`);
+                  return Reflect.has(target, key);
+                }
+              });
+              try { new Request("ftp:", init); } catch (_) {}
+              return log.join(",");
+            })()
+            "#,
+        ),
+        "g:adAuctionHeaders,g:attributionReporting,h:attributionReporting,g:body,g:browsingTopics,g:cache,g:credentials,g:duplex,g:headers,g:integrity,g:keepalive,g:method,g:mode,g:priority,g:privateToken,g:redirect,g:referrer,g:referrerPolicy,g:sharedStorageWritable,g:signal,g:targetAddressSpace"
+    );
+}
+
+#[test]
+fn fetch_init_is_snapshotted_before_url_validation_in_webidl_order() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const log = [];
+              const init = new Proxy({}, {
+                get(target, key, receiver) {
+                  log.push(`g:${String(key)}`);
+                  return Reflect.get(target, key, receiver);
+                },
+                has(target, key) {
+                  log.push(`h:${String(key)}`);
+                  return Reflect.has(target, key);
+                }
+              });
+              fetch("ftp:", init).catch(() => {});
+              return log.join(",");
+            })()
+            "#,
+        ),
+        "g:adAuctionHeaders,g:attributionReporting,h:attributionReporting,g:body,g:browsingTopics,g:cache,g:credentials,g:duplex,g:headers,g:integrity,g:keepalive,g:method,g:mode,g:priority,g:privateToken,g:redirect,g:referrer,g:referrerPolicy,g:sharedStorageWritable,g:signal,g:targetAddressSpace"
+    );
+}
+
+#[test]
+fn element_animate_starts_at_zero_overall_progress() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const animation = document.createElement("div").animate(
+                [{ opacity: 0 }, { opacity: 1 }],
+                { duration: 1000 }
+              );
+              const initial = animation.effect.getComputedTiming();
+              const first = [
+                animation.timeline.constructor.name,
+                animation.playState,
+                animation.currentTime,
+                animation.overallProgress,
+                initial.localTime,
+                initial.progress,
+                initial.currentIteration
+              ].join("|");
+              animation.currentTime = 500;
+              const positioned = animation.effect.getComputedTiming();
+              return `${first}|${animation.overallProgress}|${positioned.localTime}|${positioned.progress}|${positioned.currentIteration}`;
+            })()
+            "#,
+        ),
+        "DocumentTimeline|running|0|0|0|0|0|0.5|500|0.5|0"
+    );
+}
+
+#[test]
+fn document_timeline_tracks_the_realm_clock_and_origin_time() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let first = text(&mut runtime, "String(document.timeline.currentTime)")
+        .parse::<f64>()
+        .expect("initial document timeline time");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const current = document.timeline.currentTime;
+              const shifted = new DocumentTimeline({ originTime: 100 });
+              const animation = document.createElement("div").animate(
+                [{ opacity: 0 }, { opacity: 1 }],
+                { duration: 1000 }
+              );
+              return [
+                current > 0,
+                Math.abs((current - 100) - shifted.currentTime) < 5,
+                document.timeline.duration === null,
+                animation.timeline === document.timeline,
+                animation.currentTime === 0
+              ].join("|");
+            })()
+            "#,
+        ),
+        "true|true|true|true|true"
+    );
+    let second = text(&mut runtime, "String(document.timeline.currentTime)")
+        .parse::<f64>()
+        .expect("later document timeline time");
+    assert!(
+        second > first,
+        "document timeline must advance: {first} -> {second}"
+    );
+}
+
+#[test]
+fn desktop_document_create_event_rejects_touch_event() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              let failure;
+              try { document.createEvent("TouchEvent"); }
+              catch (error) { failure = `${error.name}|${error.code}|${error.message}`; }
+              const constructed = new TouchEvent("touchstart");
+              return `${failure}|${constructed instanceof TouchEvent}|${constructed.type}`;
+            })()
+            "#,
+        ),
+        "NotSupportedError|9|Failed to execute 'createEvent' on 'Document': The provided event type ('TouchEvent') is invalid.|true|touchstart"
+    );
+}
+
+#[test]
+fn media_can_play_type_does_not_infer_unknown_codecs_from_a_container() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const media = document.createElement("video");
+              return [
+                media.canPlayType('video/mp4; codecs="avc1.42E01E"'),
+                media.canPlayType('video/mp4'),
+                media.canPlayType('video/mp4; codecs=bogus'),
+                media.canPlayType('video/ogg; codecs=opus'),
+                media.canPlayType('video/ogg; codecs=theora')
+              ].join("|");
+            })()
+            "#,
+        ),
+        "probably|maybe||probably|"
+    );
+}
+
+#[test]
 fn offline_audio_context_suspends_on_render_quantum_and_resumes_to_completion() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     let _ = runtime
@@ -632,7 +1018,7 @@ fn performance_timeline_observer_queue_and_measure_options_are_functional() {
         "true|3|1|true|true|2|5|measure-detail|1|true|",
         "function observe() { [native code] }"
     );
-    let expected_callback = "a,b,span,taken|true|0";
+    let expected_callback = "a,span,b,taken|true|0";
 
     let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
     assert_eq!(text(&mut direct, setup), expected_immediate);
@@ -648,7 +1034,7 @@ fn performance_timeline_observer_queue_and_measure_options_are_functional() {
             &mut direct,
             "performance.clearMarks(); performance.clearMeasures(); performance.getEntries().length"
         ),
-        "1"
+        "2"
     );
 
     let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
@@ -677,6 +1063,316 @@ fn performance_timeline_observer_queue_and_measure_options_are_functional() {
             && entry.api.contains("PerformanceObserver")
             && entry.api.ends_with(".takeRecords")
     }));
+}
+
+#[test]
+fn user_timing_matches_edge_errors_clone_semantics_and_chronological_order() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let answer = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const error = callback => {
+            try { callback(); return "ok"; }
+            catch (value) {
+              return [value.name, value.constructor.name, value.code ?? "-"].join(":");
+            }
+          };
+          performance.clearMarks();
+          performance.clearMeasures();
+          const output = [
+            error(() => performance.measure("missing", "absent-mark")),
+            error(() => performance.measure("duration-only", {duration: 1})),
+            error(() => performance.measure("all", {start: 0, duration: 1, end: 2})),
+            error(() => performance.measure("negative", {start: -1, end: 2})),
+            error(() => performance.mark("navigationStart")),
+            error(() => new PerformanceMark("navigationStart")),
+            error(() => performance.mark("nan", {startTime: NaN})),
+            error(() => performance.mark("function-detail", {detail() {}})),
+            error(() => performance.measure("function-detail", {start: 0, end: 1, detail() {}}))
+          ];
+
+          const cycle = {};
+          cycle.self = cycle;
+          const cloned = performance.mark("cycle", {detail: cycle}).detail;
+          output.push(cloned !== cycle && cloned.self === cloned);
+
+          const markOrder = [];
+          const markOptions = {};
+          Object.defineProperties(markOptions, {
+            startTime: {get() { markOrder.push("startTime"); return 3; }},
+            detail: {get() { markOrder.push("detail"); return null; }}
+          });
+          performance.mark("getter-mark", markOptions);
+          output.push(markOrder.join(","));
+
+          const measureOrder = [];
+          const measureOptions = {};
+          for (const [name, value] of [
+            ["start", 1], ["end", 2], ["duration", undefined], ["detail", null]
+          ]) {
+            Object.defineProperty(measureOptions, name, {
+              get() { measureOrder.push(name); return value; }
+            });
+          }
+          performance.measure("getter-measure", measureOptions);
+          output.push(measureOrder.join(","));
+
+          performance.clearMarks();
+          performance.mark("empty-options-end", {startTime: 4});
+          output.push(performance.measure("empty-options", {}, "empty-options-end").duration);
+          performance.clearMarks();
+          performance.mark("sort-late", {startTime: 20});
+          performance.mark("sort-early", {startTime: 10});
+          output.push(performance.getEntriesByType("mark").map(v => v.name).join(","));
+          performance.mark("same", {startTime: 30});
+          performance.mark("same", {startTime: 5});
+          output.push(performance.getEntriesByName("same", "mark").map(v => v.startTime).join(","));
+          output.push(performance.getEntries().filter(v => v.name.startsWith("sort-"))
+            .map(v => v.name).join(","));
+          return output.join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        answer,
+        concat!(
+            "SyntaxError:DOMException:12|TypeError:TypeError:-|TypeError:TypeError:-|",
+            "TypeError:TypeError:-|SyntaxError:DOMException:12|SyntaxError:DOMException:12|",
+            "TypeError:TypeError:-|",
+            "DataCloneError:DOMException:25|DataCloneError:DOMException:25|true|",
+            "detail,startTime|detail,duration,end,start|4|sort-early,sort-late|5,30|",
+            "sort-early,sort-late"
+        )
+    );
+}
+
+#[test]
+fn url_search_params_uses_webidl_union_conversion_and_live_pair_iterators() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let answer = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const errorName = callback => {
+            try { callback(); return "ok"; }
+            catch (error) { return error.name; }
+          };
+          const output = [];
+          output.push(Reflect.ownKeys(URLSearchParams.prototype).map(String).join(","));
+          output.push(new URLSearchParams(new Map([["a", "1"], ["a", "2"]])).toString());
+          output.push(new URLSearchParams((function* () {
+            yield (function* () { yield "x"; yield "7"; })();
+          })()).toString());
+          output.push(errorName(() => new URLSearchParams(["ab"])));
+          output.push(errorName(() => new URLSearchParams([["a", "1", "extra"]])));
+          output.push(errorName(() => new URLSearchParams([["a"]])));
+          output.push(errorName(() => new URLSearchParams([{}])));
+          output.push(new URLSearchParams(null).toString());
+          output.push(new URLSearchParams(12).toString());
+
+          const record = {};
+          Object.defineProperty(record, "hidden", {value: "no", enumerable: false});
+          record.visible = "yes";
+          output.push(new URLSearchParams(record).toString());
+          output.push(errorName(() => new URLSearchParams({[Symbol("key")]: "value"})));
+
+          const live = new URLSearchParams("a=1&b=2");
+          const iterator = live.entries();
+          const prototype = Object.getPrototypeOf(iterator);
+          const next = Object.getOwnPropertyDescriptor(prototype, "next");
+          const tag = Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag);
+          output.push([
+            Object.prototype.toString.call(iterator),
+            Reflect.ownKeys(prototype).map(String).join(","),
+            [next.writable, next.enumerable, next.configurable, next.value.name, next.value.length].join(","),
+            [tag.writable, tag.enumerable, tag.configurable].join(","),
+            iterator[Symbol.iterator]() === iterator,
+            Object.getPrototypeOf(prototype) ===
+              Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())),
+            Function.prototype.toString.call(next.value)
+          ].join("~"));
+          output.push(iterator.next().value.join(":"));
+          live.append("c", "3");
+          output.push(iterator.next().value.join(":"));
+          output.push(iterator.next().value.join(":"));
+
+          const deleted = new URLSearchParams("a=1&b=2");
+          const deletedIterator = deleted.keys();
+          deletedIterator.next();
+          deleted.delete("b");
+          output.push(JSON.stringify(deletedIterator.next()));
+
+          const each = new URLSearchParams("a=1&b=2");
+          const calls = [];
+          each.forEach((value, name, receiver) => {
+            calls.push(`${name}:${value}:${receiver === each}`);
+            if (name === "a") each.append("c", "3");
+          });
+          output.push(calls.join(","));
+
+          const deleteDuringEach = new URLSearchParams("a=1&b=2&c=3");
+          const deleteCalls = [];
+          deleteDuringEach.forEach((value, name) => {
+            deleteCalls.push(name);
+            if (name === "a") deleteDuringEach.delete("b");
+          });
+          output.push(deleteCalls.join(","));
+          return output.join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        answer,
+        concat!(
+            "size,append,delete,get,getAll,has,set,sort,toString,entries,forEach,keys,values,",
+            "constructor,Symbol(Symbol.toStringTag),Symbol(Symbol.iterator)|",
+            "a=2|x=7|TypeError|TypeError|TypeError|TypeError|null=|12=|visible=yes|TypeError|",
+            "[object URLSearchParams Iterator]~next,Symbol(Symbol.toStringTag)~",
+            "true,true,true,next,0~false,false,true~true~true~function next() { [native code] }|",
+            "a:1|b:2|c:3|{\"done\":true}|",
+            "a:1:true,b:2:true,c:3:true|a,c"
+        )
+    );
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(
+        text(
+            &mut traced,
+            "new URLSearchParams('trace=live').entries().next().value.join('=')"
+        ),
+        "trace=live"
+    );
+    let trace = traced.proxy_trace();
+    assert!(trace.iter().any(|entry| {
+        entry.operation == "call"
+            && entry.api.contains("URLSearchParams")
+            && entry.api.ends_with(".entries")
+    }));
+    assert!(
+        trace
+            .iter()
+            .any(|entry| { entry.operation == "call" && entry.api.ends_with(".next") })
+    );
+}
+
+#[test]
+fn headers_validate_bytestrings_and_expose_live_sorted_pair_iterators() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let answer = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const errorName = callback => {
+            try { callback(); return "ok"; }
+            catch (error) { return error.name; }
+          };
+          const output = [];
+          output.push(Reflect.ownKeys(Headers.prototype).map(String).join(","));
+          output.push(JSON.stringify(Array.from(
+            new Headers(new Map([["B", "2"], ["a", "1"]]))
+          )));
+          output.push(JSON.stringify(Array.from(new Headers((function* () {
+            yield (function* () { yield "X-One"; yield "  value\t"; })();
+          })()))));
+          output.push(errorName(() => new Headers([["a", "1", "extra"]])));
+          output.push(errorName(() => new Headers([["a"]])));
+          output.push(errorName(() => new Headers([{}])));
+          output.push(errorName(() => new Headers(null)));
+          output.push(errorName(() => new Headers(12)));
+          output.push(errorName(() => new Headers([[" x ", "1"]])));
+          output.push(errorName(() => new Headers([["x", "a\nb"]])));
+          output.push(errorName(() => new Headers([["x", "a\0b"]])));
+          output.push(errorName(() => new Headers([["😀", "1"]])));
+          output.push(errorName(() => new Headers([["x", "😀"]])));
+          output.push(errorName(() => new Headers().append()));
+          output.push(errorName(() => new Headers().set("x")));
+          output.push(new Headers([["x", "é"]]).get("x"));
+
+          const record = {};
+          Object.defineProperty(record, "hidden", {value: "no", enumerable: false});
+          record.Visible = "  yes\t";
+          output.push(JSON.stringify(Array.from(new Headers(record))));
+          output.push(errorName(() => new Headers({[Symbol("key")]: "value"})));
+
+          const duplicates = new Headers();
+          duplicates.append("X-B", "2");
+          duplicates.append("x-a", "1");
+          duplicates.append("X-B", "3");
+          duplicates.append("Set-Cookie", "a=1");
+          duplicates.append("set-cookie", "b=2");
+          output.push(duplicates.get("x-b"));
+          output.push(duplicates.getSetCookie().join(","));
+          output.push(JSON.stringify(Array.from(duplicates)));
+
+          const live = new Headers([["a", "1"], ["c", "3"]]);
+          const iterator = live.entries();
+          const prototype = Object.getPrototypeOf(iterator);
+          const next = Object.getOwnPropertyDescriptor(prototype, "next");
+          const tag = Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag);
+          output.push([
+            Object.prototype.toString.call(iterator),
+            Reflect.ownKeys(prototype).map(String).join(","),
+            [next.writable, next.enumerable, next.configurable, next.value.name, next.value.length].join(","),
+            [tag.writable, tag.enumerable, tag.configurable].join(","),
+            iterator[Symbol.iterator]() === iterator,
+            Object.getPrototypeOf(prototype) ===
+              Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())),
+            Function.prototype.toString.call(next.value)
+          ].join("~"));
+          output.push(iterator.next().value.join(":"));
+          live.append("b", "2");
+          output.push(iterator.next().value.join(":"));
+          output.push(iterator.next().value.join(":"));
+
+          const each = new Headers([["a", "1"], ["c", "3"]]);
+          const calls = [];
+          each.forEach((value, name, receiver) => {
+            calls.push(`${name}:${value}:${receiver === each}`);
+            if (name === "a") each.append("b", "2");
+          });
+          output.push(calls.join(","));
+          return output.join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        answer,
+        concat!(
+            "append,delete,get,getSetCookie,has,set,entries,forEach,keys,values,constructor,",
+            "Symbol(Symbol.toStringTag),Symbol(Symbol.iterator)|",
+            "[[\"a\",\"1\"],[\"b\",\"2\"]]|[[\"x-one\",\"value\"]]|",
+            "TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|",
+            "TypeError|TypeError|TypeError|TypeError|é|[[\"visible\",\"yes\"]]|",
+            "TypeError|2, 3|a=1,b=2|",
+            "[[\"set-cookie\",\"a=1\"],[\"set-cookie\",\"b=2\"],[\"x-a\",\"1\"],[\"x-b\",\"2, 3\"]]|",
+            "[object Headers Iterator]~next,Symbol(Symbol.toStringTag)~",
+            "true,true,true,next,0~false,false,true~true~true~function next() { [native code] }|",
+            "a:1|b:2|c:3|a:1:true,b:2:true,c:3:true"
+        )
+    );
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(
+        text(
+            &mut traced,
+            "new Headers([['trace','live']]).entries().next().value.join('=')"
+        ),
+        "trace=live"
+    );
+    let trace = traced.proxy_trace();
+    assert!(trace.iter().any(|entry| {
+        entry.operation == "call"
+            && entry.api.contains("Headers")
+            && entry.api.ends_with(".entries")
+    }));
+    assert!(
+        trace
+            .iter()
+            .any(|entry| entry.operation == "call" && entry.api.ends_with(".next"))
+    );
 }
 
 #[test]
@@ -873,7 +1569,7 @@ fn image_srcset_selection_and_density_correction_follow_edge_dpr_semantics() {
             .push(("content-type".to_owned(), "image/svg+xml".to_owned()));
         options.network_replay.push(entry);
     }
-    let source = r#"
+    let source = r##"
         (async () => {
           const image = new Image();
           image.src = "/assets/image-1x.svg";
@@ -901,7 +1597,7 @@ fn image_srcset_selection_and_density_correction_follow_edge_dpr_semantics() {
             connected
           ].join("|");
         })()
-    "#;
+    "##;
     let expected = concat!(
         "2|false,,0,0|true|https://sandbox.test/assets/image-1x.svg|",
         "https://sandbox.test/assets/image-2x.svg|13|17|26,34|13,17"
@@ -1016,6 +1712,64 @@ fn blob_object_urls_use_the_current_https_origin_and_uuid_shape() {
     assert!(
         matches!(identifier.as_bytes()[19], b'8' | b'9' | b'a' | b'b'),
         "UUID variant"
+    );
+}
+
+#[test]
+fn canvas_paths_rasterize_strokes_curves_transforms_and_rgba_colors() {
+    let source = r##"
+        (() => {
+          const canvas = document.createElement("canvas");
+          canvas.width = 20;
+          canvas.height = 20;
+          const context = canvas.getContext("2d");
+          context.strokeStyle = "rgba(255, 0, 0, 0.5)";
+          context.lineWidth = 4;
+          context.lineCap = "butt";
+          context.beginPath();
+          context.moveTo(2, 8);
+          context.quadraticCurveTo(8, 8, 14, 8);
+          context.stroke();
+          const straight = Array.from(context.getImageData(8, 8, 1, 1).data);
+
+          context.clearRect(0, 0, 20, 20);
+          context.save();
+          context.translate(4, 4);
+          context.strokeStyle = "rgba(0, 255, 0, 1)";
+          context.beginPath();
+          context.moveTo(0, 0);
+          context.bezierCurveTo(2, 0, 4, 0, 8, 0);
+          context.stroke();
+          context.restore();
+          const transformed = Array.from(context.getImageData(6, 4, 1, 1).data);
+
+          context.clearRect(0, 0, 20, 20);
+          context.fillStyle = "#0000ff";
+          context.beginPath();
+          context.moveTo(2, 2);
+          context.lineTo(18, 2);
+          context.lineTo(10, 18);
+          context.closePath();
+          context.fill();
+          const filled = Array.from(context.getImageData(10, 8, 1, 1).data);
+
+          context.clearRect(0, 0, 20, 20);
+          context.save();
+          context.translate(5, 10);
+          context.font = "10px Arial";
+          context.fillStyle = "rgba(255, 255, 255, 1)";
+          context.fillText("G", 0, 0);
+          context.restore();
+          const transformedText = Array.from(context.getImageData(6, 5, 1, 1).data);
+          return [straight, transformed, filled, transformedText]
+            .map(value => value.join(","))
+            .join("|");
+        })()
+    "##;
+    let mut runtime = EdgeRuntime::new().expect("canvas path raster runtime");
+    assert_eq!(
+        text(&mut runtime, source),
+        "255,0,0,128|0,255,0,255|0,0,255,255|255,255,255,255"
     );
 }
 
@@ -1366,6 +2120,85 @@ fn edge_clock_semantics_link_performance_date_events_timers_and_animation_frames
     assert_eq!(raf.len(), 2);
     assert!(raf[0] >= 15.0, "RAF timestamp delta was {}", raf[0]);
     assert!(raf[1] <= 0.3, "RAF/performance skew was {}", raf[1]);
+}
+
+#[test]
+fn performance_now_uses_a_realm_relative_monotonic_100_microsecond_grid() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let values = text(
+        &mut runtime,
+        r#"
+        (() => {
+          let previous = performance.now();
+          let nonMonotonic = false;
+          let offGrid = false;
+          for (let index = 0; index < 100000; index++) {
+            const current = performance.now();
+            nonMonotonic ||= current < previous;
+            offGrid ||= Math.abs(current * 10 - Math.round(current * 10)) > 1e-7;
+            previous = current;
+          }
+          const parentNowAtChildCreation = performance.now();
+          const frame = document.createElement("iframe");
+          document.body.appendChild(frame);
+          const childNow = frame.contentWindow.performance.now();
+          const childOriginDelta =
+            frame.contentWindow.performance.timeOrigin - performance.timeOrigin;
+          const parentNowAfterChildCreation = performance.now();
+          return [
+            nonMonotonic,
+            offGrid,
+            childNow,
+            childOriginDelta,
+            parentNowAtChildCreation,
+            parentNowAfterChildCreation,
+            Math.abs(performance.timeOrigin + performance.now() - Date.now()),
+            Math.abs(
+              frame.contentWindow.performance.timeOrigin +
+              frame.contentWindow.performance.now() -
+              frame.contentWindow.Date.now()
+            )
+          ].join("|");
+        })()
+        "#,
+    )
+    .split('|')
+    .map(str::to_owned)
+    .collect::<Vec<_>>();
+    assert_eq!(values.len(), 8);
+    assert_eq!(values[0], "false");
+    assert_eq!(values[1], "false");
+    let child_now = values[2].parse::<f64>().expect("child performance.now");
+    let child_origin_delta = values[3].parse::<f64>().expect("child time origin delta");
+    let parent_now_before = values[4]
+        .parse::<f64>()
+        .expect("parent performance.now before");
+    let parent_now_after = values[5]
+        .parse::<f64>()
+        .expect("parent performance.now after");
+    let root_epoch_skew = values[6].parse::<f64>().expect("root epoch skew");
+    let child_epoch_skew = values[7].parse::<f64>().expect("child epoch skew");
+    assert!(child_now >= 0.0);
+    assert!(
+        child_origin_delta >= parent_now_before - 5.0,
+        "child origin delta was {child_origin_delta}; parent before was {parent_now_before}"
+    );
+    assert!(
+        child_origin_delta <= parent_now_after + 5.0,
+        "child origin delta was {child_origin_delta}; parent after was {parent_now_after}"
+    );
+    assert!(
+        (child_origin_delta + child_now - parent_now_after).abs() <= 5.0,
+        "child timeline did not match parent: origin={child_origin_delta}, child now={child_now}, parent now={parent_now_after}"
+    );
+    assert!(
+        root_epoch_skew <= 5.0,
+        "root epoch skew was {root_epoch_skew}"
+    );
+    assert!(
+        child_epoch_skew <= 5.0,
+        "child epoch skew was {child_epoch_skew}"
+    );
 }
 
 #[test]
@@ -1907,6 +2740,110 @@ fn navigation_and_all_replayed_resource_initiators_populate_the_edge_timeline() 
     assert!(trace.iter().any(|entry| {
         entry.operation == "get" && entry.api == "PerformanceResourceTiming.prototype.initiatorType"
     }));
+}
+
+#[test]
+fn page_load_populates_navigation_visibility_resource_and_paint_entries_in_edge_order() {
+    let script_url = "https://timeline.example.test/assets/app.js";
+    let mut runtime = EdgeRuntime::with_options(EdgeRuntimeOptions {
+        page: Some(PageInit {
+            url: "https://timeline.example.test/page".to_owned(),
+            html: concat!(
+                "<!doctype html><html><head></head><body>",
+                "<main>visible content</main>",
+                "<script src=\"/assets/app.js\"></script>",
+                "</body></html>"
+            )
+            .to_owned(),
+            content_type: "text/html; charset=utf-8".to_owned(),
+            ..PageInit::default()
+        }),
+        network_replay: vec![NetworkReplayEntry {
+            url: script_url.to_owned(),
+            method: "GET".to_owned(),
+            status: 200,
+            status_text: "OK".to_owned(),
+            headers: vec![(
+                "Content-Type".to_owned(),
+                "text/javascript; charset=utf-8".to_owned(),
+            )],
+            body: b"globalThis.timelineScriptLoaded = true;".to_vec(),
+        }],
+        ..EdgeRuntimeOptions::default()
+    })
+    .expect("performance timeline runtime");
+
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const entries = performance.getEntries();
+          const navigation = entries[0];
+          const visibility = entries[1];
+          const resource = entries[2];
+          const paints = entries.slice(3);
+          const navigationJSON = navigation.toJSON();
+          return [
+            timelineScriptLoaded,
+            entries.map(entry => entry.entryType).join(","),
+            navigation instanceof PerformanceNavigationTiming,
+            navigation instanceof PerformanceResourceTiming,
+            navigation.duration === navigation.loadEventEnd,
+            navigation.responseEnd <= navigation.domInteractive,
+            navigation.domInteractive <= navigation.domContentLoadedEventStart,
+            navigation.domContentLoadedEventStart <= navigation.domContentLoadedEventEnd,
+            navigation.domContentLoadedEventEnd <= navigation.domComplete,
+            navigation.domComplete <= navigation.loadEventStart,
+            navigation.loadEventStart <= navigation.loadEventEnd,
+            navigation.confidence === null,
+            navigation.notRestoredReasons === null,
+            Object.keys(navigationJSON).join(","),
+            visibility instanceof VisibilityStateEntry,
+            visibility.name,
+            visibility.startTime,
+            visibility.duration,
+            resource instanceof PerformanceResourceTiming,
+            resource.name,
+            resource.initiatorType,
+            resource.responseStatus,
+            resource.encodedBodySize,
+            paints.map(entry => entry.name).join(","),
+            paints.every(entry =>
+              entry instanceof PerformancePaintTiming &&
+              entry.duration === 0 &&
+              entry.paintTime <= entry.presentationTime &&
+              entry.startTime === entry.presentationTime
+            )
+          ].join("|");
+        })()
+        "#,
+    );
+    let expected_navigation_keys = concat!(
+        "name,entryType,startTime,duration,initiatorType,deliveryType,",
+        "nextHopProtocol,renderBlockingStatus,contentType,contentEncoding,",
+        "workerStart,workerRouterEvaluationStart,workerCacheLookupStart,",
+        "workerMatchedSourceType,workerFinalSourceType,redirectStart,redirectEnd,",
+        "fetchStart,domainLookupStart,domainLookupEnd,connectStart,",
+        "secureConnectionStart,connectEnd,requestStart,responseStart,",
+        "firstInterimResponseStart,finalResponseHeadersStart,responseEnd,",
+        "transferSize,encodedBodySize,decodedBodySize,responseStatus,serverTiming,",
+        "unloadEventStart,unloadEventEnd,domInteractive,",
+        "domContentLoadedEventStart,domContentLoadedEventEnd,domComplete,",
+        "loadEventStart,loadEventEnd,type,redirectCount,activationStart,",
+        "criticalCHRestart,notRestoredReasons,confidence"
+    );
+    assert_eq!(
+        result,
+        format!(
+            concat!(
+                "true|navigation,visibility-state,resource,paint,paint|",
+                "true|true|true|true|true|true|true|true|true|",
+                "true|true|{}|true|visible|0|0|true|{}|script|200|",
+                "39|first-paint,first-contentful-paint|true"
+            ),
+            expected_navigation_keys, script_url
+        )
+    );
 }
 
 #[test]

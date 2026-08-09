@@ -79,15 +79,15 @@ pub(crate) fn construct(
         init.is_some_and(|value| super::event::boolean_property(scope, value, "cancelable"));
     let composed =
         init.is_some_and(|value| super::event::boolean_property(scope, value, "composed"));
-    let view = init
-        .and_then(|value| property(scope, value, "view"))
-        .filter(|value| !value.is_null_or_undefined())
-        .map(|value| v8::Global::new(scope, value));
     let detail = init
         .map(|value| super::event::number_property(scope, value, "detail", 0.0) as i32)
         .unwrap_or(0);
     let source_capabilities = init
         .and_then(|value| property(scope, value, "sourceCapabilities"))
+        .filter(|value| !value.is_null_or_undefined())
+        .map(|value| v8::Global::new(scope, value));
+    let view = init
+        .and_then(|value| property(scope, value, "view"))
         .filter(|value| !value.is_null_or_undefined())
         .map(|value| v8::Global::new(scope, value));
     super::ui_event::attach(
@@ -105,21 +105,29 @@ pub(crate) fn construct(
     let data = data_value
         .filter(|value| !value.is_null_or_undefined())
         .map(|value| crate::webidl::value_to_string(scope, value));
-    let is_composing =
-        init.is_some_and(|value| super::event::boolean_property(scope, value, "isComposing"));
+    let data_transfer = init
+        .and_then(|value| property(scope, value, "dataTransfer"))
+        .filter(|value| !value.is_null_or_undefined())
+        .map(|value| v8::Global::new(scope, value));
     let input_type = init
         .and_then(|value| property(scope, value, "inputType"))
         .filter(|value| !value.is_undefined())
         .map(|value| sanitize_input_type(&crate::webidl::value_to_string(scope, value)))
         .unwrap_or_default();
-    let data_transfer = init
-        .and_then(|value| property(scope, value, "dataTransfer"))
-        .filter(|value| !value.is_null_or_undefined())
-        .map(|value| v8::Global::new(scope, value));
-    let target_ranges = init
-        .and_then(|value| property(scope, value, "targetRanges"))
-        .map(|value| read_sequence(scope, value))
-        .unwrap_or_default();
+    let is_composing =
+        init.is_some_and(|value| super::event::boolean_property(scope, value, "isComposing"));
+    let target_ranges = match init.and_then(|value| property(scope, value, "targetRanges")) {
+        Some(value) if !value.is_undefined() => {
+            match crate::webidl::sequence_values(scope, value) {
+                Ok(values) => values,
+                Err(message) => {
+                    crate::webidl::throw_type_error(scope, &message);
+                    return;
+                }
+            }
+        }
+        _ => Vec::new(),
+    };
     scope
         .get_slot_mut::<InputEventStore>()
         .expect("InputEvent state")
@@ -196,27 +204,6 @@ pub(crate) fn property<'s>(
     name: &str,
 ) -> Option<v8::Local<'s, v8::Value>> {
     object.get(scope, v8::String::new(scope, name)?.into())
-}
-
-pub(crate) fn read_sequence(
-    scope: &v8::PinScope<'_, '_>,
-    value: v8::Local<'_, v8::Value>,
-) -> Vec<v8::Global<v8::Value>> {
-    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
-        return Vec::new();
-    };
-    let Some(length) =
-        property(scope, object, "length").and_then(|value| value.uint32_value(scope))
-    else {
-        return Vec::new();
-    };
-    let mut values = Vec::with_capacity(length as usize);
-    for index in 0..length {
-        if let Some(value) = object.get_index(scope, index) {
-            values.push(v8::Global::new(scope, value));
-        }
-    }
-    values
 }
 
 pub(crate) fn record(

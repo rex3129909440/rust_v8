@@ -69,6 +69,24 @@ pub(crate) fn construct(
         .insert(a.this().get_identity_hash().get(), err);
     r.set(a.this().into())
 }
+pub(crate) fn create<'s>(
+    s: &mut v8::PinScope<'s, '_>,
+    error: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure(s)?;
+    let prototype = crate::webidl::prototype(s, constructor)?;
+    let event = v8::Object::new(s);
+    if crate::webidl::set_platform_prototype(s, event, prototype.into()) != Some(true) {
+        return Err("cannot create SensorErrorEvent".to_owned());
+    }
+    super::event::attach(s, event, "error".to_owned(), false, false, false);
+    let stored_error = v8::Global::new(s, error);
+    s.get_slot_mut::<SensorErrorEventStore>()
+        .ok_or_else(|| "SensorErrorEvent state missing".to_owned())?
+        .errors
+        .insert(event.get_identity_hash().get(), stored_error);
+    Ok(event)
+}
 pub(crate) fn error(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,

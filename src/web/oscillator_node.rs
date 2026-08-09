@@ -12,6 +12,7 @@ struct OscillatorRecord {
     frequency: v8::Global<v8::Object>,
     detune: v8::Global<v8::Object>,
     periodic_wave: Option<v8::Global<v8::Object>>,
+    sample_rate: f64,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -149,6 +150,7 @@ fn attach(
                 frequency,
                 detune,
                 periodic_wave: None,
+                sample_rate,
             },
         );
     Ok(())
@@ -331,21 +333,20 @@ pub(crate) fn sample_at(
     let frequency =
         f64::from(super::audio_param::value_at(scope, frequency, time).unwrap_or(440.0));
     let detune = f64::from(super::audio_param::value_at(scope, detune, time).unwrap_or(0.0));
-    let phase =
-        std::f64::consts::TAU * frequency * 2.0_f64.powf(detune / 1_200.0) * (time - started_at);
+    let computed_frequency = frequency * 2.0_f64.powf(detune / 1_200.0);
+    let phase = std::f64::consts::TAU * computed_frequency * (time - started_at);
+    let frame = ((time - started_at) * record.sample_rate).round();
+    let rate_scale = 4_096.0_f32 / record.sample_rate as f32;
+    let phase_increment = computed_frequency as f32 * rate_scale;
+    let virtual_read_index = frame * f64::from(phase_increment);
     let sample = match record.oscillator_type.as_str() {
-        "square" => {
-            if phase.sin() >= 0.0 {
-                1.0
-            } else {
-                -1.0
-            }
-        }
+        "square" => band_limited_square(virtual_read_index, computed_frequency, record.sample_rate),
         "sawtooth" => {
-            let cycle = phase / std::f64::consts::TAU;
-            (2.0 * (cycle - (cycle + 0.5).floor())) as f32
+            band_limited_sawtooth(virtual_read_index, computed_frequency, record.sample_rate)
         }
-        "triangle" => (2.0 / std::f64::consts::PI * phase.sin().asin()) as f32,
+        "triangle" => {
+            band_limited_triangle(virtual_read_index, computed_frequency, record.sample_rate)
+        }
         "custom" => record
             .periodic_wave
             .as_ref()
@@ -356,4 +357,64 @@ pub(crate) fn sample_at(
         _ => phase.sin() as f32,
     };
     Some(sample)
+}
+
+fn harmonic_limit(frequency: f64, sample_rate: f64) -> usize {
+    let frequency = frequency.abs();
+    if !frequency.is_finite() || frequency <= f64::EPSILON {
+        return 0;
+    }
+    ((sample_rate * 0.5 / frequency).floor() as usize).min(4_096)
+}
+
+fn periodic_wave_interpolate(virtual_read_index: f64, sample: impl Fn(f64) -> f32) -> f32 {
+    const TABLE_SIZE: usize = 4_096;
+    let wrapped = virtual_read_index.rem_euclid(TABLE_SIZE as f64);
+    let first_index = wrapped as usize;
+    let second_index = (first_index + 1) & (TABLE_SIZE - 1);
+    let factor = wrapped as f32 - first_index as f32;
+    let first = sample(std::f64::consts::TAU * first_index as f64 / TABLE_SIZE as f64);
+    let second = sample(std::f64::consts::TAU * second_index as f64 / TABLE_SIZE as f64);
+    (1.0 - factor) * first + factor * second
+}
+
+fn band_limited_square(virtual_read_index: f64, frequency: f64, sample_rate: f64) -> f32 {
+    let limit = harmonic_limit(frequency, sample_rate);
+    periodic_wave_interpolate(virtual_read_index, |phase| {
+        let mut value = 0.0;
+        for harmonic in (1..=limit).step_by(2) {
+            value += (harmonic as f64 * phase).sin() / harmonic as f64;
+        }
+        (4.0 / std::f64::consts::PI * value) as f32
+    })
+}
+
+fn band_limited_sawtooth(virtual_read_index: f64, frequency: f64, sample_rate: f64) -> f32 {
+    let limit = harmonic_limit(frequency, sample_rate);
+    periodic_wave_interpolate(virtual_read_index, |phase| {
+        let mut value = 0.0;
+        for harmonic in 1..=limit {
+            let sign = if harmonic % 2 == 0 { -1.0 } else { 1.0 };
+            value += sign * (harmonic as f64 * phase).sin() / harmonic as f64;
+        }
+        (2.0 / std::f64::consts::PI * value) as f32
+    })
+}
+
+fn band_limited_triangle(virtual_read_index: f64, frequency: f64, sample_rate: f64) -> f32 {
+    let limit = harmonic_limit(frequency, sample_rate);
+    periodic_wave_interpolate(virtual_read_index, |phase| {
+        let mut value = 0.0;
+        for harmonic in (1..=limit).step_by(2) {
+            let sign = if harmonic % 4 == 1 { 1.0 } else { -1.0 };
+            let harmonic = harmonic as f64;
+            value += sign * (harmonic * phase).sin() / (harmonic * harmonic);
+        }
+        // Blink normalizes all band-limited tables with the peak measured
+        // from the full 4096-sample triangle table. Retain that normalization
+        // when a high pitch culls the upper partials.
+        const TRIANGLE_TABLE_NORMALIZATION: f64 = 1.000_197_787_918_47;
+        (TRIANGLE_TABLE_NORMALIZATION * 8.0 / (std::f64::consts::PI * std::f64::consts::PI) * value)
+            as f32
+    })
 }

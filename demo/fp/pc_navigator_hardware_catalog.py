@@ -32,9 +32,11 @@ PC_NAVIGATOR_HARDWARE_ROWS: tuple[tuple[str, int, int | float, int, int, int, tu
     ("pc_1c_1g_notouch_legacy", 1, 1, 0, 1, 3, ("legacy", "lowend", "notouch", "obsolete")),
     ("pc_2c_1g_notouch_legacy", 2, 1, 0, 1, 5, ("legacy", "lowend", "notouch", "obsolete")),
     ("pc_2c_2g_notouch_legacy", 2, 2, 0, 2, 14, ("legacy", "lowend", "notouch")),
+    ("pc_2c_3g_notouch_legacy", 2, 2, 0, 3, 5, ("legacy", "lowend", "notouch")),
     ("pc_2c_4g_notouch_legacy", 2, 4, 0, 4, 18, ("legacy", "lowend", "notouch")),
     ("pc_4c_2g_notouch_legacy", 4, 2, 0, 2, 12, ("legacy", "lowend", "notouch")),
     ("pc_4c_4g_notouch_lowend", 4, 4, 0, 4, 42, ("lowend", "office", "notouch")),
+    ("pc_4c_6g_notouch_legacy", 4, 4, 0, 6, 8, ("legacy", "office", "notouch")),
     ("pc_4c_8g_notouch_office", 4, 8, 0, 8, 78, ("office", "mainstream", "notouch")),
     ("pc_6c_4g_notouch_office", 6, 4, 0, 8, 20, ("office", "lowend", "notouch")),
     ("pc_6c_8g_notouch_office", 6, 8, 0, 8, 52, ("office", "mainstream", "notouch")),
@@ -229,7 +231,7 @@ _LOGICAL_PROCESSOR_WEIGHTS = {
     16: 20, 18: 2, 20: 8, 22: 1, 24: 10, 28: 1, 32: 3,
 }
 _PHYSICAL_MEMORY_WEIGHTS = {
-    1: 1, 2: 1, 4: 4, 8: 19, 12: 4, 16: 100, 24: 5,
+    1: 1, 2: 1, 3: 1, 4: 4, 6: 3, 8: 19, 12: 4, 16: 100, 24: 5,
     32: 90, 48: 3, 64: 10, 96: 2, 128: 2, 192: 1, 256: 1,
     512: 1, 1024: 1,
 }
@@ -430,6 +432,9 @@ def _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
     tier = str((gpu_profile or {}).get("tier", "") or "").strip().lower()
     architecture = str((gpu_profile or {}).get("architecture", "") or "").strip().lower()
     model = str((gpu_profile or {}).get("model", "") or "").strip().lower()
+    gpu_form_factor = str(
+        (gpu_profile or {}).get("formFactor", "mixed") or "mixed"
+    ).strip().lower()
 
     def profile_tags(profile: dict[str, object]) -> tuple[str, ...]:
         return tuple(str(item).lower() for item in profile.get("tags", ()))
@@ -444,7 +449,7 @@ def _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
         tags = profile_tags(profile)
         return any(value in tags for value in values)
 
-    portable_gpu = tier == "laptop" or any(
+    portable_gpu = gpu_form_factor == "portable" or tier == "laptop" or any(
         needle in model
         for needle in (
             "laptop gpu",
@@ -453,7 +458,7 @@ def _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
         )
     )
     recent_arches = {
-        "blackwell", "ada", "ampere", "turing", "rdna4", "rdna3.5",
+        "blackwell", "lovelace", "ada", "ampere", "turing", "rdna4", "rdna3.5",
         "rdna3", "rdna2", "xe2-battlemage", "xe2", "xe-lpg", "xe-hpg",
         "xe-lp", "gen-12", "gen-12lp", "gen-11", "adreno-x2", "adreno-x1",
     }
@@ -472,6 +477,9 @@ def _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
         return ()
 
     if portable_gpu:
+        mobile_discrete = tier == "laptop" or (
+            gpu_form_factor == "portable" and tier != "integrated"
+        )
         demanding_mobile = any(
             needle in model
             for needle in (
@@ -479,15 +487,42 @@ def _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
                 "3080", "3070", "2080", "quadro rtx", "rtx a",
             )
         )
-        minimum_cpu = 12 if demanding_mobile and architecture in recent_arches else 4
-        minimum_ram = 16 if demanding_mobile and architecture in recent_arches else 4
+        if architecture == "blackwell":
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 12, 32, 16, 96
+        elif architecture in {"lovelace", "ada"}:
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 8, 32, 16, 96
+        elif architecture == "ampere":
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 6, 32, 8, 64
+        elif architecture == "turing":
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 4, 24, 8, 64
+        elif architecture == "pascal":
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 4, 16, 8, 64
+        elif architecture in {"maxwell", "kepler"}:
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 2, 16, 4, 32
+        elif architecture in {"xe2", "xe-lpg"}:
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 8, 24, 8, 64
+        elif architecture in {"gen-12", "gen-12lp"}:
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 4, 20, 8, 64
+        elif architecture == "gen-11":
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 4, 16, 8, 32
+        elif architecture in {"gen-9", "gen-9.5"}:
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 4, 16, 4, 32
+        else:
+            minimum_cpu, maximum_cpu, minimum_ram, maximum_ram = 4, 32, 4, 96
+        if demanding_mobile and architecture in recent_arches:
+            minimum_cpu = max(minimum_cpu, 12)
+            minimum_ram = max(minimum_ram, 16)
         return tuple(
             profile
             for profile in profiles
-            if has_any(profile, {"laptop", "touch", "convertible", "surface"})
+            if (
+                "laptop" in profile_tags(profile)
+                if mobile_discrete
+                else has_any(profile, {"laptop", "touch", "convertible", "surface"})
+            )
             and not has_any(profile, {"arm64", "workstation", "obsolete"})
-            and minimum_cpu <= concurrency(profile) <= 32
-            and minimum_ram <= physical_ram(profile) <= 96
+            and minimum_cpu <= concurrency(profile) <= maximum_cpu
+            and minimum_ram <= physical_ram(profile) <= maximum_ram
         )
 
     modern_integrated_arches = {
@@ -528,6 +563,10 @@ def _compute_compatible_pc_navigator_hardware_profiles_for_gpu(
             profile
             for profile in profiles
             if not has_any(profile, {"legacy", "lowend", "workstation", "obsolete", "arm64"})
+            and (
+                gpu_form_factor != "desktop"
+                or not has_any(profile, {"laptop", "touch", "convertible", "surface"})
+            )
             and 6 <= concurrency(profile) <= 32
             and 8 <= physical_ram(profile) <= 64
         )

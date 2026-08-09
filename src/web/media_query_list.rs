@@ -88,7 +88,9 @@ pub(crate) fn create<'s>(
         return Err("cannot create MediaQueryList".to_owned());
     }
     super::event_target::attach(scope, object);
-    let preferences = crate::fingerprint::edge(scope).media_preferences.clone();
+    let fingerprint = crate::fingerprint::edge(scope);
+    let preferences = fingerprint.media_preferences.clone();
+    let device_posture_folded = fingerprint.hardware_devices.device_posture == "folded";
     let matches = evaluate_query(
         &media,
         MediaEnvironment {
@@ -98,6 +100,7 @@ pub(crate) fn create<'s>(
             device_height,
             device_pixel_ratio,
             color_depth,
+            device_posture_folded,
         },
         &preferences,
     );
@@ -263,19 +266,18 @@ struct MediaEnvironment {
     device_height: f64,
     device_pixel_ratio: f64,
     color_depth: u32,
+    device_posture_folded: bool,
 }
 
 impl MediaEnvironment {
     fn query_viewport(self) -> (f64, f64) {
-        if self.viewport_width > 0.0 && self.viewport_height > 0.0 {
-            (self.viewport_width, self.viewport_height)
-        } else {
-            // The sandbox can intentionally expose a zero-sized Window while
-            // still modelling a rendered Edge surface.  Media queries need a
-            // usable CSS viewport in that state, so they fall back to the
-            // configured screen instead of producing an indeterminate range.
-            (self.device_width, self.device_height)
-        }
+        // `width`, `height`, `aspect-ratio`, orientation and viewport units
+        // describe the viewport even when it is zero-sized.  Falling back to
+        // the physical screen here lets min/max-width probes recover
+        // `screen.width` from an intentionally hidden Window.  The deprecated
+        // device-* features have their own explicit device_width/device_height
+        // path below.
+        (self.viewport_width, self.viewport_height)
     }
 }
 
@@ -403,19 +405,22 @@ fn evaluate_boolean_feature(
     environment: MediaEnvironment,
     preferences: &crate::MediaPreferencesFingerprint,
 ) -> bool {
+    if matches!(name, "aspect-ratio" | "device-aspect-ratio") {
+        return numeric_feature_value(name, environment, preferences).is_some();
+    }
     if let Some(value) = numeric_feature_value(name, environment, preferences) {
         return value.is_finite() && value > 0.0;
     }
     match name {
         "orientation" => {
             let (width, height) = environment.query_viewport();
-            width > 0.0 && height > 0.0
+            width.is_finite() && height.is_finite()
         }
         "prefers-color-scheme" => true,
         "prefers-contrast" => preferences.contrast != "no-preference",
         "prefers-reduced-motion" => preferences.reduced_motion,
         "prefers-reduced-data" => preferences.reduced_data,
-        "prefers-reduced-transparency" => false,
+        "prefers-reduced-transparency" => preferences.reduced_transparency,
         "forced-colors" => preferences.forced_colors,
         "inverted-colors" => preferences.inverted_colors,
         "pointer" => preferences.pointer != "none",
@@ -448,11 +453,11 @@ fn evaluate_discrete_feature(
         "orientation" => match value {
             "landscape" => {
                 let (width, height) = environment.query_viewport();
-                width > 0.0 && height > 0.0 && width > height
+                width.is_finite() && height.is_finite() && width > height
             }
             "portrait" => {
                 let (width, height) = environment.query_viewport();
-                width > 0.0 && height > 0.0 && height >= width
+                width.is_finite() && height.is_finite() && height >= width
             }
             _ => false,
         },
@@ -468,7 +473,11 @@ fn evaluate_discrete_feature(
             "no-preference" => !preferences.reduced_data,
             _ => false,
         },
-        "prefers-reduced-transparency" => value == "no-preference",
+        "prefers-reduced-transparency" => match value {
+            "reduce" => preferences.reduced_transparency,
+            "no-preference" => !preferences.reduced_transparency,
+            _ => false,
+        },
         "forced-colors" => match value {
             "active" => preferences.forced_colors,
             "none" => !preferences.forced_colors,
@@ -485,13 +494,18 @@ fn evaluate_discrete_feature(
         "hover" => value == preferences.hover,
         "any-hover" => value == preferences.any_hover,
         "display-mode" => value == preferences.display_mode,
-        "dynamic-range" | "video-dynamic-range" => value == preferences.dynamic_range,
+        "dynamic-range" => value == preferences.dynamic_range,
+        "video-dynamic-range" => value == preferences.video_dynamic_range,
         "scripting" => value == preferences.scripting,
         "update" => value == "fast",
         "overflow-block" => value == "scroll",
-        "overflow-inline" => value == "none",
+        "overflow-inline" => value == "scroll",
         "environment-blending" => value == "opaque",
-        "device-posture" => value == "continuous",
+        "device-posture" => match value {
+            "folded" => environment.device_posture_folded,
+            "continuous" => !environment.device_posture_folded,
+            _ => false,
+        },
         "shape" => value == "rect",
         "nav-controls" => value == "none",
         "scan" => false,
@@ -663,8 +677,13 @@ fn compare(left: f64, right: f64, comparison: Comparison) -> bool {
 }
 
 fn ratio(numerator: f64, denominator: f64) -> Option<f64> {
-    (numerator.is_finite() && denominator.is_finite() && numerator > 0.0 && denominator > 0.0)
-        .then_some(numerator / denominator)
+    if !numerator.is_finite() || !denominator.is_finite() || numerator < 0.0 || denominator < 0.0 {
+        return None;
+    }
+    if denominator == 0.0 {
+        return Some(if numerator == 0.0 { 0.0 } else { f64::INFINITY });
+    }
+    Some(numerator / denominator)
 }
 
 fn parse_ratio(value: &str) -> Option<f64> {
@@ -672,7 +691,10 @@ fn parse_ratio(value: &str) -> Option<f64> {
     if let Some((numerator, denominator)) = value.split_once('/') {
         let numerator = parse_nonnegative_number(numerator)?;
         let denominator = parse_nonnegative_number(denominator)?;
-        return (denominator > 0.0).then_some(numerator / denominator);
+        if denominator == 0.0 {
+            return (numerator > 0.0).then_some(f64::INFINITY);
+        }
+        return Some(numerator / denominator);
     }
     parse_nonnegative_number(value)
 }
@@ -829,6 +851,12 @@ fn gamut_at_least(configured: &str, requested: &str) -> bool {
 }
 
 fn approximately_equal(left: f64, right: f64) -> bool {
+    if left == right {
+        return true;
+    }
+    if !left.is_finite() || !right.is_finite() {
+        return false;
+    }
     (left - right).abs() <= f64::EPSILON * left.abs().max(right.abs()).max(1.0) * 16.0
 }
 
@@ -844,6 +872,7 @@ mod tests {
             device_height: 982.0,
             device_pixel_ratio: 2.0,
             color_depth: 30,
+            device_posture_folded: false,
         }
     }
 
@@ -905,26 +934,86 @@ mod tests {
     }
 
     #[test]
-    fn zero_exposed_viewport_uses_the_configured_screen_for_media_queries() {
+    fn zero_sized_viewport_does_not_fall_back_to_the_configured_screen() {
         let preferences = crate::MediaPreferencesFingerprint::default();
         let environment = MediaEnvironment {
             viewport_width: 0.0,
             viewport_height: 0.0,
             ..environment()
         };
-        assert!(evaluate_query(
+        assert!(evaluate_query("(width: 0px)", environment, &preferences));
+        assert!(evaluate_query("(height: 0px)", environment, &preferences));
+        assert!(!evaluate_query("(width)", environment, &preferences));
+        assert!(!evaluate_query("(height)", environment, &preferences));
+        assert!(!evaluate_query(
+            "(min-width: 1px)",
+            environment,
+            &preferences
+        ));
+        assert!(!evaluate_query(
             "(width: 1512px) and (height: 982px)",
             environment,
             &preferences
         ));
         assert!(evaluate_query(
-            "(aspect-ratio: 1512/982)",
+            "(aspect-ratio: 0/1)",
+            environment,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(orientation: portrait)",
+            environment,
+            &preferences
+        ));
+        assert!(!evaluate_query(
+            "(orientation: landscape)",
             environment,
             &preferences
         ));
         assert!(evaluate_query(
             "(device-height: 982px)",
             environment,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(device-width: 1512px)",
+            environment,
+            &preferences
+        ));
+    }
+
+    #[test]
+    fn zero_axis_aspect_ratios_follow_edge_ratio_semantics() {
+        let preferences = crate::MediaPreferencesFingerprint::default();
+        let horizontal = MediaEnvironment {
+            viewport_width: 100.0,
+            viewport_height: 0.0,
+            ..environment()
+        };
+        assert!(evaluate_query(
+            "(aspect-ratio: 1/0)",
+            horizontal,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(orientation: landscape)",
+            horizontal,
+            &preferences
+        ));
+
+        let vertical = MediaEnvironment {
+            viewport_width: 0.0,
+            viewport_height: 100.0,
+            ..environment()
+        };
+        assert!(evaluate_query(
+            "(aspect-ratio: 0/1)",
+            vertical,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(orientation: portrait)",
+            vertical,
             &preferences
         ));
     }

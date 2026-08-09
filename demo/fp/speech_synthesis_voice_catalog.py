@@ -1080,24 +1080,6 @@ for index, voice in enumerate(BROWSER_CAPTURED_VOICES):
     )
 
 
-def _generic_voice_for_locale(locale: str) -> dict[str, object] | None:
-    # Some country-language pairs have no widely shipped Windows voice. For
-    # those cases we still keep the Web Speech shape and requested BCP-47 lang
-    # instead of leaking an unrelated en-US/es-ES voice into the profile.
-    normalized = normalize_locale(locale)
-    if not normalized:
-        return None
-    base = base_language(normalized)
-    language = LANGUAGE_DISPLAY_BY_BASE.get(base, base.upper())
-    region = region_from_locale(normalized)
-    region_name = REGION_DISPLAY_BY_CODE.get(region, region)
-    if region_name:
-        name = f"Microsoft {language} - {language} ({region_name})"
-    else:
-        name = f"Microsoft {language} - {language}"
-    return _voice_obj(name, normalized)
-
-
 def _templates_for_locale(locale: str) -> tuple[dict[str, object], ...]:
     locale = normalize_locale(locale)
     captured = BROWSER_CAPTURED_VOICE_TEMPLATES_BY_LOCALE.get(locale)
@@ -1107,7 +1089,11 @@ def _templates_for_locale(locale: str) -> tuple[dict[str, object], ...]:
     if exact:
         return exact
     fallback_locale = FALLBACK_LOCALE_BY_BASE.get(base_language(locale))
-    if fallback_locale and locale == base_language(locale):
+    # A requested regional language does not imply that Windows ships a voice
+    # for that exact region.  Fall back to a real voice for the same language
+    # and retain that voice's actual BCP-47 tag; never manufacture a Microsoft
+    # voice name from the requested country.
+    if fallback_locale:
         return (
             BROWSER_CAPTURED_VOICE_TEMPLATES_BY_LOCALE.get(fallback_locale)
             or VOICE_TEMPLATES_BY_LOCALE.get(fallback_locale, ())
@@ -1126,7 +1112,7 @@ def _choose_voice(rng: random.Random, locale: str) -> dict[str, object] | None:
         if requested_locale and requested_locale in VOICE_TEMPLATES_BY_LOCALE:
             output["lang"] = requested_locale
         return output
-    return _generic_voice_for_locale(requested_locale)
+    return None
 
 
 def _dedupe_voices(voices: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -1247,7 +1233,10 @@ def choose_speech_synthesis_voice_profile(
             voices.append(voice)
 
     # Many desktop installs expose at least one US English voice as a fallback.
-    if len(voices) < 2 and base_language(locale_candidates[0]) != "en":
+    # This also covers an English regional locale for which Windows has no
+    # dedicated voice.  The selected row is still an actual captured/cataloged
+    # voice rather than a generated placeholder.
+    if len(voices) < 2:
         fallback = _choose_voice(rng, "en-US")
         if fallback:
             fallback["default"] = False

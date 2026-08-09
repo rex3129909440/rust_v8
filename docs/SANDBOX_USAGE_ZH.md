@@ -385,6 +385,8 @@ DOM 布局使用最终 Window 视口。例如 input 的 `width:50vw`、`height:1
 
 `hardware_concurrency` 和 `device_memory_gb` 是用户指纹字段。沙箱不再对它们施加浏览器档位白名单或人为范围：`hardware_concurrency` 通过 C ABI 的 `u32` 字段传递，`device_memory_gb` 通过 `f64` 字段传递。调用方应根据自己的目标证据填写；preset 中的值只是默认值，不是全局限制。
 
+随机 profile 生成器会额外保证浏览器版本一致性，但不会把两者混为一谈：`hardwareConcurrency` 按所选真实硬件行可覆盖 32、64、96、128、192 等逻辑处理器数；Edge/Chromium 147–150 的桌面 `deviceMemory` 只生成 2/4/8/16/32，Android 只生成 1/2/4/8。这个桶规则仅用于随机生成器，不会限制用户显式传入的自定义值。
+
 ### 10.2 可配置类别
 
 | 类别 | Python 类型示例 |
@@ -402,6 +404,7 @@ DOM 布局使用最终 Window 视口。例如 input 的 `width:50vw`、`height:1
 | Permissions | `PermissionsProfile` |
 | Battery/Geolocation | `BatteryProfile`、`GeolocationProfile` |
 | CSS media preferences | `MediaPreferencesProfile` |
+| 初始 Document/BODY | `DocumentProfile` |
 | Plugins/MIME types | `PluginListProfile` |
 | Gamepad/USB/HID/Serial | `HardwareDevicesProfile` |
 | Bluetooth/MIDI/Keyboard | `HardwareDevicesProfile` |
@@ -410,7 +413,64 @@ DOM 布局使用最终 Window 视口。例如 input 的 `width:50vw`、`height:1
 
 指纹在 Worker 创建时固定。不要试图在同一个 V8 环境中热替换完整指纹；需要每次执行不同指纹时使用 `EdgeSandboxPool`，Pool 会按配置选择、复用或重建 Worker。
 
-### 10.3 Mac Edge 150 preset
+### 10.3 国家随机 profile 与资源加载上下文
+
+`create_country_profile_details()` 除了返回强类型指纹，还会返回与该 seed 绑定的 `resource_load`。它只随机生成 URL-safe 的不透明资源标识；页面的 HTTPS origin、目录和版本仍由调用方传入，因此同一次执行中的页面地址、脚本地址和版本不会互相冲突。
+
+```python
+from edge_sandbox import create_country_profile_details
+from edge_sandbox.edge_runtime_options import EdgeRunOptions, PageInit
+from edge_sandbox.run_sandbox import EdgeSandbox
+
+fingerprint = create_country_profile_details("US", seed=803431)
+page_url = "https://page.example.test/a/b/fp?x-kpsdk-v=j-1.2.594"
+script_url = fingerprint.resource_load.script_url(
+    page_url,
+    "j-1.2.594",
+)
+
+options = EdgeRunOptions(
+    page=PageInit(url=page_url, html="<!doctype html><body></body>")
+)
+with EdgeSandbox(profile=fingerprint.profile, options=options) as sandbox:
+    value = sandbox.evaluate(
+        "performance.getEntriesByType('resource').at(-1).name",
+        source_url=script_url,
+    )
+    assert value == script_url
+```
+
+同一个 seed 会生成相同资源上下文，不同 seed 会生成不同上下文。`script_url()` 保证脚本与页面同源、继承页面目录、去除 fragment，并把调用方提供的版本写入资源查询参数。
+
+随机 profile 同时生成相互关联的 `navigator.connection`、显示/无障碍媒体偏好、设备姿态和 `navigator.userActivation` 状态。RTT 使用 50ms 桶并覆盖 0–600ms，downlink 使用 0.05Mbps 桶；`effectiveType` 由同一组 RTT/downlink 推导，`saveData` 与 `(prefers-reduced-data: reduce)` 保持一致。桌面姿态固定为 `continuous`，只有目录中标记为可折叠的 Android 设备才可能生成 `folded`。
+
+不加载 page HTML、只调用一次 `evaluate()` 时，国家随机 profile 默认固定初始 BODY 为5个子元素、`clientHeight=18`，因此以下调用不需要额外传入这两个参数：
+
+```python
+from edge_sandbox import create_country_profile_details
+from edge_sandbox.run_sandbox import EdgeSandbox
+
+fingerprint = create_country_profile_details(
+    "US",
+    seed=803431,
+)
+
+with EdgeSandbox(profile=fingerprint.profile) as sandbox:
+    value = sandbox.evaluate(
+        "[document.body.childElementCount, "
+        "document.body.children[0].tagName, "
+        "document.body.clientHeight].join('|')"
+    )
+    assert value == "5|DIV|18"
+```
+
+`body_child_element_count=N` 会在脚本运行前创建 N 个真实的占位 `DIV`，不是伪造 getter 返回值；DOM 查询、`children`、`document.all` 和节点遍历都能观察到它们。`body_client_height` 只覆盖 BODY 的初始几何读数。国家随机 profile 未传参数时使用固定的 `5/18`；显式传入其他数值可覆盖，显式传入 `None` 可恢复正常 HTML/CSS 布局计算。如果同时加载 page HTML，沙箱只在现有 BODY 元素数量不足目标值时补足节点，不会删除页面原有节点。
+
+当 `evaluate(..., source_url=...)` 收到 HTTPS 脚本 URL 时，沙箱会在脚本开始执行前加入一条 `PerformanceResourceTiming`：`entryType="resource"`、`initiatorType="script"`、`responseStatus=200`、`contentType="text/javascript"`。Rust 会对本次传入的完整 UTF-8 源码执行真实 HTTP 内容编码，`decodedBodySize` 是源码字节数，`encodedBodySize` 是压缩结果字节数，`transferSize=encodedBodySize+300`。未传入编码时默认使用 `zstd`，可通过 `PerformanceProfile.evaluated_script_content_encoding` 切换为 `gzip`、`deflate`、`br`、`zstd` 或空字符串（不压缩）。因此脚本内部第一次调用 `performance.getEntriesByType("resource")` 就能看到该地址和大小；`source_url` 同时继续作为异常堆栈的 ScriptOrigin。
+
+如果调用方已经从真实页面响应中取得完整脚本 URL，可以直接把真实 URL 作为 `source_url`；随机资源上下文用于离线测试或需要每个一次性 Worker 独立资源身份的场景，不能用固定 `xxx` 占位地址代替完整 URL。
+
+### 10.4 Mac Edge 150 preset
 
 Apple Silicon Mac 预设位于 `examples/mac_edge_profile.py`：
 
@@ -450,6 +510,143 @@ profile = mac_edge_150_profile(
 
 完整 Mac 字体、GPU、媒体与权限说明见 `docs/MAC_EDGE_PROFILE_ZH.md`。
 
+### 10.5 `performance.memory` / `console.memory`
+
+这三个字段不能作为彼此独立的随机数：
+
+- `usedJSHeapSize` 是 V8 当前存活对象大小。
+- `totalJSHeapSize` 对应 V8 已提交的物理堆内存。
+- `jsHeapSizeLimit` 是 V8 为当前 isolate 保留的最大堆容量；始终满足 `used <= total <= limit`。
+
+国家随机 profile 使用项目内置 V8 `15.0.245.2` 的资源约束算法计算精确上限。桌面 64 位默认值如下：
+
+| 物理内存 | `jsHeapSizeLimit` |
+| ---: | ---: |
+| 1 GiB | 562036736 |
+| 2 GiB | 1124073472 |
+| 3 GiB | 1711276032 |
+| 4 GiB | 2248146944 |
+| 6 GiB | 3321888768 |
+| 8 GiB 及以上 | 4395630592 |
+
+Android 使用 V8 独立的 1:4 old-generation 比例和低端 young-generation 配置，不能复用桌面表：
+
+| Android 物理内存 | `jsHeapSizeLimit` |
+| ---: | ---: |
+| 2 GiB | 549453824 |
+| 3 GiB | 830472192 |
+| 4 GiB | 1098907648 |
+| 6 GiB | 1635778560 |
+| 8 GiB | 2248146944 |
+| 12 GiB | 3321888768 |
+| 16 GiB 及以上 | 4395630592 |
+
+Blink 在非精确模式下还会把三个字段映射到 100 个指数桶：首桶为 `10000000`，末桶为 `3760000000`，并缓存 20 分钟。站点隔离的 HTTPS 页面使用精确模式，缓存窗口为 50ms。随机 profile 默认模拟后者；`demo.fp.v8_memory_profile_catalog.BLINK_MEMORY_BUCKETS` 保留了全部 100 个非精确模式结果，`quantize_blink_memory_size()` 可用于明确需要非精确页面的测试。
+
+`totalJSHeapSize` 与 `usedJSHeapSize` 由页面代码、DOM/API 初始化、资源加载、分配和 GC 决定，不存在按 RAM/CPU/GPU 枚举的有限“设备表”。随机生成器因此只抽取完整的实测快照对，不再使用“随机总量 × 随机百分比”。当前目录包含：
+
+- Windows Edge/Chromium 148 页面样本：`98833423 / 62981207`。
+- Mac M5 Edge 150 完整采集：`189287527 / 180511835`。
+- 内置 V8 15.0.245.2 在 0、1000、5000、10000、25000、50000、100000、250000、500000 个保留对象负载下直接读取的 9 组 `HeapStatistics`，范围为 `8388608 / 7002608` 到 `74006528 / 56718360`。
+
+这些负载快照不是根据比例插值出来的值。Windows 候选池为 10 组、macOS 为 10 组、Android 为 9 组；浏览器页面样本只进入对应操作系统，嵌入 V8 的 9 组进入三个平台。完整逐行数值和来源见 `demo/fp/v8_memory_profile_catalog.py`。
+
+每次 `create_country_profile_details()` 的 `memory_snapshot_profile_id` 会注明采用哪一条证据；同一一次性 Worker 内保持一份一致快照，`performance.memory` 和 `console.memory` 使用相同三元组。用户也可以通过 `MemoryProfile` 显式覆盖六个 typed 字段，但必须保持大小关系；这些字段仍通过独立 C ABI 数字 setter 传入，不使用 JSON 字符串。
+
+### 10.6 `performance.getEntries()` typed profile
+
+`PerformanceProfile` 可以按顺序配置根 Window 的完整初始 Performance Timeline。配置通过二进制 C ABI 结构传入，不使用 JSON 字符串。`entries=None` 保留页面、replay 和 `evaluate(source_url=...)` 自动生成的记录；显式传入 tuple（包括空 tuple）则使用用户给出的精确初始记录，并抑制自动 navigation、visibility、resource 和 paint 重复项。脚本之后主动调用 `performance.mark()` / `measure()` 仍会正常追加记录。
+
+自动 `evaluate` 资源的编码可独立配置：
+
+```python
+from dataclasses import replace
+from examples.edge_profile import PerformanceProfile
+
+profile = replace(
+    profile,
+    performance=PerformanceProfile(
+        entries=None,
+        evaluated_script_content_encoding="br",
+    ),
+)
+```
+
+gzip/deflate 使用 `flate2`，br 使用 `brotli`，zstd 使用 `zstd`；只有创建自动资源记录且编码非空时才执行压缩。`network_replay` 若带 `Content-Encoding` 响应头，也会对 replay 中的解码后 body 使用对应算法计算两种大小。精确复现某个远端响应时，服务器的压缩级别、字典、分块和版本同样会影响结果；已有 `PerformanceEntryProfile` 的显式 byte-size 字段仍是精确回填真实网络证据的入口。
+
+```python
+from dataclasses import replace
+
+from edge_sandbox import (
+    EdgeSandbox,
+    PerformanceEntryProfile,
+    PerformanceProfile,
+    create_country_profile_details,
+)
+from edge_sandbox.edge_runtime_options import EdgeRunOptions, PageInit
+
+page_url = "https://example.test/page"
+script_url = "https://example.test/ips.js?v=1"
+javascript = "JSON.stringify(performance.getEntries().map(e => e.toJSON()))"
+
+navigation = PerformanceEntryProfile(
+    name=page_url,
+    entry_type="navigation",
+    duration=3368.9,
+    initiator_type="navigation",
+    next_hop_protocol="h2",
+    content_type="text/html",
+    content_encoding="zstd",
+    encoded_body_size=587,
+    decoded_body_size=847,
+    # 省略时由 Rust 按 encodedBodySize + 300 得到 887。
+    transfer_size=None,
+    response_status=429,
+    response_end=425.9,
+    dom_complete=3368.9,
+    load_event_end=3368.9,
+)
+visible = PerformanceEntryProfile(
+    name="visible",
+    entry_type="visibility-state",
+)
+resource = PerformanceEntryProfile(
+    name=script_url,
+    entry_type="resource",
+    start_time=431.3,
+    duration=2121.2,
+    initiator_type="script",
+    next_hop_protocol="h2",
+    content_type="text/javascript",
+    content_encoding="zstd",
+    encoded_body_size=291181,
+    decoded_body_size=609863,
+    transfer_size=None,  # 自动得到 291481。
+    response_status=200,
+    response_end=2552.5,
+)
+
+base = create_country_profile_details("US", seed=101).profile
+profile = replace(
+    base,
+    performance=PerformanceProfile(entries=(navigation, visible, resource)),
+)
+options = EdgeRunOptions(
+    page=PageInit(url=page_url, html="<!doctype html><body></body>")
+)
+
+with EdgeSandbox(profile=profile, options=options) as sandbox:
+    print(sandbox.evaluate(javascript, source_url=script_url))
+```
+
+支持的单一 `content_encoding` 为 `""`、`"gzip"`、`"deflate"`、`"br"`、`"zstd"`。Chromium 对这些格式执行内容解码，但不会重新决定服务器的压缩结果：
+
+- `encoded_body_size` 是线上响应在 Content-Encoding 解码前的 body 字节数；
+- `decoded_body_size` 是解码后的 HTML/JavaScript 字节数；
+- 普通非缓存同源响应的 `transfer_size` 为 `encoded_body_size + 300`；显式值优先，可表达缓存、重新验证或真实采集值；
+- 压缩条目必须提供真实 encoded 和 decoded 大小，沙箱不会用任意压缩级别伪造外部服务器结果；
+- `navigation.name` 应与 `PageInit.url` 一致，脚本 `resource.name` 应与 `evaluate(..., source_url=...)` 一致。
+
 ## 11. 时间、随机数和确定性执行
 
 ```python
@@ -474,6 +671,13 @@ options = EdgeRunOptions(
 - `max_task_turns`：一次 evaluate 最多执行的任务轮次，范围 1–65536。
 
 Date、`performance.now()`、Event timestamp、timer、requestAnimationFrame 和 Worker 时钟使用关联模型。不要用宿主 Python 的耗时直接推断 JavaScript 内部的确定性时钟值。
+
+普通运行模式下，`performance.now()` 使用不受系统墙钟调整影响的 Rust 单调时钟。当前沙箱公开的 `crossOriginIsolated` 为 `false`，因此按 Chromium 的非隔离路径收敛到 100 微秒网格：同一 sandbox 内使用一个秘密阈值，对当前单调时刻与当前 realm 的时间原点分别做确定性抖动收敛后再相减。它不是每次调用添加随机数，也不是简单执行 `floor(relativeTime / 0.1) * 0.1`。
+
+- 根 Window、每个 iframe 和每个 Worker 都有自己的时间原点；同一 realm 内结果保证不倒退。
+- `Event.timeStamp`、RAF callback timestamp、Gamepad/Sensor 时间戳复用同一 realm 的 Performance 时钟。
+- `Date.now()` 是整数毫秒墙钟；`performance.timeOrigin + performance.now()` 与它近似对应，但不承诺逐次严格相等。
+- 确定性模式仍按 `clock_step_ms` 推进任务时间；相同配置会得到相同的时间收敛阈值。
 
 ## 12. 资源限制和超时
 

@@ -8,7 +8,7 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     isolate.set_slot(PerformanceGlobalStore::default());
 }
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
-    let performance = super::performance::create(scope)?;
+    let performance = super::performance::create(scope, true)?;
     let realm_id = crate::webidl::realm_id(scope);
     let stored = v8::Global::new(scope, performance);
     scope

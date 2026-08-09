@@ -66,6 +66,7 @@ class ProfileField(IntEnum):
     CSS_INPUT_SUBMIT_RESET = 92
     CSS_INPUT_FILE = 93
     CSS_INPUT_TEXT = 94
+    PERFORMANCE_EVALUATED_SCRIPT_CONTENT_ENCODING = 95
 
     PERMISSION_ACCELEROMETER = 800
     PERMISSION_BACKGROUND_SYNC = 801
@@ -96,6 +97,7 @@ class ProfileField(IntEnum):
     MEDIA_PREFERENCE_DISPLAY_MODE = 827
     MEDIA_PREFERENCE_DYNAMIC_RANGE = 828
     MEDIA_PREFERENCE_SCRIPTING = 829
+    MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE = 830
 
     NAVIGATOR_LANGUAGES = 100
     UA_FORM_FACTORS = 101
@@ -162,6 +164,7 @@ class ProfileField(IntEnum):
     SCREEN_ORIENTATION_ANGLE = 238
     WEBGPU_SUBGROUP_MIN_SIZE = 239
     WEBGPU_SUBGROUP_MAX_SIZE = 240
+    DOCUMENT_BODY_CHILD_ELEMENT_COUNT = 241
 
     TIME_ZONE_OFFSET_MINUTES = 300
     SCREEN_WIDTH = 301
@@ -297,6 +300,7 @@ class ProfileField(IntEnum):
     VISUAL_VIEWPORT_PAGE_TOP = 560
     VISUAL_VIEWPORT_SCALE = 561
     WEBGL2_MAX_TEXTURE_LOD_BIAS = 562
+    DOCUMENT_BODY_CLIENT_HEIGHT = 563
 
     AUDIO_CHANNEL_NOISE_AMPLITUDE = 600
     AUDIO_FREQUENCY_NOISE_AMPLITUDE = 601
@@ -329,6 +333,11 @@ class ProfileField(IntEnum):
     MIDI_SYSEX_ENABLED = 724
     WEBGPU_DEVELOPER_FEATURES = 725
     WEBGPU_IS_FALLBACK_ADAPTER = 726
+    SENSORS_AVAILABLE = 727
+    WEBGPU_AVAILABLE = 728
+    MEDIA_PREFERENCE_REDUCED_TRANSPARENCY = 729
+    NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE = 730
+    NAVIGATOR_USER_ACTIVATION_IS_ACTIVE = 731
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,6 +397,8 @@ class NavigatorProfile:
     webdriver: bool | None = None
     pdf_viewer_enabled: bool | None = None
     do_not_track: str | None = None
+    user_activation_has_been_active: bool | None = None
+    user_activation_is_active: bool | None = None
     user_agent_data: UserAgentDataProfile | None = None
     network: NetworkProfile | None = None
 
@@ -520,6 +531,7 @@ class WebGlProfile:
 
 @dataclass(frozen=True, slots=True)
 class WebGpuProfile:
+    available: bool | None = None
     vendor: str | None = None
     architecture: str | None = None
     device: str | None = None
@@ -645,6 +657,19 @@ class CssProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentProfile:
+    """Initial document state used before standalone ``evaluate`` runs.
+
+    ``body_child_element_count`` is materialized as real placeholder ``div``
+    nodes. ``body_client_height`` overrides only the initial BODY clientHeight;
+    omitted values preserve normal HTML/CSS-derived behavior.
+    """
+
+    body_child_element_count: int | None = None
+    body_client_height: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class MediaDeviceProfile:
     device_id: str
     kind: str
@@ -738,6 +763,7 @@ class MediaPreferencesProfile:
     color_scheme: str | None = None
     contrast: str | None = None
     reduced_motion: bool | None = None
+    reduced_transparency: bool | None = None
     reduced_data: bool | None = None
     forced_colors: bool | None = None
     inverted_colors: bool | None = None
@@ -749,6 +775,7 @@ class MediaPreferencesProfile:
     any_hover: str | None = None
     display_mode: str | None = None
     dynamic_range: str | None = None
+    video_dynamic_range: str | None = None
     scripting: str | None = None
 
 
@@ -853,6 +880,7 @@ class HardwareDevicesProfile:
 
 @dataclass(frozen=True, slots=True)
 class SensorsProfile:
+    available: bool | None = None
     accelerometer: tuple[float, float, float] | None = None
     gravity: tuple[float, float, float] | None = None
     linear_acceleration: tuple[float, float, float] | None = None
@@ -879,12 +907,87 @@ class XrProfile:
 
 @dataclass(frozen=True, slots=True)
 class MemoryProfile:
+    """One coherent V8 heap snapshot exposed by performance/console.memory.
+
+    Keep ``used <= total <= limit`` for each surface.  ``total`` and ``used``
+    are transient allocation statistics, not physical-RAM identifiers.
+    """
+
     performance_js_heap_size_limit: int | None = None
     performance_total_js_heap_size: int | None = None
     performance_used_js_heap_size: int | None = None
     console_js_heap_size_limit: int | None = None
     console_total_js_heap_size: int | None = None
     console_used_js_heap_size: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PerformanceEntryProfile:
+    """One ordered Performance Timeline entry supplied without JSON."""
+
+    name: str
+    entry_type: str
+    start_time: float = 0.0
+    duration: float = 0.0
+
+    initiator_type: str = ""
+    delivery_type: str = ""
+    next_hop_protocol: str = ""
+    render_blocking_status: str = "non-blocking"
+    content_type: str = ""
+    content_encoding: str = ""
+    worker_start: float = 0.0
+    worker_router_evaluation_start: float = 0.0
+    worker_cache_lookup_start: float = 0.0
+    worker_matched_source_type: str = ""
+    worker_final_source_type: str = ""
+    redirect_start: float = 0.0
+    redirect_end: float = 0.0
+    fetch_start: float = 0.0
+    domain_lookup_start: float = 0.0
+    domain_lookup_end: float = 0.0
+    connect_start: float = 0.0
+    secure_connection_start: float = 0.0
+    connect_end: float = 0.0
+    request_start: float = 0.0
+    response_start: float = 0.0
+    first_interim_response_start: float = 0.0
+    final_response_headers_start: float = 0.0
+    response_end: float = 0.0
+    transfer_size: int | None = None
+    encoded_body_size: int | None = None
+    decoded_body_size: int | None = None
+    response_status: int | None = None
+
+    unload_event_start: float = 0.0
+    unload_event_end: float = 0.0
+    dom_interactive: float = 0.0
+    dom_content_loaded_event_start: float = 0.0
+    dom_content_loaded_event_end: float = 0.0
+    dom_complete: float = 0.0
+    load_event_start: float = 0.0
+    load_event_end: float = 0.0
+    navigation_type: str = "navigate"
+    redirect_count: int = 0
+    critical_ch_restart: float = 0.0
+    activation_start: float = 0.0
+
+    paint_time: float = 0.0
+    presentation_time: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class PerformanceProfile:
+    """Performance Timeline inputs and evaluated-script transfer encoding.
+
+    ``evaluated_script_content_encoding`` controls the automatic resource
+    entry created by ``evaluate(..., source_url=...)``. Rust compresses the
+    actual UTF-8 source to derive encodedBodySize; an empty string represents
+    an uncompressed response.
+    """
+
+    entries: tuple[PerformanceEntryProfile, ...] | None = None
+    evaluated_script_content_encoding: str = "zstd"
 
 
 @dataclass(frozen=True, slots=True)
@@ -904,6 +1007,7 @@ class EdgeProfile:
     speech: SpeechProfile | None = None
     fonts: FontProfile | None = None
     css: CssProfile | None = None
+    document: DocumentProfile | None = None
     media: MediaProfile | None = None
     permissions: PermissionsProfile | None = None
     battery: BatteryProfile | None = None
@@ -915,3 +1019,4 @@ class EdgeProfile:
     timing: TimingProfile | None = None
     xr: XrProfile | None = None
     memory: MemoryProfile | None = None
+    performance: PerformanceProfile | None = None

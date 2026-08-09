@@ -77,6 +77,11 @@ def build_android_device_profile(row: tuple[object, ...]) -> dict[str, object]:
         "maxTouchPoints": 5,
         "weight": weight,
         "tags": tags,
+        # Chromium's Android WebGPU blocklist explicitly enables ARM,
+        # Qualcomm and Intel adapters. Other vendors remain in the inventory
+        # but are not used by the generated profile until adapter-unavailable
+        # semantics are representable by the sandbox.
+        "webgpuSupported": str(driver_vendor) in {"ARM", "Qualcomm", "Intel"},
         "gpu": {
             "driverVendor": driver_vendor,
             "vendor": driver_vendor.lower().replace(" technologies", ""),
@@ -122,14 +127,58 @@ ANDROID_DEVICE_PROFILES: tuple[dict[str, object], ...] = tuple(
 )
 
 
-def get_android_device_profiles(model: str | None = None) -> tuple[dict[str, object], ...]:
+# Conservative official-update ranges used by the generated WebGPU-capable
+# Android branch. The lower bound is at least Android 12 because Chromium's
+# default Android WebGPU rollout requires Android 12+; the upper bound avoids
+# pairing a current UA with hardware whose vendor support ended years earlier.
+ANDROID_WEBGPU_OS_RANGE_BY_PROFILE_ID: dict[str, tuple[int, int]] = {
+    "android_pixel_9_pro_fold": (14, 17),
+    "android_pixel_8": (14, 17),
+    "android_pixel_7": (13, 17),
+    "android_pixel_6": (12, 17),
+    "android_pixel_5": (12, 14),
+    "android_pixel_3": (12, 12),
+    "android_galaxy_z_fold_6": (14, 17),
+    "android_galaxy_z_fold_5": (13, 17),
+    "android_galaxy_s24_ultra": (14, 17),
+    "android_galaxy_a55": (14, 17),
+    "android_galaxy_s20_qualcomm": (12, 13),
+    "android_galaxy_s20_exynos": (12, 13),
+    "android_galaxy_a71": (12, 13),
+    "android_galaxy_a51": (12, 13),
+    "android_surface_duo": (12, 12),
+    "android_moto_g_power_2022": (12, 12),
+}
+
+
+def get_android_device_profiles(
+    model: str | None = None,
+    android_version: int | None = None,
+) -> tuple[dict[str, object], ...]:
     model_key = str(model or "").strip().lower()
-    if not model_key or model_key in {"k", "android"}:
-        return ANDROID_DEVICE_PROFILES
-    return tuple(
-        profile for profile in ANDROID_DEVICE_PROFILES
-        if str(profile.get("model", "")).lower() == model_key
-    )
+    output = ANDROID_DEVICE_PROFILES
+    if model_key and model_key not in {"k", "android"}:
+        output = tuple(
+            profile for profile in output
+            if str(profile.get("model", "")).lower() == model_key
+        )
+    if android_version is not None:
+        requested = int(android_version)
+        output = tuple(
+            profile
+            for profile in output
+            if (
+                str(profile.get("id", "")) in ANDROID_WEBGPU_OS_RANGE_BY_PROFILE_ID
+                and ANDROID_WEBGPU_OS_RANGE_BY_PROFILE_ID[
+                    str(profile.get("id", ""))
+                ][0]
+                <= requested
+                <= ANDROID_WEBGPU_OS_RANGE_BY_PROFILE_ID[
+                    str(profile.get("id", ""))
+                ][1]
+            )
+        )
+    return output
 
 
 def choose_android_device_profile(

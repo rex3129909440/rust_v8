@@ -13,6 +13,8 @@ observation with the selected typed profile.
 
 from __future__ import annotations
 
+import base64
+import math
 import random
 import re
 import secrets
@@ -21,6 +23,7 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Sequence
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
@@ -76,7 +79,10 @@ from ua import (  # noqa: E402
     generate_ua_data_from_ua,
     get_base_platform,
 )
-from screen_profile_catalog import choose_pc_screen_profile_for_hardware  # noqa: E402
+from screen_profile_catalog import (  # noqa: E402
+    choose_pc_screen_profile_for_hardware,
+    materialize_pc_screen_profile_for_windows,
+)
 from speech_synthesis_voice_catalog import (  # noqa: E402
     choose_speech_synthesis_voice_profile,
 )
@@ -88,10 +94,20 @@ from windows_webgl_gpu_catalog import (  # noqa: E402
     get_windows_webgl_gpu_candidates,
 )
 from windows_font_profile_catalog import build_windows_font_profile  # noqa: E402
+from windows_css_profile_catalog import (  # noqa: E402
+    chromium148_zh_cn_dpr1_css_overrides,
+    chromium150_windows_css_overrides,
+)
+from v8_memory_profile_catalog import (  # noqa: E402
+    choose_v8_memory_snapshot,
+    is_known_memory_snapshot,
+    v8_150_precise_heap_size_limit,
+)
 
 if SOURCE_CHECKOUT:
     from examples.edge_profile import (  # type: ignore
         BatteryProfile,
+        DocumentProfile,
         EdgeProfile,
         FontMetricProfile,
         FontProfile,
@@ -105,6 +121,7 @@ if SOURCE_CHECKOUT:
         RtcCodecProfile,
         RtcHeaderExtensionProfile,
         ScreenProfile,
+        SensorsProfile,
         SpeechProfile,
         SpeechVoiceProfile,
         TimingProfile,
@@ -115,6 +132,7 @@ if SOURCE_CHECKOUT:
 else:  # Installed wheel.
     from edge_sandbox.edge_profile import (
         BatteryProfile,
+        DocumentProfile,
         EdgeProfile,
         FontMetricProfile,
         FontProfile,
@@ -128,6 +146,7 @@ else:  # Installed wheel.
         RtcCodecProfile,
         RtcHeaderExtensionProfile,
         ScreenProfile,
+        SensorsProfile,
         SpeechProfile,
         SpeechVoiceProfile,
         TimingProfile,
@@ -278,6 +297,38 @@ _ANDROID_COMPRESSED_TEXTURE_FORMATS = (
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceLoadProfile:
+    """Per-evaluation script resource context linked to a random profile.
+
+    Only opaque URL-safe request tokens are randomized.  The caller supplies
+    the actual HTTPS page URL and version so the generated script URL stays
+    same-origin, inherits the page directory, and uses the same version value.
+    """
+
+    script_name: str
+    uid_token: str
+    integrity_token: str
+
+    def script_url(self, page_url: str, x_kpsdk_v: str) -> str:
+        parsed = urlsplit(page_url)
+        if parsed.scheme.lower() != "https" or not parsed.netloc:
+            raise ValueError("page_url must be an absolute HTTPS URL")
+        version = str(x_kpsdk_v).strip()
+        if not version:
+            raise ValueError("x_kpsdk_v must not be blank")
+        directory = parsed.path.rsplit("/", 1)[0]
+        path = f"{directory}/{self.script_name}"
+        query = urlencode(
+            (
+                ("KP_UIDz", self.uid_token),
+                ("x-kpsdk-v", version),
+                ("x-kpsdk-im", self.integrity_token),
+            )
+        )
+        return urlunsplit((parsed.scheme, parsed.netloc, path, query, ""))
+
+
+@dataclass(frozen=True, slots=True)
 class RandomFingerprint:
     """One typed profile plus the catalog choices used to construct it."""
 
@@ -297,10 +348,12 @@ class RandomFingerprint:
     cpu_logical_processors: int
     device_memory_gb: float
     physical_memory_gb: int
+    memory_snapshot_profile_id: str
     gpu_model: str
     gpu_core_count: int | None
     gpu_core_unit: str
     geolocation_reference: tuple[float, float]
+    resource_load: ResourceLoadProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,6 +362,266 @@ class FingerprintVerification:
 
     fingerprint: RandomFingerprint
     observations: tuple[tuple[str, str], ...]
+
+
+def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
+    """Return cross-surface consistency errors for one generated profile.
+
+    This audit is deliberately independent from any site or workload.  It
+    checks only relationships that must agree inside the browser profile.
+    ``get_random_fp_details`` runs it before returning, so callers cannot
+    accidentally receive a profile that violates these invariants.
+    """
+
+    issues: list[str] = []
+    profile = fingerprint.profile
+    navigator = profile.navigator
+    ua_data = navigator.user_agent_data
+    screen = profile.screen
+    window = profile.window
+    storage = profile.storage
+    webgpu = profile.webgpu
+
+    ua_match = re.search(r"\b(?:Chrome|Chromium)/(\d+)", navigator.user_agent)
+    chromium_major = int(ua_match.group(1)) if ua_match else 0
+    if chromium_major < 140 or chromium_major > 150:
+        issues.append("navigator.userAgent has no supported Chromium major")
+
+    edge_match = re.search(r"\b(?:Edg|EdgA)/(\d+)", navigator.user_agent)
+    if fingerprint.browser == "edge":
+        if edge_match is None:
+            issues.append("Edge profile has no Edg/EdgA token")
+        elif int(edge_match.group(1)) != chromium_major:
+            issues.append("Chrome and Edge UA majors differ")
+    elif edge_match is not None:
+        issues.append("Chrome profile unexpectedly contains an Edge token")
+
+    expected_platforms = {
+        "windows": ("Win32", "Windows", False),
+        "macos": ("MacIntel", "macOS", False),
+        "android": ("Linux armv8l", "Android", True),
+    }
+    expected = expected_platforms.get(fingerprint.platform)
+    if expected is None:
+        issues.append(f"unsupported profile platform {fingerprint.platform!r}")
+    else:
+        js_platform, ch_platform, mobile = expected
+        if navigator.platform != js_platform:
+            issues.append("navigator.platform conflicts with selected platform")
+        if ua_data.platform != ch_platform:
+            issues.append("UA-CH platform conflicts with selected platform")
+        if bool(ua_data.mobile) != mobile:
+            issues.append("UA-CH mobile flag conflicts with selected platform")
+
+    if not navigator.languages or navigator.languages[0] != navigator.language:
+        issues.append("navigator.language is not the first languages entry")
+    if navigator.hardware_concurrency != fingerprint.cpu_logical_processors:
+        issues.append("hardwareConcurrency conflicts with selection metadata")
+    if float(navigator.device_memory_gb) != float(fingerprint.device_memory_gb):
+        issues.append("deviceMemory conflicts with selection metadata")
+    if fingerprint.physical_memory_gb <= 0:
+        issues.append("physical memory must be positive")
+
+    network = navigator.network
+    network_rtt = int(network.rtt) if network.rtt is not None else -1
+    if not 0 <= network_rtt <= 600 or network_rtt % 50:
+        issues.append("NetworkInformation.rtt is outside Chromium's generated buckets")
+    downlink = float(network.downlink or 0)
+    if not 0.05 <= downlink <= 10.0 or abs(downlink * 20 - round(downlink * 20)) > 1e-9:
+        issues.append("NetworkInformation.downlink is outside Chromium's generated buckets")
+    if network_rtt >= 2_000 or downlink <= 0.05:
+        expected_effective_type = "slow-2g"
+    elif network_rtt >= 1_400 or downlink <= 0.07:
+        expected_effective_type = "2g"
+    elif network_rtt >= 270 or downlink <= 0.7:
+        expected_effective_type = "3g"
+    else:
+        expected_effective_type = "4g"
+    if network.effective_type != expected_effective_type:
+        issues.append("effectiveType conflicts with RTT/downlink")
+    if profile.media_preferences.reduced_data != bool(network.save_data):
+        issues.append("prefers-reduced-data conflicts with NetworkInformation.saveData")
+    if navigator.user_activation_is_active and not navigator.user_activation_has_been_active:
+        issues.append("userActivation.isActive requires hasBeenActive")
+    posture = str(profile.hardware_devices.device_posture or "")
+    if posture not in {"continuous", "folded"}:
+        issues.append("device posture is invalid")
+    if posture == "folded" and fingerprint.platform != "android":
+        issues.append("non-foldable desktop profile uses folded posture")
+    if profile.media_preferences.forced_colors and profile.media_preferences.contrast == "no-preference":
+        issues.append("forced colors conflict with prefers-contrast")
+
+    allowed_device_memory = (
+        {1.0, 2.0, 4.0, 8.0}
+        if fingerprint.platform == "android"
+        else ({2.0, 4.0, 8.0, 16.0, 32.0} if chromium_major >= 147 else {2.0, 4.0, 8.0})
+    )
+    if float(navigator.device_memory_gb) not in allowed_device_memory:
+        issues.append("deviceMemory is not a Chromium bucket for this platform/version")
+
+    if not screen or not window:
+        issues.append("screen/window profile is missing")
+    else:
+        width = float(screen.width or 0)
+        height = float(screen.height or 0)
+        avail_width = float(screen.avail_width or 0)
+        avail_height = float(screen.avail_height or 0)
+        avail_left = float(screen.avail_left or 0)
+        avail_top = float(screen.avail_top or 0)
+        if width <= 0 or height <= 0:
+            issues.append("physical screen dimensions must be positive")
+        if avail_width <= 0 or avail_height <= 0:
+            issues.append("available screen dimensions must be positive")
+        if avail_left + avail_width > width or avail_top + avail_height > height:
+            issues.append("available screen rectangle exceeds physical screen")
+        if screen.color_depth != screen.pixel_depth:
+            issues.append("screen colorDepth and pixelDepth differ")
+        if float(screen.device_pixel_ratio or 0) <= 0:
+            issues.append("devicePixelRatio must be positive")
+        if float(screen.viewport_width or 0) != 0.0 or float(screen.viewport_height or 0) != 0.0:
+            issues.append("configured hidden viewport must keep screen viewport at zero")
+        if float(window.inner_width or 0) != 0.0 or float(window.inner_height or 0) != 0.0:
+            issues.append("configured hidden viewport must keep window.inner* at zero")
+        if float(window.outer_width or 0) != float(screen.outer_width or 0):
+            issues.append("window.outerWidth conflicts with screen outer width")
+        if fingerprint.platform == "windows":
+            try:
+                platform_major = int(
+                    str(ua_data.platform_version).split(".", 1)[0]
+                )
+            except (TypeError, ValueError):
+                issues.append("Windows UA-CH platform version is invalid")
+            else:
+                expected_taskbar_height = 48 if platform_major >= 13 else 40
+                observed_taskbar_height = int(height) - int(avail_height)
+                if observed_taskbar_height != expected_taskbar_height:
+                    issues.append(
+                        "Windows work area conflicts with UA-CH platform version"
+                    )
+        if float(window.outer_height or 0) != float(screen.outer_height or 0):
+            issues.append("window.outerHeight conflicts with screen outer height")
+
+    if storage is None or storage.quota_bytes is None or storage.usage_bytes is None:
+        issues.append("storage estimate is incomplete")
+    else:
+        available = int(storage.quota_bytes) - int(storage.usage_bytes)
+        if int(storage.usage_bytes) < 0 or available < 0:
+            issues.append("storage usage/quota relationship is invalid")
+        if available != 10 * 1024**3:
+            issues.append("storage estimate does not follow Chromium static quota")
+
+    memory = profile.memory
+    expected_heap_limit = _v8_heap_limit_for_profile(
+        fingerprint.physical_memory_gb,
+        fingerprint.platform,
+    )
+    if memory.performance_js_heap_size_limit != expected_heap_limit:
+        issues.append("performance.memory heap limit conflicts with physical memory")
+    if memory.console_js_heap_size_limit != memory.performance_js_heap_size_limit:
+        issues.append("console.memory and performance.memory heap limits differ")
+    if not (
+        0 <= int(memory.performance_used_js_heap_size or -1)
+        <= int(memory.performance_total_js_heap_size or -1)
+        <= int(memory.performance_js_heap_size_limit or -1)
+    ):
+        issues.append("performance.memory used/total/limit relationship is invalid")
+    if (
+        memory.console_used_js_heap_size != memory.performance_used_js_heap_size
+        or memory.console_total_js_heap_size != memory.performance_total_js_heap_size
+    ):
+        issues.append("console.memory conflicts with performance.memory")
+    if not is_known_memory_snapshot(
+        fingerprint.memory_snapshot_profile_id,
+        fingerprint.platform,
+        int(memory.performance_total_js_heap_size or 0),
+        int(memory.performance_used_js_heap_size or 0),
+    ):
+        issues.append("performance.memory snapshot is not an evidence catalog row")
+
+    if fingerprint.platform in {"windows", "macos", "android"}:
+        if not str(webgpu.device or ""):
+            issues.append("internal WebGPU adapter identity is missing")
+        if webgpu.developer_features is not False:
+            issues.append("WebGPU developer features would expose private adapter fields")
+
+    if fingerprint.platform == "macos":
+        if profile.sensors.available is not False:
+            issues.append("Mac profile exposes unavailable sensor readings")
+        if profile.permissions.speaker_selection != "unsupported":
+            issues.append("Mac speaker-selection permission should be unsupported")
+        if profile.permissions.top_level_storage_access != "invalid-origin":
+            issues.append("Mac top-level-storage-access permission should reject invalid origin")
+        # Selection metadata is encoded in the generated hardware id because
+        # Screen itself intentionally describes the active display, which may
+        # be external.
+        if "_host_imac" in fingerprint.navigator_hardware_profile_id.lower():
+            battery = profile.battery
+            if not (
+                battery.charging is True
+                and battery.charging_time == 0.0
+                and battery.level == 1.0
+            ):
+                issues.append("iMac host is paired with a portable battery state")
+        hardware_id = fingerprint.navigator_hardware_profile_id.lower()
+        expected_camera = (
+            any(marker in hardware_id for marker in ("_host_air", "_host_pro"))
+            or "_host_imac" in hardware_id
+            or fingerprint.screen_profile_id
+            == "mac_studio_display_2560x1440_2x"
+        )
+        has_camera = any(
+            device.kind == "videoinput" for device in profile.media.devices
+        )
+        if has_camera != expected_camera:
+            issues.append("Mac camera inventory conflicts with host/display class")
+    elif fingerprint.platform == "windows":
+        try:
+            windows_platform_major = int(str(ua_data.platform_version).split(".", 1)[0])
+        except ValueError:
+            windows_platform_major = -1
+        if windows_platform_major >= 13 and fingerprint.physical_memory_gb < 4:
+            issues.append("Windows 11 profile is below its 4 GiB memory minimum")
+        if windows_platform_major not in {10, 15}:
+            issues.append("generated Windows platformVersion is unsupported")
+        expected_font_prefix = (
+            "windows-11-" if windows_platform_major >= 13 else "windows-10-"
+        )
+        if not fingerprint.font_profile_id.startswith(expected_font_prefix):
+            issues.append("Windows font inventory conflicts with platformVersion")
+        if profile.sensors.available is not bool(navigator.max_touch_points):
+            issues.append("Windows sensor availability conflicts with device form factor")
+
+    headers = dict(fingerprint.request_headers)
+    if headers.get("user-agent") != navigator.user_agent:
+        issues.append("request User-Agent conflicts with navigator.userAgent")
+    if headers.get("sec-ch-ua-platform") != f'"{ua_data.platform}"':
+        issues.append("request sec-ch-ua-platform conflicts with UA-CH")
+    if headers.get("sec-ch-ua-arch") != f'"{ua_data.architecture}"':
+        issues.append("request sec-ch-ua-arch conflicts with UA-CH")
+    if headers.get("sec-ch-ua-bitness") != f'"{ua_data.bitness}"':
+        issues.append("request sec-ch-ua-bitness conflicts with UA-CH")
+    if headers.get("sec-ch-ua-platform-version") != f'"{ua_data.platform_version}"':
+        issues.append("request platform-version conflicts with UA-CH")
+    expected_mobile_header = "?1" if ua_data.mobile else "?0"
+    if headers.get("sec-ch-ua-mobile") != expected_mobile_header:
+        issues.append("request sec-ch-ua-mobile conflicts with UA-CH")
+    if not headers.get("accept-language", "").startswith(navigator.language):
+        issues.append("Accept-Language conflicts with navigator.language")
+
+    if not profile.fonts.families:
+        issues.append("font family profile is empty")
+    latitude, longitude = fingerprint.geolocation_reference
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        issues.append("geolocation reference is outside valid bounds")
+    return tuple(issues)
+
+
+def validate_random_fp(fingerprint: RandomFingerprint) -> None:
+    """Raise when a generated profile violates a cross-surface invariant."""
+
+    issues = audit_random_fp(fingerprint)
+    if issues:
+        raise RuntimeError("inconsistent generated fingerprint: " + "; ".join(issues))
 
 
 def _require_country_code(country_code: str) -> str:
@@ -326,6 +639,21 @@ def _resolve_seed(seed: int | None) -> int:
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer or None")
     return seed & ((1 << 63) - 1)
+
+
+def _random_urlsafe_token(rng: random.Random, byte_length: int) -> str:
+    payload = bytes(rng.getrandbits(8) for _ in range(byte_length))
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _build_resource_load_profile(rng: random.Random) -> ResourceLoadProfile:
+    return ResourceLoadProfile(
+        script_name="ips.js",
+        # 64 and 32 random bytes produce stable 86/43-character URL-safe
+        # opaque identifiers without placeholder text or invalid URL bytes.
+        uid_token=_random_urlsafe_token(rng, 64),
+        integrity_token=_random_urlsafe_token(rng, 32),
+    )
 
 
 def _resolve_user_agent(
@@ -364,6 +692,8 @@ def _resolve_user_agent(
         edge_match = re.search(r"\b(?:Edg|EdgA)/(\d+)(?:\.\d+){0,3}", ua_string)
         if edge_match is None or not 140 <= int(edge_match.group(1)) <= 150:
             raise ValueError("user_agent Edge major must be between 140 and 150")
+        if int(edge_match.group(1)) != chromium_major:
+            raise ValueError("user_agent Chrome and Edge majors must match")
 
     ua_options: dict[str, object] = {}
     if platform_name == "macos":
@@ -571,6 +901,25 @@ def _mac_css_for_screen(css: object, selected: dict[str, object]) -> object:
             "background-color:rgb(255, 255, 255)"
         ),
     )
+
+
+def _windows_css_for_screen_and_locale(
+    css: object,
+    selected: dict[str, object],
+    locale: str,
+    chromium_major: int,
+) -> object:
+    """Apply observed Windows Chromium control geometry coherently."""
+
+    window = selected.get("window", {})
+    if not isinstance(window, dict):
+        window = {}
+    dpr = float(window.get("devicePixelRatio", 1.0))
+    if chromium_major == 148 and locale.lower() == "zh-cn" and abs(dpr - 1.0) < 1e-9:
+        overrides = chromium148_zh_cn_dpr1_css_overrides()
+    else:
+        overrides = chromium150_windows_css_overrides(dpr, locale)
+    return replace(css, **overrides)
 
 
 def _speech_profile(selected: dict[str, object]) -> SpeechProfile:
@@ -805,7 +1154,10 @@ def _battery_profile(
     )
 
 
-def _media_devices(platform_name: str) -> tuple[MediaDeviceProfile, ...]:
+def _media_devices(
+    platform_name: str,
+    hardware: dict[str, object],
+) -> tuple[MediaDeviceProfile, ...]:
     """Return the pre-permission device shape without invented identifiers.
 
     Chromium does not expose stable labels or hardware identifiers before the
@@ -817,7 +1169,12 @@ def _media_devices(platform_name: str) -> tuple[MediaDeviceProfile, ...]:
     devices = [
         MediaDeviceProfile("", "audioinput", "", ""),
     ]
-    if platform_name in {"macos", "android"}:
+    hardware_tags = {str(item).lower() for item in hardware.get("tags", ())}
+    portable_windows = platform_name == "windows" and bool(
+        hardware_tags & {"laptop", "touch", "convertible", "surface"}
+    )
+    mac_camera = platform_name == "macos" and "camera" in hardware_tags
+    if platform_name == "android" or portable_windows or mac_camera:
         devices.append(MediaDeviceProfile("", "videoinput", "", ""))
     devices.append(MediaDeviceProfile("", "audiooutput", "", ""))
     return tuple(devices)
@@ -827,36 +1184,43 @@ def _storage_values(
     rng: random.Random,
     physical_memory_gb: int,
 ) -> tuple[int, int]:
-    """Choose a deterministic, internally valid browser storage estimate."""
+    """Choose Chromium's static per-origin storage estimate.
 
-    # Disk capacity cannot be inferred from navigator.deviceMemory.  Use a
-    # broad desktop quota pool and only bias larger-memory machines away from
-    # the smallest entry.  Both values are real byte counts, not sentinel
-    # placeholders.
-    quota_choices = [64, 128, 256, 512]
-    if physical_memory_gb >= 32:
-        quota_choices = quota_choices[1:]
-    quota_bytes = rng.choice(quota_choices) * 1024**3
-    usage_bytes = rng.randrange(24, 768) * 1024**2
-    return quota_bytes, min(usage_bytes, quota_bytes // 64)
+    The exposed quota is not the host disk capacity and is not correlated
+    with physical RAM.  Current Chromium's static quota policy exposes the
+    origin's usage plus 10 GiB of available space.  Keep usage variable while
+    preserving that relationship exactly.
+    """
+
+    del physical_memory_gb
+    usage_bytes = rng.randrange(16 * 1024**2, 192 * 1024**2)
+    quota_bytes = usage_bytes + 10 * 1024**3
+    return quota_bytes, usage_bytes
 
 
 def _network_profile(seed: int, platform_name: str) -> NetworkProfile:
     """Choose a browser-observed NetworkInformation snapshot.
 
     Network quality is independent from CPU/GPU selection. A separate random
-    stream keeps the existing hardware catalog sequence stable. The pool
-    contains Edge 150 observations from Windows and macOS plus the project's
-    original Windows baseline.
+    stream keeps the existing hardware catalog sequence stable. Values follow
+    Chromium's observable 50 ms / 50 Kbit/s quantization: RTT covers 0..600 ms
+    and downlink covers 0.05..10.00 Mbit/s. The effective type is derived from
+    the same RTT/downlink pair instead of being selected independently.
     """
 
-    observations = (
-        ("4g", 100, 1.7, False),
-        ("4g", 100, 10.0, False),
-        ("4g", 50, 10.0, False),
-    )
-    index = (seed ^ 0x4E4554574F524B) % len(observations)
-    effective_type, rtt, downlink, save_data = observations[index]
+    del platform_name
+    rng = random.Random(seed ^ 0x4E4554574F524B)
+    rtt = rng.randint(0, 12) * 50
+    downlink = rng.randint(1, 200) / 20.0
+    if rtt >= 2_000 or downlink <= 0.05:
+        effective_type = "slow-2g"
+    elif rtt >= 1_400 or downlink <= 0.07:
+        effective_type = "2g"
+    elif rtt >= 270 or downlink <= 0.7:
+        effective_type = "3g"
+    else:
+        effective_type = "4g"
+    save_data = rng.random() < 0.12
     return NetworkProfile(
         effective_type=effective_type,
         rtt=rtt,
@@ -865,13 +1229,110 @@ def _network_profile(seed: int, platform_name: str) -> NetworkProfile:
     )
 
 
-def _memory_values(rng: random.Random) -> tuple[int, int, int]:
-    """Create a coherent performance.memory snapshot for one evaluation."""
+def _user_activation_values(seed: int) -> tuple[bool, bool]:
+    """Choose one valid UserActivation state for this isolated evaluation."""
 
-    heap_limit = 4_294_705_152
-    total_heap = rng.randrange(12, 49) * 1024**2
-    used_heap = int(total_heap * rng.uniform(0.58, 0.91))
-    return heap_limit, total_heap, used_heap
+    value = random.Random(seed ^ 0x5553455241435449).random()
+    if value < 0.12:
+        return True, True
+    if value < 0.32:
+        return True, False
+    return False, False
+
+
+def _media_preference_values(
+    seed: int,
+    platform_name: str,
+    hardware: dict[str, object],
+    screen: dict[str, object],
+    network: NetworkProfile,
+) -> tuple[dict[str, object], str]:
+    """Build one internally consistent display/accessibility preference set."""
+
+    rng = random.Random(seed ^ 0x4D45444941505245)
+    tags = {str(item).lower() for item in hardware.get("tags", ())}
+    forced_colors = platform_name == "windows" and rng.random() < 0.04
+    if forced_colors:
+        contrast = "custom"
+    else:
+        contrast = rng.choices(
+            ("no-preference", "more", "less"),
+            weights=(94, 4, 2),
+            k=1,
+        )[0]
+    if platform_name == "android":
+        pointer = "coarse"
+        hover = "none"
+    else:
+        pointer = "fine"
+        hover = "hover"
+    color_gamut = (
+        str(screen.get("colorGamut", "p3"))
+        if platform_name == "macos"
+        else "srgb"
+    )
+    dynamic_range = (
+        str(screen.get("dynamicRange", "standard"))
+        if platform_name == "macos"
+        else "standard"
+    )
+    posture = (
+        "folded"
+        if platform_name == "android" and "foldable" in tags and rng.random() < 0.30
+        else "continuous"
+    )
+    return (
+        {
+            "color_scheme": rng.choices(("light", "dark"), weights=(68, 32), k=1)[0],
+            "contrast": contrast,
+            "reduced_motion": rng.random() < 0.10,
+            "reduced_transparency": rng.random() < (0.06 if platform_name == "macos" else 0.025),
+            "reduced_data": bool(network.save_data),
+            "forced_colors": forced_colors,
+            "inverted_colors": rng.random() < 0.01,
+            "monochrome_bits": 0,
+            "color_gamut": color_gamut,
+            "pointer": pointer,
+            "any_pointer": pointer,
+            "hover": hover,
+            "any_hover": hover,
+            "display_mode": "browser",
+            "dynamic_range": dynamic_range,
+            "video_dynamic_range": dynamic_range,
+            "scripting": "enabled",
+        },
+        posture,
+    )
+
+
+def _v8_heap_limit_for_profile(
+    physical_memory_gb: int,
+    platform_name: str,
+) -> int:
+    return v8_150_precise_heap_size_limit(
+        physical_memory_gb,
+        platform_name,
+    )
+
+
+def _memory_values(
+    rng: random.Random,
+    physical_memory_gb: int,
+    platform_name: str,
+) -> tuple[str, int, int, int]:
+    """Select one indivisible, evidence-backed V8 memory snapshot."""
+
+    heap_limit = _v8_heap_limit_for_profile(
+        physical_memory_gb,
+        platform_name,
+    )
+    snapshot = choose_v8_memory_snapshot(rng, platform_name)
+    return (
+        snapshot.id,
+        heap_limit,
+        snapshot.total_js_heap_size,
+        snapshot.used_js_heap_size,
+    )
 
 
 def _chromium_device_memory_gb(
@@ -897,6 +1358,41 @@ def _chromium_device_memory_gb(
     if chromium_major >= 147:
         return max(2.0, min(bucket, 32.0))
     return min(bucket, 8.0)
+
+
+def _windows_platform_version(
+    rng: random.Random,
+    gpu: dict[str, object],
+    hardware: dict[str, object],
+) -> str:
+    """Choose a Windows UA-CH version compatible with selected hardware."""
+
+    tags = {str(item).lower() for item in hardware.get("tags", ())}
+    physical_memory_gb = int(hardware.get("physicalRamHintGb", 0))
+    architecture = str(gpu.get("architecture", "")).lower()
+    model = str(gpu.get("model", "")).lower()
+    if "arm64" in tags:
+        return "15.0.0"
+    if (
+        physical_memory_gb < 4
+        or str(gpu.get("tier", "")).lower() == "legacy"
+        or tags & {"legacy", "obsolete", "lowend", "netbook"}
+        or architecture == "gen-9"
+        or any(
+            name in model
+            for name in (
+                "iris(r) plus graphics 640",
+                "iris(r) plus graphics 650",
+                "hd graphics 620",
+                "hd graphics 615",
+            )
+        )
+    ):
+        return "10.0.0"
+    # Both supported Windows generations can use the frozen NT 10.0 UA.
+    # Modern installations are weighted toward Windows 11 without deleting
+    # the still-real Windows 10 population.
+    return rng.choices(("15.0.0", "10.0.0"), weights=(4, 1), k=1)[0]
 
 
 def _chromium_mobile_device_memory_gb(
@@ -936,6 +1432,8 @@ def get_random_fp_details(
     time_zone: str | None = None,
     include_virtual_gpu: bool = False,
     include_external_mac_screen: bool = False,
+    body_child_element_count: int | None = 5,
+    body_client_height: float | None = 18.0,
 ) -> RandomFingerprint:
     """Return a country-aware Windows, macOS, or Android Mobile profile.
 
@@ -947,6 +1445,10 @@ def get_random_fp_details(
     selects a complete phone record with linked SoC GPU, RAM, screen, DPR,
     Android model, and AOSP fonts. If omitted, the fixed Chrome 150 Windows UA
     is used.
+    ``body_child_element_count`` materializes that many real placeholder DIV
+    nodes in the default BODY used by standalone ``evaluate``. An explicit
+    ``body_client_height`` controls the matching BODY geometry observation.
+    Both default to the fixed workload profile values 5 and 18.
     ``seed`` makes every catalog choice deterministic.  Chromium's frozen
     low-entropy Mac UA retains ``MacIntel`` while UA-CH is set to the selected
     Apple-silicon hardware architecture.
@@ -956,6 +1458,19 @@ def get_random_fp_details(
     resolved_seed = _resolve_seed(seed)
     rng = random.Random(resolved_seed)
     user_agent_profile, platform_name = _resolve_user_agent(user_agent)
+    if body_child_element_count is not None:
+        if (
+            isinstance(body_child_element_count, bool)
+            or not isinstance(body_child_element_count, int)
+            or not 0 <= body_child_element_count <= 10_000
+        ):
+            raise ValueError("body_child_element_count must be an integer from 0 to 10000")
+    if body_client_height is not None:
+        if isinstance(body_client_height, bool):
+            raise ValueError("body_client_height must be a finite non-negative number")
+        body_client_height = float(body_client_height)
+        if not math.isfinite(body_client_height) or not 0 <= body_client_height <= 10_000_000:
+            raise ValueError("body_client_height must be a finite non-negative number")
 
     languages = tuple(choose_language_list(rng, country, include_secondary=True))
     if not languages:
@@ -975,6 +1490,7 @@ def get_random_fp_details(
         )
 
     selected_fonts: dict[str, object]
+    windows_platform_version: str | None = None
     if platform_name == "windows":
         ua_tags = {
             str(item).lower() for item in user_agent_profile.get("tags", ())
@@ -1006,7 +1522,19 @@ def get_random_fp_details(
             tag="windows",
             gpu_profile=gpu,
         )
-        selected_fonts = build_windows_font_profile(languages[0])
+        windows_platform_version = _windows_platform_version(
+            rng,
+            gpu,
+            hardware,
+        )
+        screen = materialize_pc_screen_profile_for_windows(
+            screen,
+            windows_platform_version,
+        )
+        selected_fonts = build_windows_font_profile(
+            languages[0],
+            windows_platform_version,
+        )
     elif platform_name == "macos":
         gpu = choose_mac_gpu_candidate(
             rng,
@@ -1015,14 +1543,33 @@ def get_random_fp_details(
         memory_choices = tuple(int(item) for item in gpu.get("memoryChoicesGb", ()))
         if not memory_choices:
             raise ValueError("selected Mac GPU has no memory choices")
-        screen_classes = tuple(str(item) for item in gpu.get("screenClasses", ()))
-        portable = any(
-            item.startswith(("air", "pro", "intel13", "intel16"))
-            for item in screen_classes
+        # A chip such as M3/M4 is shared by portable Macs and iMacs. Select
+        # the concrete device screen first; deriving the form factor from the
+        # GPU's entire list of possible products incorrectly turned iMac
+        # profiles into battery-powered laptops.
+        screen = choose_mac_screen_profile_for_gpu(
+            rng,
+            gpu,
+            include_external=include_external_mac_screen,
+        )
+        portable = bool(screen.get("hostPortable", screen.get("portable", False)))
+        host_device_class = str(
+            screen.get("hostDeviceClass", screen.get("deviceClass", "mac"))
         )
         memory_gb = rng.choice(memory_choices)
+        hardware_tags = [
+            "mac",
+            "laptop" if portable else "desktop",
+            "notouch",
+            f"host-{host_device_class}",
+        ]
+        if bool(screen.get("hostHasCamera", portable)):
+            hardware_tags.append("camera")
         hardware = {
-            "id": f"{gpu.get('id', 'mac')}_{memory_gb}gb",
+            "id": (
+                f"{gpu.get('id', 'mac')}_{memory_gb}gb_"
+                f"host_{host_device_class}"
+            ),
             "hardwareConcurrency": int(gpu.get("cpuCores", 8)),
             "deviceMemory": _chromium_device_memory_gb(
                 memory_gb,
@@ -1030,13 +1577,8 @@ def get_random_fp_details(
             ),
             "maxTouchPoints": 0,
             "physicalRamHintGb": memory_gb,
-            "tags": ("mac", "laptop" if portable else "desktop", "notouch"),
+            "tags": tuple(hardware_tags),
         }
-        screen = choose_mac_screen_profile_for_gpu(
-            rng,
-            gpu,
-            include_external=include_external_mac_screen,
-        )
         selected_fonts = build_mac_font_profile(
             languages[0],
             str(gpu.get("macosPlatformVersion", "15.5.0")),
@@ -1048,9 +1590,23 @@ def get_random_fp_details(
             if isinstance(ua_data_raw, dict)
             else ""
         )
+        requested_android_version = (
+            str(ua_data_raw.get("platformVersion", ""))
+            if isinstance(ua_data_raw, dict)
+            else ""
+        )
+        try:
+            requested_android_major = int(
+                requested_android_version.split(".", 1)[0]
+            )
+        except ValueError as error:
+            raise ValueError("Android UA has no numeric platform version") from error
         device = choose_android_device_profile(
             rng,
-            get_android_device_profiles(requested_model),
+            get_android_device_profiles(
+                requested_model,
+                android_version=requested_android_major,
+            ),
         )
         memory_choices = tuple(
             int(item) for item in device.get("physicalMemoryChoicesGb", ())
@@ -1097,7 +1653,11 @@ def get_random_fp_details(
     if not isinstance(ua_data_raw, dict):
         raise ValueError("selected user-agent profile has no UA-CH data")
     ua_data_values = dict(ua_data_raw)
-    if platform_name == "macos":
+    if platform_name == "windows":
+        if windows_platform_version is None:
+            raise RuntimeError("Windows platform version was not selected")
+        ua_data_values["platformVersion"] = windows_platform_version
+    elif platform_name == "macos":
         ua_data_values.update(
             {
                 "platform": "macOS",
@@ -1152,6 +1712,15 @@ def get_random_fp_details(
         time_zone=selected_time_zone,
         time_zone_offset_minutes=_time_zone_offset_minutes(selected_time_zone),
     )
+    network_profile = _network_profile(resolved_seed, platform_name)
+    has_been_active, is_active = _user_activation_values(resolved_seed)
+    media_preference_values, device_posture = _media_preference_values(
+        resolved_seed,
+        platform_name,
+        hardware,
+        screen,
+        network_profile,
+    )
     navigator_profile = NavigatorProfile(
         user_agent=str(user_agent_profile.get("userAgent", "")),
         app_version=str(user_agent_profile.get("appVersion", "")),
@@ -1172,8 +1741,10 @@ def get_random_fp_details(
         webdriver=False,
         pdf_viewer_enabled=True,
         do_not_track=None,
+        user_activation_has_been_active=has_been_active,
+        user_activation_is_active=is_active,
         user_agent_data=_user_agent_data_profile(ua_data_values),
-        network=_network_profile(resolved_seed, platform_name),
+        network=network_profile,
     )
     speech_profile = (
         _mac_speech_profile(
@@ -1238,7 +1809,11 @@ def get_random_fp_details(
         hardware.get("physicalRamHintGb", hardware.get("deviceMemory", 8))
     )
     quota_bytes, usage_bytes = _storage_values(rng, physical_memory_gb)
-    heap_limit, total_heap, used_heap = _memory_values(rng)
+    memory_snapshot_profile_id, heap_limit, total_heap, used_heap = _memory_values(
+        rng,
+        physical_memory_gb,
+        platform_name,
+    )
     canvas_profile = replace(
         base_profile.canvas,
         data_url_salt=canvas_salt,
@@ -1259,7 +1834,22 @@ def get_random_fp_details(
         css=(
             _mac_css_for_screen(base_profile.css, screen)
             if platform_name == "macos"
+            else _windows_css_for_screen_and_locale(
+                base_profile.css,
+                screen,
+                languages[0],
+                int(user_agent_profile.get("chromiumMajor", 150)),
+            )
+            if platform_name == "windows"
             else base_profile.css
+        ),
+        document=(
+            DocumentProfile(
+                body_child_element_count=body_child_element_count,
+                body_client_height=body_client_height,
+            )
+            if body_child_element_count is not None or body_client_height is not None
+            else None
         ),
         audio=replace(
             base_profile.audio,
@@ -1275,7 +1865,7 @@ def get_random_fp_details(
         fonts=_font_profile(selected_fonts),
         media=replace(
             base_profile.media,
-            devices=_media_devices(platform_name),
+            devices=_media_devices(platform_name, hardware),
         ),
         battery=battery_profile,
         # This is the selected IANA zone's published reference location, not
@@ -1297,6 +1887,17 @@ def get_random_fp_details(
             hid_devices=(),
             serial_ports=(),
             bluetooth_devices=(),
+            bluetooth_available=(
+                True
+                if platform_name in {"macos", "android"}
+                else (
+                    bool(
+                        {str(item).lower() for item in hardware.get("tags", ())}
+                        & {"laptop", "touch", "convertible", "surface"}
+                    )
+                    or rng.random() < 0.55
+                )
+            ),
             keyboard_layout=tuple(
                 KeyboardLayoutEntryProfile(code, value)
                 for code, value in keyboard_layout_for_profile(
@@ -1304,8 +1905,13 @@ def get_random_fp_details(
                     country,
                 )
             ),
+            device_posture=device_posture,
             midi_inputs=(),
             midi_outputs=(),
+        ),
+        media_preferences=replace(
+            base_profile.media_preferences,
+            **media_preference_values,
         ),
         timing=timing_profile,
         memory=replace(
@@ -1320,6 +1926,10 @@ def get_random_fp_details(
     )
 
     if platform_name == "windows":
+        windows_sensor_available = bool(
+            {str(item).lower() for item in hardware.get("tags", ())}
+            & {"touch", "convertible", "surface"}
+        )
         profile = replace(
             shared_profile,
             id=f"random-windows-{country.lower()}-{resolved_seed:016x}",
@@ -1333,12 +1943,17 @@ def get_random_fp_details(
                     int(item) for item in _WINDOWS_COMPRESSED_TEXTURE_FORMATS
                 ),
                 webgl2_max_samples=16,
+                webgl2_max_combined_vertex_uniform_components=212_988,
                 aliased_point_size_max=1024.0,
             ),
             webgpu=replace(
                 base_profile.webgpu,
+                available=bool(gpu.get("webgpuSupported", True)),
                 vendor=str(gpu.get("vendor", "")),
                 architecture=str(gpu.get("webgpuArchitecture", "")),
+                # Keep a valid internal adapter identity. GPUAdapterInfo masks
+                # device/description to empty strings while developerFeatures
+                # is false, matching the sourced browser observation.
                 device=str(gpu.get("deviceId", "")),
                 description=str(gpu.get("model", "")),
                 developer_features=False,
@@ -1358,9 +1973,14 @@ def get_random_fp_details(
                 output_latency=0.0,
             ),
             media_preferences=replace(
-                base_profile.media_preferences,
+                shared_profile.media_preferences,
                 color_gamut="srgb",
                 dynamic_range="standard",
+                video_dynamic_range="standard",
+            ),
+            sensors=replace(
+                shared_profile.sensors,
+                available=windows_sensor_available,
             ),
         )
     elif platform_name == "macos":
@@ -1379,6 +1999,7 @@ def get_random_fp_details(
             webgl=mac_webgl_profile,
             webgpu=replace(
                 base_profile.webgpu,
+                available=True,
                 device=str(gpu.get("deviceMarker", "") or gpu.get("model", "")),
                 description=str(gpu.get("model", "")),
                 **mac_webgpu_capabilities,
@@ -1395,8 +2016,11 @@ def get_random_fp_details(
             media=_mac_media_profile(shared_profile.media),
             permissions=replace(
                 shared_profile.permissions,
+                speaker_selection="unsupported",
+                top_level_storage_access="invalid-origin",
                 window_management="prompt",
             ),
+            sensors=replace(shared_profile.sensors, available=False),
             hardware_devices=replace(
                 shared_profile.hardware_devices,
                 keyboard_layout=tuple(
@@ -1404,15 +2028,11 @@ def get_random_fp_details(
                     for code, value in MAC_CHROMIUM150_KEYBOARD_LAYOUT
                 ),
             ),
-            memory=replace(
-                shared_profile.memory,
-                performance_js_heap_size_limit=4_395_630_592,
-                console_js_heap_size_limit=4_395_630_592,
-            ),
             media_preferences=replace(
                 shared_profile.media_preferences,
                 color_gamut=str(screen.get("colorGamut", "p3")),
                 dynamic_range=str(screen.get("dynamicRange", "standard")),
+                video_dynamic_range=str(screen.get("dynamicRange", "standard")),
             ),
         )
     else:
@@ -1433,9 +2053,13 @@ def get_random_fp_details(
             ),
             webgpu=replace(
                 base_profile.webgpu,
+                available=bool(device.get("webgpuSupported", False)),
                 vendor=str(gpu.get("vendor", "")),
                 architecture=str(gpu.get("webgpuArchitecture", "")),
-                device="",
+                # Keep the adapter identity internally so the native profile
+                # remains valid. developer_features=False masks device and
+                # description from JavaScript, as on the desktop branches.
+                device=str(gpu.get("model", "")),
                 description=str(gpu.get("model", "")),
                 developer_features=False,
                 subgroup_min_size=32,
@@ -1456,16 +2080,21 @@ def get_random_fp_details(
                 output_latency=0.0,
             ),
             media_preferences=replace(
-                base_profile.media_preferences,
+                shared_profile.media_preferences,
                 color_gamut="srgb",
                 dynamic_range="standard",
+                video_dynamic_range="standard",
             ),
         )
 
     headers = dict(user_agent_profile.get("headers", {}))
     headers["user-agent"] = str(user_agent_profile.get("userAgent", ""))
     headers["accept-language"] = _accept_language(languages)
-    if platform_name == "macos":
+    if platform_name == "windows":
+        headers["sec-ch-ua-platform-version"] = (
+            f'"{ua_data_values["platformVersion"]}"'
+        )
+    elif platform_name == "macos":
         headers["sec-ch-ua-platform"] = '"macOS"'
         headers["sec-ch-ua-arch"] = f'"{ua_data_values["architecture"]}"'
         headers["sec-ch-ua-bitness"] = f'"{ua_data_values["bitness"]}"'
@@ -1481,7 +2110,7 @@ def get_random_fp_details(
             f'"{ua_data_values["platformVersion"]}"'
         )
         headers["sec-ch-ua-mobile"] = "?1"
-    return RandomFingerprint(
+    fingerprint = RandomFingerprint(
         profile=profile,
         seed=resolved_seed,
         country_code=country,
@@ -1500,13 +2129,76 @@ def get_random_fp_details(
         physical_memory_gb=int(
             hardware.get("physicalRamHintGb", hardware.get("deviceMemory", 0))
         ),
+        memory_snapshot_profile_id=memory_snapshot_profile_id,
         gpu_model=str(gpu.get("model", "")),
         gpu_core_count=(
             int(gpu["gpuCores"]) if "gpuCores" in gpu else None
         ),
         gpu_core_unit=str(gpu.get("gpuCoreUnit", "")),
         geolocation_reference=reference_location,
+        resource_load=_build_resource_load_profile(rng),
     )
+    selection_issues: list[str] = []
+    if int(hardware.get("hardwareConcurrency", 0)) != fingerprint.cpu_logical_processors:
+        selection_issues.append("selected hardware CPU count changed during composition")
+    if int(hardware.get("physicalRamHintGb", 0)) != fingerprint.physical_memory_gb:
+        selection_issues.append("selected hardware memory changed during composition")
+    if platform_name == "macos":
+        memory_choices = {int(item) for item in gpu.get("memoryChoicesGb", ())}
+        if fingerprint.physical_memory_gb not in memory_choices:
+            selection_issues.append("Mac memory is unavailable for the selected chip")
+        if fingerprint.cpu_logical_processors != int(gpu.get("cpuCores", 0)):
+            selection_issues.append("Mac CPU count is unavailable for the selected chip")
+        screen_class = str(screen.get("deviceClass", "")).lower()
+        host_screen_class = str(
+            screen.get("hostDeviceClass", screen_class)
+        ).lower()
+        allowed_screen_classes = {
+            str(item).lower() for item in gpu.get("screenClasses", ())
+        }
+        if host_screen_class not in allowed_screen_classes:
+            selection_issues.append("Mac host device is unavailable for the selected chip")
+        if screen_class not in allowed_screen_classes and screen_class != "external":
+            selection_issues.append("Mac screen is unavailable for the selected chip")
+        hardware_tags = {str(item).lower() for item in hardware.get("tags", ())}
+        if bool(screen.get("hostPortable", screen.get("portable", False))) != (
+            "laptop" in hardware_tags
+        ):
+            selection_issues.append("Mac form factor conflicts with selected host")
+        if profile.webgpu.available is not True:
+            selection_issues.append("Apple-silicon Mac lost its WebGPU adapter")
+    elif platform_name == "windows":
+        hardware_tags = {str(item).lower() for item in hardware.get("tags", ())}
+        gpu_form_factor = str(gpu.get("formFactor", "mixed")).lower()
+        hardware_portable = bool(
+            hardware_tags & {"laptop", "touch", "convertible", "surface"}
+        )
+        if gpu_form_factor == "portable" and not hardware_portable:
+            selection_issues.append("portable Windows GPU is paired with desktop hardware")
+        if gpu_form_factor == "desktop" and hardware_portable:
+            selection_issues.append("desktop Windows GPU is paired with portable hardware")
+        if float(hardware.get("physicalRamHintGb", 0)) < 2:
+            selection_issues.append("64-bit Windows profile is below 2 GiB RAM")
+        if profile.webgpu.available is not bool(gpu.get("webgpuSupported", True)):
+            selection_issues.append("Windows WebGPU availability conflicts with the adapter")
+        platform_major = int(str(profile.navigator.user_agent_data.platform_version).split(".", 1)[0])
+        expected_taskbar_height = 48 if platform_major >= 13 else 40
+        observed_taskbar_height = int(profile.screen.height or 0) - int(
+            profile.screen.avail_height or 0
+        )
+        if observed_taskbar_height != expected_taskbar_height:
+            selection_issues.append(
+                "Windows taskbar work area conflicts with UA-CH platform version"
+            )
+    elif platform_name == "android":
+        if profile.webgpu.available is not bool(device.get("webgpuSupported", False)):
+            selection_issues.append("Android WebGPU availability conflicts with the adapter")
+    if selection_issues:
+        raise RuntimeError(
+            "inconsistent catalog selection: " + "; ".join(selection_issues)
+        )
+    validate_random_fp(fingerprint)
+    return fingerprint
 
 
 def get_random_fp(
@@ -1517,8 +2209,14 @@ def get_random_fp(
     time_zone: str | None = None,
     include_virtual_gpu: bool = False,
     include_external_mac_screen: bool = False,
+    body_child_element_count: int | None = 5,
+    body_client_height: float | None = 18.0,
 ) -> EdgeProfile:
-    """Return the typed profile expected by ``EdgeSandbox(profile=...)``."""
+    """Return the typed profile expected by ``EdgeSandbox(profile=...)``.
+
+    The default standalone BODY state is fixed at five children and a
+    23-pixel client height unless the caller explicitly overrides it.
+    """
 
     return get_random_fp_details(
         country_code,
@@ -1527,6 +2225,8 @@ def get_random_fp(
         time_zone=time_zone,
         include_virtual_gpu=include_virtual_gpu,
         include_external_mac_screen=include_external_mac_screen,
+        body_child_element_count=body_child_element_count,
+        body_client_height=body_client_height,
     ).profile
 
 
@@ -1751,8 +2451,11 @@ __all__ = [
     "DEFAULT_WINDOWS_USER_AGENT",
     "FingerprintVerification",
     "RandomFingerprint",
+    "ResourceLoadProfile",
+    "audit_random_fp",
     "get_random_fp",
     "get_random_fp_details",
     "test_random_fp_combinations",
+    "validate_random_fp",
     "verify_random_fp",
 ]

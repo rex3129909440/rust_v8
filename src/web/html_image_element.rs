@@ -1390,6 +1390,11 @@ fn run_image_request(scope: &mut v8::PinScope<'_, '_>, request: PendingImageRequ
     {
         let end_time =
             super::performance::now_for_current_realm(request_scope).unwrap_or(request.start_time);
+        let encoded_body_size = crate::content_encoding::encoded_http_body_size(
+            &resource.bytes,
+            &resource.content_encoding,
+        )
+        .unwrap_or(resource.bytes.len());
         if let Ok(entry) = super::performance_resource_timing::create_for_resource(
             request_scope,
             request.url.clone(),
@@ -1397,6 +1402,7 @@ fn run_image_request(scope: &mut v8::PinScope<'_, '_>, request: PendingImageRequ
             request.start_time,
             (end_time - request.start_time).max(0.0),
             status,
+            encoded_body_size,
             resource.bytes.len(),
             normalized_media_type(&resource.content_type),
             resource.content_encoding.clone(),

@@ -30,6 +30,16 @@ struct RequestRecord {
     body_used: bool,
 }
 
+struct RequestInitSnapshot<'s> {
+    values: HashMap<&'static str, v8::Local<'s, v8::Value>>,
+}
+
+impl<'s> RequestInitSnapshot<'s> {
+    fn get(&self, name: &'static str) -> Option<v8::Local<'s, v8::Value>> {
+        self.values.get(name).copied()
+    }
+}
+
 pub(crate) struct FetchRequestSnapshot {
     pub(crate) method: String,
     pub(crate) url: String,
@@ -147,16 +157,21 @@ fn construct<'s>(
         .as_ref()
         .map(|record| record.url.clone())
         .unwrap_or_else(|| crate::webidl::value_to_string(scope, arguments.get(0)));
+    let init = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
+    // Web IDL converts a dictionary in lexicographic member-name order before
+    // the Fetch constructor validates the URL. Besides matching observable
+    // getter order, taking one snapshot prevents user getters from being
+    // invoked more than once during the same conversion.
+    let init_values = snapshot_request_init(scope, init);
     let Ok(parsed_url) = url::Url::parse(&input_url) else {
         crate::webidl::throw_type_error(scope, "Request URL must be absolute");
         return;
     };
-    let init = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
-    let method = string_option(scope, init, "method")
+    let method = snapshot_string_option(scope, &init_values, "method")
         .or_else(|| inherited.as_ref().map(|record| record.method.clone()))
         .unwrap_or_else(|| "GET".to_owned());
     let method = normalize_method(&method);
-    let body_override = init.and_then(|value| property(scope, value, "body"));
+    let body_override = init_values.get("body");
     let bytes = if let Some(value) = body_override {
         if value.is_null_or_undefined() {
             Vec::new()
@@ -173,14 +188,15 @@ fn construct<'s>(
         crate::webidl::throw_type_error(scope, "GET or HEAD request cannot have a body");
         return;
     }
-    let headers = match request_headers(scope, init, inherited.as_ref()) {
-        Ok(headers) => headers,
-        Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
-            return;
-        }
-    };
-    let signal = if let Some(value) = init.and_then(|value| property(scope, value, "signal")) {
+    let headers =
+        match request_headers_from_value(scope, init_values.get("headers"), inherited.as_ref()) {
+            Ok(headers) => headers,
+            Err(message) => {
+                crate::webidl::throw_type_error(scope, &message);
+                return;
+            }
+        };
+    let signal = if let Some(value) = init_values.get("signal") {
         v8::Local::<v8::Object>::try_from(value)
             .ok()
             .filter(|signal| super::abort_signal::record(scope, *signal).is_some())
@@ -209,59 +225,61 @@ fn construct<'s>(
             .as_ref()
             .map(|record| record.destination.clone())
             .unwrap_or_default(),
-        referrer: string_option(scope, init, "referrer")
+        referrer: snapshot_string_option(scope, &init_values, "referrer")
             .or_else(|| inherited.as_ref().map(|record| record.referrer.clone()))
             .unwrap_or_else(|| "about:client".to_owned()),
-        referrer_policy: option_or(
+        referrer_policy: snapshot_option_or(
             scope,
-            init,
+            &init_values,
             "referrerPolicy",
             inherited.as_ref().map(|r| r.referrer_policy.as_str()),
             "",
         ),
-        mode: option_or(
+        mode: snapshot_option_or(
             scope,
-            init,
+            &init_values,
             "mode",
             inherited.as_ref().map(|r| r.mode.as_str()),
             "cors",
         ),
-        credentials: option_or(
+        credentials: snapshot_option_or(
             scope,
-            init,
+            &init_values,
             "credentials",
             inherited.as_ref().map(|r| r.credentials.as_str()),
             "same-origin",
         ),
-        cache: option_or(
+        cache: snapshot_option_or(
             scope,
-            init,
+            &init_values,
             "cache",
             inherited.as_ref().map(|r| r.cache.as_str()),
             "default",
         ),
-        redirect: option_or(
+        redirect: snapshot_option_or(
             scope,
-            init,
+            &init_values,
             "redirect",
             inherited.as_ref().map(|r| r.redirect.as_str()),
             "follow",
         ),
-        integrity: option_or(
+        integrity: snapshot_option_or(
             scope,
-            init,
+            &init_values,
             "integrity",
             inherited.as_ref().map(|r| r.integrity.as_str()),
             "",
         ),
-        keepalive: bool_option(scope, init, "keepalive")
+        keepalive: snapshot_bool_option(scope, &init_values, "keepalive")
             .or_else(|| inherited.as_ref().map(|record| record.keepalive))
             .unwrap_or(false),
         signal: v8::Global::new(scope, signal),
-        duplex: "half".to_owned(),
+        duplex: snapshot_string_option(scope, &init_values, "duplex")
+            .unwrap_or_else(|| "half".to_owned()),
         history_navigation: false,
         reload_navigation: false,
-        target_address_space: "unknown".to_owned(),
+        target_address_space: snapshot_string_option(scope, &init_values, "targetAddressSpace")
+            .unwrap_or_else(|| "unknown".to_owned()),
         body,
         bytes,
         body_used: false,
@@ -285,6 +303,95 @@ fn normalize_method(method: &str) -> String {
         method.to_owned()
     }
 }
+
+fn snapshot_request_init<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    init: Option<v8::Local<'s, v8::Object>>,
+) -> RequestInitSnapshot<'s> {
+    const MEMBERS: [&str; 20] = [
+        "adAuctionHeaders",
+        "attributionReporting",
+        "body",
+        "browsingTopics",
+        "cache",
+        "credentials",
+        "duplex",
+        "headers",
+        "integrity",
+        "keepalive",
+        "method",
+        "mode",
+        "priority",
+        "privateToken",
+        "redirect",
+        "referrer",
+        "referrerPolicy",
+        "sharedStorageWritable",
+        "signal",
+        "targetAddressSpace",
+    ];
+    let mut values = HashMap::with_capacity(MEMBERS.len());
+    if let Some(init) = init {
+        for name in MEMBERS {
+            if let Some(value) = property(scope, init, name) {
+                values.insert(name, value);
+            }
+            if name == "attributionReporting" {
+                let Some(key) = v8::String::new(scope, name) else {
+                    continue;
+                };
+                // Chromium's RequestInit conversion performs a feature-gated
+                // presence check after retrieving this dictionary member. The
+                // HasProperty operation is observable through Proxy traps.
+                let _ = init.has(scope, key.into());
+            }
+        }
+    }
+    RequestInitSnapshot { values }
+}
+
+pub(crate) fn observe_request_init(
+    scope: &v8::PinScope<'_, '_>,
+    init: Option<v8::Local<'_, v8::Object>>,
+) {
+    // Fetch and Request both perform the Web IDL dictionary conversion before
+    // URL validation.  Keep that observable conversion in one implementation
+    // so Proxy get/has traps see the same member order on both entry points.
+    let _ = snapshot_request_init(scope, init);
+}
+
+fn snapshot_string_option(
+    scope: &mut v8::PinScope<'_, '_>,
+    init: &RequestInitSnapshot<'_>,
+    name: &'static str,
+) -> Option<String> {
+    init.get(name)
+        .filter(|value| !value.is_undefined())
+        .map(|value| crate::webidl::value_to_string(scope, value))
+}
+
+fn snapshot_bool_option(
+    scope: &v8::PinScope<'_, '_>,
+    init: &RequestInitSnapshot<'_>,
+    name: &'static str,
+) -> Option<bool> {
+    init.get(name)
+        .filter(|value| !value.is_undefined())
+        .map(|value| value.boolean_value(scope))
+}
+
+fn snapshot_option_or(
+    scope: &mut v8::PinScope<'_, '_>,
+    init: &RequestInitSnapshot<'_>,
+    name: &'static str,
+    inherited: Option<&str>,
+    default: &str,
+) -> String {
+    snapshot_string_option(scope, init, name)
+        .or_else(|| inherited.map(str::to_owned))
+        .unwrap_or_else(|| default.to_owned())
+}
+
 fn property<'s>(
     s: &v8::PinScope<'s, '_>,
     o: v8::Local<'s, v8::Object>,
@@ -327,10 +434,16 @@ fn request_headers<'s>(
     init: Option<v8::Local<'s, v8::Object>>,
     inherited: Option<&RequestRecord>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
-    if let Some(value) = init
-        .and_then(|o| property(s, o, "headers"))
-        .and_then(|v| v8::Local::<v8::Object>::try_from(v).ok())
-    {
+    let value = init.and_then(|object| property(s, object, "headers"));
+    request_headers_from_value(s, value, inherited)
+}
+
+fn request_headers_from_value<'s>(
+    s: &mut v8::PinScope<'s, '_>,
+    value: Option<v8::Local<'s, v8::Value>>,
+    inherited: Option<&RequestRecord>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    if let Some(value) = value.and_then(|v| v8::Local::<v8::Object>::try_from(v).ok()) {
         if let Some(values) = super::headers::snapshot(s, value) {
             return super::headers::create(s, values);
         }

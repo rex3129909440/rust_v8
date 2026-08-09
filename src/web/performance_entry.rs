@@ -90,6 +90,19 @@ pub(crate) fn record(
         .cloned()
 }
 
+pub(crate) fn set_duration(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    duration: f64,
+) {
+    if let Some(record) = scope
+        .get_slot_mut::<PerformanceEntryStore>()
+        .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
+    {
+        record.duration = duration.max(0.0);
+    }
+}
+
 pub(crate) fn to_object<'s>(
     scope: &v8::PinScope<'s, '_>,
     record: &PerformanceEntryRecord,

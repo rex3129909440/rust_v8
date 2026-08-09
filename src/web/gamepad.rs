@@ -96,9 +96,11 @@ pub(crate) fn create<'s>(
     }
     let actuator = super::gamepad_haptic_actuator::create(scope)?;
     let timestamp = super::performance::now_for_current_realm(scope).unwrap_or_else(|| {
-        crate::determinism::high_resolution_milliseconds(crate::determinism::elapsed_milliseconds(
+        crate::determinism::relative_high_resolution_milliseconds(
             scope,
-        ))
+            crate::determinism::elapsed_milliseconds(scope),
+            0.0,
+        )
     });
     let record = GamepadRecord {
         id: id.to_owned(),

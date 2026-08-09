@@ -1,6 +1,12 @@
 """Python API for the native Edge sandbox."""
 
-from .edge_profile import EdgeProfile, ProfileField, WebAudioProfile
+from .edge_profile import (
+    EdgeProfile,
+    PerformanceEntryProfile,
+    PerformanceProfile,
+    ProfileField,
+    WebAudioProfile,
+)
 from .edge_runtime_options import (
     DeterministicExecution,
     EdgeRunOptions,
@@ -35,6 +41,8 @@ __all__ = [
     "IframeHook",
     "NetworkReplayEntry",
     "PageInit",
+    "PerformanceEntryProfile",
+    "PerformanceProfile",
     "PooledNetworkRequest",
     "ProfileField",
     "SandboxExecutionError",

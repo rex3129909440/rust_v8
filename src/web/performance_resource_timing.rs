@@ -221,7 +221,8 @@ pub(crate) fn create_for_resource<'s>(
     start_time: f64,
     duration: f64,
     response_status: u16,
-    body_size: usize,
+    encoded_body_size: usize,
+    decoded_body_size: usize,
     content_type: String,
     content_encoding: String,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
@@ -232,11 +233,79 @@ pub(crate) fn create_for_resource<'s>(
         start_time,
         duration,
         response_status,
-        body_size,
+        encoded_body_size,
+        decoded_body_size,
         content_type,
         content_encoding,
     );
     Ok(timing)
+}
+
+pub(crate) fn create_from_profile<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    profile: &crate::PerformanceEntryFingerprint,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let timing = create(
+        scope,
+        profile.name.clone(),
+        profile.initiator_type.clone(),
+        profile.start_time,
+        profile.duration,
+    )?;
+    apply_profile(scope, timing, profile);
+    Ok(timing)
+}
+
+pub(crate) fn apply_profile(
+    scope: &mut v8::PinScope<'_, '_>,
+    timing: v8::Local<'_, v8::Object>,
+    profile: &crate::PerformanceEntryFingerprint,
+) {
+    let (transfer_size, encoded_body_size, decoded_body_size) = profile.resolved_body_sizes();
+    super::performance_entry::attach(
+        scope,
+        timing,
+        profile.name.clone(),
+        profile.entry_type.clone(),
+        profile.start_time,
+        profile.duration,
+    );
+    if let Some(store) = scope.get_slot_mut::<PerformanceResourceTimingStore>() {
+        store.records.insert(
+            timing.get_identity_hash().get(),
+            ResourceTimingRecord {
+                initiator_type: profile.initiator_type.clone(),
+                next_hop_protocol: profile.next_hop_protocol.clone(),
+                delivery_type: profile.delivery_type.clone(),
+                worker_start: profile.worker_start,
+                redirect_start: profile.redirect_start,
+                redirect_end: profile.redirect_end,
+                fetch_start: profile.fetch_start,
+                domain_lookup_start: profile.domain_lookup_start,
+                domain_lookup_end: profile.domain_lookup_end,
+                connect_start: profile.connect_start,
+                connect_end: profile.connect_end,
+                secure_connection_start: profile.secure_connection_start,
+                request_start: profile.request_start,
+                response_start: profile.response_start,
+                response_end: profile.response_end,
+                transfer_size: transfer_size as f64,
+                encoded_body_size: encoded_body_size as f64,
+                decoded_body_size: decoded_body_size as f64,
+                server_timing: Vec::new(),
+                response_status: i32::from(profile.response_status.unwrap_or_default()),
+                final_response_headers_start: profile.final_response_headers_start,
+                first_interim_response_start: profile.first_interim_response_start,
+                worker_router_evaluation_start: profile.worker_router_evaluation_start,
+                worker_cache_lookup_start: profile.worker_cache_lookup_start,
+                worker_matched_source_type: profile.worker_matched_source_type.clone(),
+                worker_final_source_type: profile.worker_final_source_type.clone(),
+                render_blocking_status: profile.render_blocking_status.clone(),
+                content_type: profile.content_type.clone(),
+                content_encoding: profile.content_encoding.clone(),
+            },
+        );
+    }
 }
 
 pub(crate) fn configure_response(
@@ -245,7 +314,8 @@ pub(crate) fn configure_response(
     start_time: f64,
     duration: f64,
     response_status: u16,
-    body_size: usize,
+    encoded_body_size: usize,
+    decoded_body_size: usize,
     content_type: String,
     content_encoding: String,
 ) {
@@ -254,7 +324,8 @@ pub(crate) fn configure_response(
         .get_slot_mut::<PerformanceResourceTimingStore>()
         .and_then(|store| store.records.get_mut(&timing.get_identity_hash().get()))
     {
-        let body_size = body_size as f64;
+        let encoded_body_size = encoded_body_size as f64;
+        let decoded_body_size = decoded_body_size as f64;
         record.next_hop_protocol = "h2".to_owned();
         record.domain_lookup_start = start_time;
         record.domain_lookup_end = start_time;
@@ -267,10 +338,10 @@ pub(crate) fn configure_response(
         record.transfer_size = if response_status == 0 {
             0.0
         } else {
-            body_size + 300.0
+            encoded_body_size + 300.0
         };
-        record.encoded_body_size = body_size;
-        record.decoded_body_size = body_size;
+        record.encoded_body_size = encoded_body_size;
+        record.decoded_body_size = decoded_body_size;
         record.response_status = i32::from(response_status);
         record.content_type = content_type;
         record.content_encoding = content_encoding;
@@ -289,7 +360,14 @@ pub(crate) fn record_network_replay(
         .unwrap_or_default();
     let content_encoding = header_value(&replay.headers, "content-encoding")
         .unwrap_or_default()
-        .to_owned();
+        .trim()
+        .to_ascii_lowercase();
+    let decoded_body_size = replay.body.len();
+    let Ok(encoded_body_size) =
+        crate::content_encoding::encoded_http_body_size(&replay.body, &content_encoding)
+    else {
+        return;
+    };
     if let Ok(entry) = create_for_resource(
         scope,
         replay.url.clone(),
@@ -297,8 +375,40 @@ pub(crate) fn record_network_replay(
         start_time,
         (end_time - start_time).max(0.0),
         replay.status,
-        replay.body.len(),
+        encoded_body_size,
+        decoded_body_size,
         content_type,
+        content_encoding,
+    ) {
+        super::performance::add_entry_for_current_realm(scope, entry, "resource");
+    }
+}
+
+pub(crate) fn record_evaluated_script(
+    scope: &mut v8::PinScope<'_, '_>,
+    source_url: &str,
+    decoded_source: &[u8],
+) {
+    let start_time = super::performance::now_for_current_realm(scope).unwrap_or(0.0);
+    let content_encoding = crate::fingerprint::edge(scope)
+        .performance
+        .evaluated_script_content_encoding
+        .clone();
+    let Ok(encoded_body_size) =
+        crate::content_encoding::encoded_http_body_size(decoded_source, &content_encoding)
+    else {
+        return;
+    };
+    if let Ok(entry) = create_for_resource(
+        scope,
+        source_url.to_owned(),
+        "script".to_owned(),
+        start_time,
+        0.0,
+        200,
+        encoded_body_size,
+        decoded_source.len(),
+        "text/javascript".to_owned(),
         content_encoding,
     ) {
         super::performance::add_entry_for_current_realm(scope, entry, "resource");
@@ -361,6 +471,13 @@ fn record(
         .records
         .get(&object.get_identity_hash().get())
         .cloned()
+}
+
+pub(crate) fn response_end(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<f64> {
+    record(scope, object).map(|record| record.response_end)
 }
 
 fn return_string(

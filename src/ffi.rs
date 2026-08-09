@@ -139,6 +139,66 @@ pub struct EdgeSandboxLimits {
     pub max_output_bytes: u64,
 }
 
+/// One typed Performance Timeline profile record.
+///
+/// String fields are borrowed for the synchronous append call. Optional
+/// response-size fields are selected by their corresponding `has_*` flag.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct EdgeSandboxPerformanceEntryProfile {
+    pub name: EdgeSandboxStringView,
+    pub entry_type: EdgeSandboxStringView,
+    pub initiator_type: EdgeSandboxStringView,
+    pub delivery_type: EdgeSandboxStringView,
+    pub next_hop_protocol: EdgeSandboxStringView,
+    pub render_blocking_status: EdgeSandboxStringView,
+    pub content_type: EdgeSandboxStringView,
+    pub content_encoding: EdgeSandboxStringView,
+    pub worker_matched_source_type: EdgeSandboxStringView,
+    pub worker_final_source_type: EdgeSandboxStringView,
+    pub navigation_type: EdgeSandboxStringView,
+    pub start_time: f64,
+    pub duration: f64,
+    pub worker_start: f64,
+    pub worker_router_evaluation_start: f64,
+    pub worker_cache_lookup_start: f64,
+    pub redirect_start: f64,
+    pub redirect_end: f64,
+    pub fetch_start: f64,
+    pub domain_lookup_start: f64,
+    pub domain_lookup_end: f64,
+    pub connect_start: f64,
+    pub secure_connection_start: f64,
+    pub connect_end: f64,
+    pub request_start: f64,
+    pub response_start: f64,
+    pub first_interim_response_start: f64,
+    pub final_response_headers_start: f64,
+    pub response_end: f64,
+    pub unload_event_start: f64,
+    pub unload_event_end: f64,
+    pub dom_interactive: f64,
+    pub dom_content_loaded_event_start: f64,
+    pub dom_content_loaded_event_end: f64,
+    pub dom_complete: f64,
+    pub load_event_start: f64,
+    pub load_event_end: f64,
+    pub critical_ch_restart: f64,
+    pub activation_start: f64,
+    pub paint_time: f64,
+    pub presentation_time: f64,
+    pub transfer_size: u64,
+    pub encoded_body_size: u64,
+    pub decoded_body_size: u64,
+    pub redirect_count: u32,
+    pub response_status: u16,
+    pub has_transfer_size: u8,
+    pub has_encoded_body_size: u8,
+    pub has_decoded_body_size: u8,
+    pub has_response_status: u8,
+    pub reserved: [u8; 8],
+}
+
 pub mod profile_field {
     pub const ID: u32 = 1;
     pub const LOCALE: u32 = 2;
@@ -199,6 +259,7 @@ pub mod profile_field {
     pub const CSS_INPUT_SUBMIT_RESET: u32 = 92;
     pub const CSS_INPUT_FILE: u32 = 93;
     pub const CSS_INPUT_TEXT: u32 = 94;
+    pub const PERFORMANCE_EVALUATED_SCRIPT_CONTENT_ENCODING: u32 = 95;
 
     pub const PERMISSION_ACCELEROMETER: u32 = 800;
     pub const PERMISSION_BACKGROUND_SYNC: u32 = 801;
@@ -229,6 +290,7 @@ pub mod profile_field {
     pub const MEDIA_PREFERENCE_DISPLAY_MODE: u32 = 827;
     pub const MEDIA_PREFERENCE_DYNAMIC_RANGE: u32 = 828;
     pub const MEDIA_PREFERENCE_SCRIPTING: u32 = 829;
+    pub const MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE: u32 = 830;
 
     pub const NAVIGATOR_LANGUAGES: u32 = 100;
     pub const UA_FORM_FACTORS: u32 = 101;
@@ -295,6 +357,7 @@ pub mod profile_field {
     pub const SCREEN_ORIENTATION_ANGLE: u32 = 238;
     pub const WEBGPU_SUBGROUP_MIN_SIZE: u32 = 239;
     pub const WEBGPU_SUBGROUP_MAX_SIZE: u32 = 240;
+    pub const DOCUMENT_BODY_CHILD_ELEMENT_COUNT: u32 = 241;
 
     pub const TIME_ZONE_OFFSET_MINUTES: u32 = 300;
     pub const SCREEN_WIDTH: u32 = 301;
@@ -430,6 +493,7 @@ pub mod profile_field {
     pub const VISUAL_VIEWPORT_PAGE_TOP: u32 = 560;
     pub const VISUAL_VIEWPORT_SCALE: u32 = 561;
     pub const WEBGL2_MAX_TEXTURE_LOD_BIAS: u32 = 562;
+    pub const DOCUMENT_BODY_CLIENT_HEIGHT: u32 = 563;
 
     pub const AUDIO_CHANNEL_NOISE_AMPLITUDE: u32 = 600;
     pub const AUDIO_FREQUENCY_NOISE_AMPLITUDE: u32 = 601;
@@ -462,6 +526,11 @@ pub mod profile_field {
     pub const MIDI_SYSEX_ENABLED: u32 = 724;
     pub const WEBGPU_DEVELOPER_FEATURES: u32 = 725;
     pub const WEBGPU_IS_FALLBACK_ADAPTER: u32 = 726;
+    pub const SENSORS_AVAILABLE: u32 = 727;
+    pub const WEBGPU_AVAILABLE: u32 = 728;
+    pub const MEDIA_PREFERENCE_REDUCED_TRANSPARENCY: u32 = 729;
+    pub const NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE: u32 = 730;
+    pub const NAVIGATOR_USER_ACTIVATION_IS_ACTIVE: u32 = 731;
 }
 
 pub struct EdgeSandboxHandle {
@@ -631,7 +700,137 @@ unsafe fn options_ref<'a>(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_profile_schema_version() -> u32 {
-    7
+    10
+}
+
+fn performance_profile_string(value: EdgeSandboxStringView, name: &str) -> Result<String, String> {
+    input_string(value.data, value.len, name)
+}
+
+/// Enables an exact ordered Performance Timeline override and removes any
+/// previously appended records. An empty override makes `getEntries()` empty.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_profile_clear_performance_entries(
+    profile: *mut EdgeSandboxProfile,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    profile_operation(error_out, || {
+        // SAFETY: guaranteed by this function's FFI contract.
+        unsafe { profile_mut(profile)? }
+            .fingerprint
+            .performance
+            .entries = Some(Vec::new());
+        Ok(())
+    })
+}
+
+/// Appends one typed root-realm Performance Timeline record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_profile_append_performance_entry(
+    profile: *mut EdgeSandboxProfile,
+    value: *const EdgeSandboxPerformanceEntryProfile,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    profile_operation(error_out, || {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let value = unsafe {
+            value
+                .as_ref()
+                .ok_or_else(|| "performance entry profile pointer is null".to_owned())?
+        };
+        if value.reserved != [0; 8]
+            || value.has_transfer_size > 1
+            || value.has_encoded_body_size > 1
+            || value.has_decoded_body_size > 1
+            || value.has_response_status > 1
+        {
+            return Err("performance entry profile flags are invalid".to_owned());
+        }
+        let entry = crate::PerformanceEntryFingerprint {
+            name: performance_profile_string(value.name, "performance entry name")?,
+            entry_type: performance_profile_string(value.entry_type, "performance entry type")?,
+            start_time: value.start_time,
+            duration: value.duration,
+            initiator_type: performance_profile_string(
+                value.initiator_type,
+                "performance initiator type",
+            )?,
+            delivery_type: performance_profile_string(
+                value.delivery_type,
+                "performance delivery type",
+            )?,
+            next_hop_protocol: performance_profile_string(
+                value.next_hop_protocol,
+                "performance next hop protocol",
+            )?,
+            render_blocking_status: performance_profile_string(
+                value.render_blocking_status,
+                "performance render blocking status",
+            )?,
+            content_type: performance_profile_string(
+                value.content_type,
+                "performance content type",
+            )?,
+            content_encoding: performance_profile_string(
+                value.content_encoding,
+                "performance content encoding",
+            )?,
+            worker_start: value.worker_start,
+            worker_router_evaluation_start: value.worker_router_evaluation_start,
+            worker_cache_lookup_start: value.worker_cache_lookup_start,
+            worker_matched_source_type: performance_profile_string(
+                value.worker_matched_source_type,
+                "performance worker matched source type",
+            )?,
+            worker_final_source_type: performance_profile_string(
+                value.worker_final_source_type,
+                "performance worker final source type",
+            )?,
+            redirect_start: value.redirect_start,
+            redirect_end: value.redirect_end,
+            fetch_start: value.fetch_start,
+            domain_lookup_start: value.domain_lookup_start,
+            domain_lookup_end: value.domain_lookup_end,
+            connect_start: value.connect_start,
+            secure_connection_start: value.secure_connection_start,
+            connect_end: value.connect_end,
+            request_start: value.request_start,
+            response_start: value.response_start,
+            first_interim_response_start: value.first_interim_response_start,
+            final_response_headers_start: value.final_response_headers_start,
+            response_end: value.response_end,
+            transfer_size: (value.has_transfer_size != 0).then_some(value.transfer_size),
+            encoded_body_size: (value.has_encoded_body_size != 0)
+                .then_some(value.encoded_body_size),
+            decoded_body_size: (value.has_decoded_body_size != 0)
+                .then_some(value.decoded_body_size),
+            response_status: (value.has_response_status != 0).then_some(value.response_status),
+            unload_event_start: value.unload_event_start,
+            unload_event_end: value.unload_event_end,
+            dom_interactive: value.dom_interactive,
+            dom_content_loaded_event_start: value.dom_content_loaded_event_start,
+            dom_content_loaded_event_end: value.dom_content_loaded_event_end,
+            dom_complete: value.dom_complete,
+            load_event_start: value.load_event_start,
+            load_event_end: value.load_event_end,
+            navigation_type: performance_profile_string(
+                value.navigation_type,
+                "performance navigation type",
+            )?,
+            redirect_count: value.redirect_count,
+            critical_ch_restart: value.critical_ch_restart,
+            activation_start: value.activation_start,
+            paint_time: value.paint_time,
+            presentation_time: value.presentation_time,
+        };
+        let entries = unsafe { profile_mut(profile)? }
+            .fingerprint
+            .performance
+            .entries
+            .get_or_insert_with(Vec::new);
+        entries.push(entry);
+        Ok(())
+    })
 }
 
 /// Allocates a profile builder initialized with the fixed Chrome 150 defaults.
@@ -801,6 +1000,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_string(
             }
             profile_field::CSS_INPUT_FILE => fingerprint.css.input_file = value,
             profile_field::CSS_INPUT_TEXT => fingerprint.css.input_text = value,
+            profile_field::PERFORMANCE_EVALUATED_SCRIPT_CONTENT_ENCODING => {
+                fingerprint.performance.evaluated_script_content_encoding = value;
+            }
             profile_field::PERMISSION_ACCELEROMETER => {
                 fingerprint.permissions.accelerometer = value;
             }
@@ -878,6 +1080,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_string(
             }
             profile_field::MEDIA_PREFERENCE_SCRIPTING => {
                 fingerprint.media_preferences.scripting = value;
+            }
+            profile_field::MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE => {
+                fingerprint.media_preferences.video_dynamic_range = value;
             }
             _ => return Err(format!("unknown string profile field {field}")),
         }
@@ -1034,6 +1239,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_u32(
             }
             profile_field::MEDIA_PREFERENCE_MONOCHROME_BITS => {
                 fingerprint.media_preferences.monochrome_bits = value;
+            }
+            profile_field::DOCUMENT_BODY_CHILD_ELEMENT_COUNT => {
+                fingerprint.document.body_child_element_count = Some(value);
             }
             profile_field::WEBGPU_MAX_TEXTURE_DIMENSION_1D => {
                 fingerprint.rendering.webgpu.max_texture_dimension_1d = value;
@@ -1537,6 +1745,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_f64(
             profile_field::WEBGL2_MAX_TEXTURE_LOD_BIAS => {
                 fingerprint.rendering.webgl.webgl2_max_texture_lod_bias = value;
             }
+            profile_field::DOCUMENT_BODY_CLIENT_HEIGHT => {
+                fingerprint.document.body_client_height = Some(value);
+            }
             profile_field::AUDIO_SAMPLE_RATE => {
                 fingerprint.rendering.audio.sample_rate = value;
             }
@@ -1743,6 +1954,15 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_bool(
             profile_field::MEDIA_PREFERENCE_INVERTED_COLORS => {
                 fingerprint.media_preferences.inverted_colors = value;
             }
+            profile_field::MEDIA_PREFERENCE_REDUCED_TRANSPARENCY => {
+                fingerprint.media_preferences.reduced_transparency = value;
+            }
+            profile_field::NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE => {
+                fingerprint.navigator.user_activation_has_been_active = value;
+            }
+            profile_field::NAVIGATOR_USER_ACTIVATION_IS_ACTIVE => {
+                fingerprint.navigator.user_activation_is_active = value;
+            }
             profile_field::WEBGL_CONTEXT_ALPHA => {
                 fingerprint.rendering.webgl.context_alpha = value;
             }
@@ -1784,6 +2004,12 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_bool(
             }
             profile_field::WEBGPU_IS_FALLBACK_ADAPTER => {
                 fingerprint.rendering.webgpu.is_fallback_adapter = value;
+            }
+            profile_field::SENSORS_AVAILABLE => {
+                fingerprint.sensors.available = value;
+            }
+            profile_field::WEBGPU_AVAILABLE => {
+                fingerprint.rendering.webgpu.available = value;
             }
             _ => return Err(format!("unknown bool profile field {field}")),
         }
@@ -4064,3 +4290,158 @@ pub extern "C" fn edge_sandbox_abi_version() -> u32 {
 // Keep the opaque handle ABI visibly pointer-sized in generated bindings.
 const _: () =
     assert!(std::mem::size_of::<*mut EdgeSandboxHandle>() == std::mem::size_of::<*mut c_void>());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_document_media_and_activation_fields_cross_the_typed_ffi() {
+        let mut profile = EdgeSandboxProfile {
+            fingerprint: crate::EdgeFingerprint::default(),
+        };
+        let profile_ptr = &mut profile as *mut EdgeSandboxProfile;
+        let mut error = EdgeSandboxBuffer::default();
+        let high = b"high";
+
+        // SAFETY: profile and error point to live stack values and `high`
+        // remains readable for the duration of the synchronous call.
+        unsafe {
+            assert!(edge_sandbox_profile_set_u32(
+                profile_ptr,
+                profile_field::DOCUMENT_BODY_CHILD_ELEMENT_COUNT,
+                5,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_f64(
+                profile_ptr,
+                profile_field::DOCUMENT_BODY_CLIENT_HEIGHT,
+                23.0,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::NAVIGATOR_USER_ACTIVATION_HAS_BEEN_ACTIVE,
+                true,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::NAVIGATOR_USER_ACTIVATION_IS_ACTIVE,
+                true,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::MEDIA_PREFERENCE_REDUCED_TRANSPARENCY,
+                true,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_set_string(
+                profile_ptr,
+                profile_field::MEDIA_PREFERENCE_VIDEO_DYNAMIC_RANGE,
+                high.as_ptr(),
+                high.len(),
+                &mut error,
+            ));
+        }
+
+        assert_eq!(
+            profile.fingerprint.document.body_child_element_count,
+            Some(5)
+        );
+        assert_eq!(profile.fingerprint.document.body_client_height, Some(23.0));
+        assert!(
+            profile
+                .fingerprint
+                .navigator
+                .user_activation_has_been_active
+        );
+        assert!(profile.fingerprint.navigator.user_activation_is_active);
+        assert!(profile.fingerprint.media_preferences.reduced_transparency);
+        assert_eq!(
+            profile.fingerprint.media_preferences.video_dynamic_range,
+            "high"
+        );
+        assert_eq!(profile.fingerprint.validate(), Ok(()));
+        assert!(error.data.is_null());
+        assert_eq!(error.len, 0);
+    }
+
+    #[test]
+    fn performance_entry_crosses_the_typed_ffi_without_json() {
+        let mut profile = EdgeSandboxProfile {
+            fingerprint: crate::EdgeFingerprint::default(),
+        };
+        let profile_ptr = &mut profile as *mut EdgeSandboxProfile;
+        let mut error = EdgeSandboxBuffer::default();
+        let name = b"https://profile.example/ips.js";
+        let entry_type = b"resource";
+        let initiator_type = b"script";
+        let rendering = b"non-blocking";
+        let content_type = b"text/javascript";
+        let encoding = b"zstd";
+        // SAFETY: an all-zero value is valid for this C input structure; all
+        // pointer fields have a zero length until replaced below.
+        let mut entry: EdgeSandboxPerformanceEntryProfile = unsafe { std::mem::zeroed() };
+        entry.name = EdgeSandboxStringView {
+            data: name.as_ptr(),
+            len: name.len(),
+        };
+        entry.entry_type = EdgeSandboxStringView {
+            data: entry_type.as_ptr(),
+            len: entry_type.len(),
+        };
+        entry.initiator_type = EdgeSandboxStringView {
+            data: initiator_type.as_ptr(),
+            len: initiator_type.len(),
+        };
+        entry.render_blocking_status = EdgeSandboxStringView {
+            data: rendering.as_ptr(),
+            len: rendering.len(),
+        };
+        entry.content_type = EdgeSandboxStringView {
+            data: content_type.as_ptr(),
+            len: content_type.len(),
+        };
+        entry.content_encoding = EdgeSandboxStringView {
+            data: encoding.as_ptr(),
+            len: encoding.len(),
+        };
+        entry.encoded_body_size = 291181;
+        entry.decoded_body_size = 609863;
+        entry.response_status = 200;
+        entry.has_encoded_body_size = 1;
+        entry.has_decoded_body_size = 1;
+        entry.has_response_status = 1;
+
+        // SAFETY: all pointers above remain live throughout the synchronous calls.
+        unsafe {
+            assert!(edge_sandbox_profile_clear_performance_entries(
+                profile_ptr,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_append_performance_entry(
+                profile_ptr,
+                &entry,
+                &mut error,
+            ));
+        }
+        let configured = profile
+            .fingerprint
+            .performance
+            .entries
+            .as_ref()
+            .expect("performance override");
+        assert_eq!(configured.len(), 1);
+        assert_eq!(configured[0].name, "https://profile.example/ips.js");
+        assert_eq!(configured[0].content_encoding, "zstd");
+        assert_eq!(
+            configured[0].resolved_body_sizes(),
+            (291481, 291181, 609863)
+        );
+        assert_eq!(profile.fingerprint.validate(), Ok(()));
+        assert!(error.data.is_null());
+        assert_eq!(error.len, 0);
+    }
+}

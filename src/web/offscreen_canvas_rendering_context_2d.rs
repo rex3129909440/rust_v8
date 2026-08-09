@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 enum PaintStyle {
@@ -1393,35 +1393,139 @@ fn parse_color(style: &PaintStyle, alpha: f64) -> [u8; 4] {
     let PaintStyle::Color(color) = style else {
         return [0, 0, 0, (alpha * 255.0) as u8];
     };
-    let lower = color.to_ascii_lowercase();
-    let rgb = if lower.starts_with('#') && lower.len() == 7 {
-        [
-            u8::from_str_radix(&lower[1..3], 16).unwrap_or(0),
-            u8::from_str_radix(&lower[3..5], 16).unwrap_or(0),
-            u8::from_str_radix(&lower[5..7], 16).unwrap_or(0),
-        ]
-    } else {
-        match lower.as_str() {
-            "red" => [255, 0, 0],
-            "blue" => [0, 0, 255],
-            "white" => [255, 255, 255],
-            "green" => [0, 128, 0],
-            _ => [0, 0, 0],
-        }
-    };
-    [rgb[0], rgb[1], rgb[2], (alpha * 255.0).round() as u8]
+    let lower = color.trim().to_ascii_lowercase();
+    let (rgb, style_alpha) = parse_canvas_color(&lower).unwrap_or(([0, 0, 0], 1.0));
+    [
+        rgb[0],
+        rgb[1],
+        rgb[2],
+        (style_alpha * alpha.clamp(0.0, 1.0) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+    ]
 }
+
+fn parse_canvas_color(value: &str) -> Option<([u8; 3], f64)> {
+    if value == "transparent" {
+        return Some(([0, 0, 0], 0.0));
+    }
+    if let Some(hex) = value.strip_prefix('#') {
+        let expanded;
+        let hex = match hex.len() {
+            3 | 4 => {
+                expanded = hex
+                    .chars()
+                    .flat_map(|character| [character, character])
+                    .collect::<String>();
+                expanded.as_str()
+            }
+            6 | 8 => hex,
+            _ => return None,
+        };
+        let red = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let green = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let blue = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        let alpha = if hex.len() == 8 {
+            f64::from(u8::from_str_radix(&hex[6..8], 16).ok()?) / 255.0
+        } else {
+            1.0
+        };
+        return Some(([red, green, blue], alpha));
+    }
+    for (prefix, has_alpha) in [("rgba(", true), ("rgb(", false)] {
+        let Some(body) = value
+            .strip_prefix(prefix)
+            .and_then(|body| body.strip_suffix(')'))
+        else {
+            continue;
+        };
+        let parts = body.split(',').map(str::trim).collect::<Vec<_>>();
+        if parts.len() != if has_alpha { 4 } else { 3 } {
+            return None;
+        }
+        let channel = |part: &str| -> Option<u8> {
+            if let Some(percent) = part.strip_suffix('%') {
+                return Some(
+                    (percent.parse::<f64>().ok()? * 2.55)
+                        .round()
+                        .clamp(0.0, 255.0) as u8,
+                );
+            }
+            Some(part.parse::<f64>().ok()?.round().clamp(0.0, 255.0) as u8)
+        };
+        let alpha = if has_alpha {
+            let part = parts[3];
+            if let Some(percent) = part.strip_suffix('%') {
+                percent.parse::<f64>().ok()? / 100.0
+            } else {
+                part.parse::<f64>().ok()?
+            }
+        } else {
+            1.0
+        };
+        return Some((
+            [channel(parts[0])?, channel(parts[1])?, channel(parts[2])?],
+            alpha.clamp(0.0, 1.0),
+        ));
+    }
+    let rgb = match value {
+        "black" => [0, 0, 0],
+        "white" => [255, 255, 255],
+        "red" => [255, 0, 0],
+        "green" => [0, 128, 0],
+        "lime" => [0, 255, 0],
+        "blue" => [0, 0, 255],
+        "yellow" => [255, 255, 0],
+        "cyan" | "aqua" => [0, 255, 255],
+        "magenta" | "fuchsia" => [255, 0, 255],
+        "gray" | "grey" => [128, 128, 128],
+        _ => return None,
+    };
+    Some((rgb, 1.0))
+}
+
+fn composite_pixel(destination: &mut [u8], source: [u8; 4], operation: &str) {
+    match operation {
+        "copy" => destination.copy_from_slice(&source),
+        "lighter" => {
+            let source_alpha = f64::from(source[3]) / 255.0;
+            for channel in 0..3 {
+                destination[channel] = (f64::from(destination[channel])
+                    + f64::from(source[channel]) * source_alpha)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            destination[3] = (u16::from(destination[3]) + u16::from(source[3])).min(255) as u8;
+        }
+        _ => blend_source_over(destination, &source, 1.0),
+    }
+}
+
 fn paint_rect(record: &mut ContextRecord, x: f64, y: f64, w: f64, h: f64, color: [u8; 4]) {
+    let x0 = x.floor().max(0.0) as u32;
+    let y0 = y.floor().max(0.0) as u32;
+    let x1 = (x + w).ceil().max(0.0).min(record.width as f64) as u32;
+    let y1 = (y + h).ceil().max(0.0).min(record.height as f64) as u32;
+    let operation = record.state.global_composite_operation.clone();
+    for py in y0.min(record.height)..y1 {
+        for px in x0.min(record.width)..x1 {
+            let i = (py as usize * record.width as usize + px as usize) * 4;
+            if i + 3 < record.pixels.len() {
+                composite_pixel(&mut record.pixels[i..i + 4], color, &operation)
+            }
+        }
+    }
+}
+
+fn clear_pixels(record: &mut ContextRecord, x: f64, y: f64, w: f64, h: f64) {
     let x0 = x.floor().max(0.0) as u32;
     let y0 = y.floor().max(0.0) as u32;
     let x1 = (x + w).ceil().max(0.0).min(record.width as f64) as u32;
     let y1 = (y + h).ceil().max(0.0).min(record.height as f64) as u32;
     for py in y0.min(record.height)..y1 {
         for px in x0.min(record.width)..x1 {
-            let i = (py as usize * record.width as usize + px as usize) * 4;
-            if i + 3 < record.pixels.len() {
-                record.pixels[i..i + 4].copy_from_slice(&color)
-            }
+            let index = (py as usize * record.width as usize + px as usize) * 4;
+            record.pixels[index..index + 4].fill(0);
         }
     }
 }
@@ -1443,7 +1547,7 @@ fn clear_rect(
 ) {
     let v = values(scope, &a, 4);
     update(scope, a.this(), |record| {
-        paint_rect(record, v[0], v[1], v[2], v[3], [0, 0, 0, 0])
+        clear_pixels(record, v[0], v[1], v[2], v[3])
     })
 }
 fn stroke_rect(
@@ -1454,30 +1558,402 @@ fn stroke_rect(
     let v = values(scope, &a, 4);
     update(scope, a.this(), |record| {
         let c = parse_color(&record.state.stroke_style, record.state.global_alpha);
-        let l = record.state.line_width;
-        paint_rect(record, v[0], v[1], v[2], l, c);
-        paint_rect(record, v[0], v[1] + v[3] - l, v[2], l, c);
-        paint_rect(record, v[0], v[1], l, v[3], c);
-        paint_rect(record, v[0] + v[2] - l, v[1], l, v[3], c)
+        let line_width = record.state.line_width;
+        let cap = record.state.line_cap.clone();
+        let mut painted = HashSet::new();
+        paint_line(
+            record,
+            (v[0], v[1]),
+            (v[0] + v[2], v[1]),
+            line_width,
+            &cap,
+            c,
+            &mut painted,
+        );
+        paint_line(
+            record,
+            (v[0] + v[2], v[1]),
+            (v[0] + v[2], v[1] + v[3]),
+            line_width,
+            &cap,
+            c,
+            &mut painted,
+        );
+        paint_line(
+            record,
+            (v[0] + v[2], v[1] + v[3]),
+            (v[0], v[1] + v[3]),
+            line_width,
+            &cap,
+            c,
+            &mut painted,
+        );
+        paint_line(
+            record,
+            (v[0], v[1] + v[3]),
+            (v[0], v[1]),
+            line_width,
+            &cap,
+            c,
+            &mut painted,
+        )
     })
+}
+
+#[derive(Clone)]
+struct RasterSubpath {
+    points: Vec<(f64, f64)>,
+    closed: bool,
+}
+
+fn transformed(transform: [f64; 6], point: (f64, f64)) -> (f64, f64) {
+    transform_point(transform, point.0, point.1)
+}
+
+fn push_curve_point(path: &mut Vec<(f64, f64)>, transform: [f64; 6], point: (f64, f64)) {
+    path.push(transformed(transform, point));
+}
+
+fn raster_subpaths(path: &[PathCommand], transform: [f64; 6]) -> Vec<RasterSubpath> {
+    let mut output = Vec::new();
+    let mut points: Vec<(f64, f64)> = Vec::new();
+    let mut current = (0.0, 0.0);
+    let mut start = current;
+    let flush = |output: &mut Vec<RasterSubpath>, points: &mut Vec<(f64, f64)>, closed| {
+        if points.len() > 1 {
+            output.push(RasterSubpath {
+                points: std::mem::take(points),
+                closed,
+            });
+        } else {
+            points.clear();
+        }
+    };
+    for command in path {
+        match *command {
+            PathCommand::MoveTo(x, y) => {
+                flush(&mut output, &mut points, false);
+                current = (x, y);
+                start = current;
+                push_curve_point(&mut points, transform, current);
+            }
+            PathCommand::LineTo(x, y) => {
+                if points.is_empty() {
+                    start = current;
+                    push_curve_point(&mut points, transform, current);
+                }
+                current = (x, y);
+                push_curve_point(&mut points, transform, current);
+            }
+            PathCommand::Rect(x, y, width, height)
+            | PathCommand::RoundRect(x, y, width, height) => {
+                flush(&mut output, &mut points, false);
+                output.push(RasterSubpath {
+                    points: vec![
+                        transformed(transform, (x, y)),
+                        transformed(transform, (x + width, y)),
+                        transformed(transform, (x + width, y + height)),
+                        transformed(transform, (x, y + height)),
+                    ],
+                    closed: true,
+                });
+                current = (x, y);
+                start = current;
+            }
+            PathCommand::Quadratic(cx, cy, x, y) => {
+                if points.is_empty() {
+                    start = current;
+                    push_curve_point(&mut points, transform, current);
+                }
+                let from = current;
+                for step in 1..=24 {
+                    let t = f64::from(step) / 24.0;
+                    let inverse = 1.0 - t;
+                    push_curve_point(
+                        &mut points,
+                        transform,
+                        (
+                            inverse * inverse * from.0 + 2.0 * inverse * t * cx + t * t * x,
+                            inverse * inverse * from.1 + 2.0 * inverse * t * cy + t * t * y,
+                        ),
+                    );
+                }
+                current = (x, y);
+            }
+            PathCommand::Bezier(c1x, c1y, c2x, c2y, x, y) => {
+                if points.is_empty() {
+                    start = current;
+                    push_curve_point(&mut points, transform, current);
+                }
+                let from = current;
+                for step in 1..=32 {
+                    let t = f64::from(step) / 32.0;
+                    let inverse = 1.0 - t;
+                    push_curve_point(
+                        &mut points,
+                        transform,
+                        (
+                            inverse.powi(3) * from.0
+                                + 3.0 * inverse * inverse * t * c1x
+                                + 3.0 * inverse * t * t * c2x
+                                + t.powi(3) * x,
+                            inverse.powi(3) * from.1
+                                + 3.0 * inverse * inverse * t * c1y
+                                + 3.0 * inverse * t * t * c2y
+                                + t.powi(3) * y,
+                        ),
+                    );
+                }
+                current = (x, y);
+            }
+            PathCommand::Arc(cx, cy, radius, start_angle, end_angle, anticlockwise) => {
+                let sweep = angle_sweep(start_angle, end_angle, anticlockwise);
+                for step in 0..=32 {
+                    let angle = start_angle + sweep * f64::from(step) / 32.0;
+                    let point = (cx + radius * angle.cos(), cy + radius * angle.sin());
+                    if points.is_empty() {
+                        start = point;
+                    }
+                    push_curve_point(&mut points, transform, point);
+                    current = point;
+                }
+            }
+            PathCommand::Ellipse(
+                cx,
+                cy,
+                radius_x,
+                radius_y,
+                rotation,
+                start_angle,
+                end_angle,
+                anticlockwise,
+            ) => {
+                let sweep = angle_sweep(start_angle, end_angle, anticlockwise);
+                let (cos_rotation, sin_rotation) = (rotation.cos(), rotation.sin());
+                for step in 0..=32 {
+                    let angle = start_angle + sweep * f64::from(step) / 32.0;
+                    let local_x = radius_x * angle.cos();
+                    let local_y = radius_y * angle.sin();
+                    let point = (
+                        cx + local_x * cos_rotation - local_y * sin_rotation,
+                        cy + local_x * sin_rotation + local_y * cos_rotation,
+                    );
+                    if points.is_empty() {
+                        start = point;
+                    }
+                    push_curve_point(&mut points, transform, point);
+                    current = point;
+                }
+            }
+            PathCommand::ArcTo(x1, y1, x2, y2, _) => {
+                if points.is_empty() {
+                    start = current;
+                    push_curve_point(&mut points, transform, current);
+                }
+                current = (x1, y1);
+                push_curve_point(&mut points, transform, current);
+                current = (x2, y2);
+                push_curve_point(&mut points, transform, current);
+            }
+            PathCommand::Close => {
+                if !points.is_empty() {
+                    current = start;
+                    flush(&mut output, &mut points, true);
+                }
+            }
+        }
+    }
+    flush(&mut output, &mut points, false);
+    output
+}
+
+fn angle_sweep(start: f64, end: f64, anticlockwise: bool) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let mut sweep = end - start;
+    if anticlockwise {
+        while sweep > 0.0 {
+            sweep -= tau;
+        }
+        sweep.max(-tau)
+    } else {
+        while sweep < 0.0 {
+            sweep += tau;
+        }
+        sweep.min(tau)
+    }
+}
+
+fn paint_line(
+    record: &mut ContextRecord,
+    from: (f64, f64),
+    to: (f64, f64),
+    line_width: f64,
+    line_cap: &str,
+    color: [u8; 4],
+    painted: &mut HashSet<usize>,
+) {
+    let radius = (line_width.abs() / 2.0).max(0.5);
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    let length_squared = dx * dx + dy * dy;
+    let length = length_squared.sqrt();
+    let extension = if line_cap == "square" { radius } else { 0.0 };
+    let minimum_x = (from.0.min(to.0) - radius - extension).floor().max(0.0) as u32;
+    let maximum_x = (from.0.max(to.0) + radius + extension)
+        .ceil()
+        .min(record.width as f64) as u32;
+    let minimum_y = (from.1.min(to.1) - radius - extension).floor().max(0.0) as u32;
+    let maximum_y = (from.1.max(to.1) + radius + extension)
+        .ceil()
+        .min(record.height as f64) as u32;
+    let operation = record.state.global_composite_operation.clone();
+    for y in minimum_y..maximum_y {
+        for x in minimum_x..maximum_x {
+            let point = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+            let projection = if length_squared > 0.0 {
+                ((point.0 - from.0) * dx + (point.1 - from.1) * dy) / length_squared
+            } else {
+                0.0
+            };
+            let minimum_projection = if line_cap == "square" && length > 0.0 {
+                -radius / length
+            } else {
+                0.0
+            };
+            let maximum_projection = if line_cap == "square" && length > 0.0 {
+                1.0 + radius / length
+            } else {
+                1.0
+            };
+            let closest_projection = projection.clamp(0.0, 1.0);
+            let closest = (
+                from.0 + closest_projection * dx,
+                from.1 + closest_projection * dy,
+            );
+            let distance_squared = (point.0 - closest.0).powi(2) + (point.1 - closest.1).powi(2);
+            let inside = if line_cap == "round" {
+                distance_squared <= radius * radius
+            } else if projection >= minimum_projection && projection <= maximum_projection {
+                let line_projection = projection.clamp(minimum_projection, maximum_projection);
+                let line_point = (from.0 + line_projection * dx, from.1 + line_projection * dy);
+                (point.0 - line_point.0).powi(2) + (point.1 - line_point.1).powi(2)
+                    <= radius * radius
+            } else {
+                false
+            };
+            if inside {
+                let index = (y as usize * record.width as usize + x as usize) * 4;
+                if painted.insert(index) {
+                    composite_pixel(&mut record.pixels[index..index + 4], color, &operation);
+                }
+            }
+        }
+    }
+}
+
+fn point_in_polygon(point: (f64, f64), polygon: &[(f64, f64)]) -> bool {
+    let mut inside = false;
+    let mut previous = polygon.len() - 1;
+    for current in 0..polygon.len() {
+        let a = polygon[current];
+        let b = polygon[previous];
+        if (a.1 > point.1) != (b.1 > point.1)
+            && point.0 < (b.0 - a.0) * (point.1 - a.1) / (b.1 - a.1) + a.0
+        {
+            inside = !inside;
+        }
+        previous = current;
+    }
+    inside
+}
+
+fn paint_fill(record: &mut ContextRecord, polygon: &[(f64, f64)], color: [u8; 4]) {
+    if polygon.len() < 3 {
+        return;
+    }
+    let minimum_x = polygon
+        .iter()
+        .map(|point| point.0)
+        .fold(f64::INFINITY, f64::min)
+        .floor()
+        .max(0.0) as u32;
+    let maximum_x = polygon
+        .iter()
+        .map(|point| point.0)
+        .fold(f64::NEG_INFINITY, f64::max)
+        .ceil()
+        .min(record.width as f64) as u32;
+    let minimum_y = polygon
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::INFINITY, f64::min)
+        .floor()
+        .max(0.0) as u32;
+    let maximum_y = polygon
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::NEG_INFINITY, f64::max)
+        .ceil()
+        .min(record.height as f64) as u32;
+    let operation = record.state.global_composite_operation.clone();
+    for y in minimum_y..maximum_y {
+        for x in minimum_x..maximum_x {
+            if point_in_polygon((f64::from(x) + 0.5, f64::from(y) + 0.5), polygon) {
+                let index = (y as usize * record.width as usize + x as usize) * 4;
+                composite_pixel(&mut record.pixels[index..index + 4], color, &operation);
+            }
+        }
+    }
 }
 fn fill(
     scope: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    if record(scope, a.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    update(scope, a.this(), |record| {
+        let color = parse_color(&record.state.fill_style, record.state.global_alpha);
+        let paths = raster_subpaths(&record.path, record.state.transform);
+        for path in paths {
+            paint_fill(record, &path.points, color);
+        }
+    })
 }
 fn stroke(
     scope: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    if record(scope, a.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    update(scope, a.this(), |record| {
+        let color = parse_color(&record.state.stroke_style, record.state.global_alpha);
+        let line_width = record.state.line_width;
+        let line_cap = record.state.line_cap.clone();
+        let paths = raster_subpaths(&record.path, record.state.transform);
+        let mut painted = HashSet::new();
+        for path in paths {
+            for segment in path.points.windows(2) {
+                paint_line(
+                    record,
+                    segment[0],
+                    segment[1],
+                    line_width,
+                    &line_cap,
+                    color,
+                    &mut painted,
+                );
+            }
+            if path.closed && path.points.len() > 2 {
+                paint_line(
+                    record,
+                    *path.points.last().unwrap_or(&(0.0, 0.0)),
+                    path.points[0],
+                    line_width,
+                    &line_cap,
+                    color,
+                    &mut painted,
+                );
+            }
+        }
+    })
 }
 fn clip(
     scope: &mut v8::PinScope<'_, '_>,
@@ -1496,16 +1972,18 @@ fn fill_text(
     let text = crate::webidl::value_to_string(scope, a.get(0));
     let x = a.get(1).number_value(scope).unwrap_or(0.0);
     let y = a.get(2).number_value(scope).unwrap_or(0.0);
+    let maximum_width = a
+        .get(3)
+        .number_value(scope)
+        .filter(|value| value.is_finite() && *value > 0.0);
+    let profile_scale = crate::fingerprint::edge(scope)
+        .rendering
+        .canvas
+        .text_width_scale;
     update(scope, a.this(), |record| {
         let color = parse_color(&record.state.fill_style, record.state.global_alpha);
-        paint_rect(
-            record,
-            x,
-            y - 10.0,
-            text.chars().count() as f64 * 6.0,
-            10.0,
-            color,
-        )
+        let polygon = text_ink_polygon(record, &text, x, y, maximum_width, profile_scale);
+        paint_fill(record, &polygon, color)
     })
 }
 fn stroke_text(
@@ -1516,17 +1994,76 @@ fn stroke_text(
     let text = crate::webidl::value_to_string(scope, a.get(0));
     let x = a.get(1).number_value(scope).unwrap_or(0.0);
     let y = a.get(2).number_value(scope).unwrap_or(0.0);
+    let maximum_width = a
+        .get(3)
+        .number_value(scope)
+        .filter(|value| value.is_finite() && *value > 0.0);
+    let profile_scale = crate::fingerprint::edge(scope)
+        .rendering
+        .canvas
+        .text_width_scale;
     update(scope, a.this(), |record| {
         let color = parse_color(&record.state.stroke_style, record.state.global_alpha);
-        paint_rect(
-            record,
-            x,
-            y - 10.0,
-            text.chars().count() as f64 * 6.0,
-            10.0,
-            color,
-        )
+        let polygon = text_ink_polygon(record, &text, x, y, maximum_width, profile_scale);
+        let mut painted = HashSet::new();
+        for index in 0..polygon.len() {
+            paint_line(
+                record,
+                polygon[index],
+                polygon[(index + 1) % polygon.len()],
+                record.state.line_width,
+                &record.state.line_cap.clone(),
+                color,
+                &mut painted,
+            );
+        }
     })
+}
+
+fn text_ink_polygon(
+    record: &ContextRecord,
+    text: &str,
+    x: f64,
+    y: f64,
+    maximum_width: Option<f64>,
+    profile_scale: f64,
+) -> Vec<(f64, f64)> {
+    let font_size = canvas_font_size(&record.state.font);
+    let mut width = text.chars().count() as f64 * font_size * 0.6 * profile_scale;
+    if let Some(maximum_width) = maximum_width {
+        width = width.min(maximum_width);
+    }
+    let aligned_x = match record.state.text_align.as_str() {
+        "center" => x - width / 2.0,
+        "right" => x - width,
+        "end" if record.state.direction != "rtl" => x - width,
+        "start" if record.state.direction == "rtl" => x - width,
+        _ => x,
+    };
+    let ascent = font_size * 0.8;
+    let descent = font_size * 0.2;
+    let top = match record.state.text_baseline.as_str() {
+        "top" => y,
+        "hanging" => y - font_size * 0.2,
+        "middle" => y - font_size / 2.0,
+        "bottom" => y - font_size,
+        "ideographic" => y - font_size * 0.9,
+        _ => y - ascent,
+    };
+    let bottom = if record.state.text_baseline == "alphabetic" {
+        y + descent
+    } else {
+        top + font_size
+    };
+    [
+        (aligned_x, top),
+        (aligned_x + width, top),
+        (aligned_x + width, bottom),
+        (aligned_x, bottom),
+    ]
+    .into_iter()
+    .map(|point| transformed(record.state.transform, point))
+    .collect()
 }
 
 fn get_image_data(

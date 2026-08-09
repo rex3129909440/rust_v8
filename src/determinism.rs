@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::hash::{BuildHasher, Hasher};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const EDGE_NON_ISOLATED_CLOCK_RESOLUTION_MS: f64 = 0.1;
+const EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US: i64 = 100;
+const TIME_CLAMPER_LOWER_DIGITS_MOD: i64 = 10_000_000_000;
 const MAX_CLOCK_SLEEP_SLICE: Duration = Duration::from_millis(5);
 
 pub(crate) struct DeterminismState {
@@ -9,6 +11,7 @@ pub(crate) struct DeterminismState {
     elapsed_ms: u64,
     started_at: Instant,
     epoch_origin_ms: f64,
+    time_clamper_secret: u64,
     random_state: u64,
     original_date_by_global: HashMap<i32, v8::Global<v8::Function>>,
 }
@@ -21,11 +24,14 @@ pub(crate) fn prepare(
         .random_seed
         .unwrap_or(0)
         .wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let time_clamper_secret =
+        deterministic_time_clamper_secret(&configuration).unwrap_or_else(fresh_time_clamper_secret);
     isolate.set_slot(DeterminismState {
         configuration,
         elapsed_ms: 0,
         started_at: Instant::now(),
         epoch_origin_ms: system_epoch_milliseconds(),
+        time_clamper_secret,
         random_state,
         original_date_by_global: HashMap::new(),
     });
@@ -84,12 +90,25 @@ pub(crate) fn elapsed_milliseconds(scope: &v8::PinScope<'_, '_>) -> f64 {
         .unwrap_or(0.0)
 }
 
-pub(crate) fn high_resolution_milliseconds(value: f64) -> f64 {
+pub(crate) fn high_resolution_milliseconds(scope: &v8::PinScope<'_, '_>, value: f64) -> f64 {
     if !value.is_finite() {
         return value;
     }
-    let value = value.max(0.0);
-    (value / EDGE_NON_ISOLATED_CLOCK_RESOLUTION_MS).floor() * EDGE_NON_ISOLATED_CLOCK_RESOLUTION_MS
+    let secret = scope
+        .get_slot::<DeterminismState>()
+        .map(|state| state.time_clamper_secret)
+        .unwrap_or(0);
+    clamp_time_resolution_milliseconds(value, secret, EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US)
+}
+
+pub(crate) fn relative_high_resolution_milliseconds(
+    scope: &v8::PinScope<'_, '_>,
+    monotonic_time_ms: f64,
+    monotonic_origin_ms: f64,
+) -> f64 {
+    let current = high_resolution_milliseconds(scope, monotonic_time_ms);
+    let origin = high_resolution_milliseconds(scope, monotonic_origin_ms);
+    (current - origin).max(0.0)
 }
 
 pub(crate) fn date_epoch_milliseconds(scope: &v8::PinScope<'_, '_>) -> f64 {
@@ -161,6 +180,64 @@ fn system_epoch_milliseconds() -> f64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs_f64() * 1_000.0)
         .unwrap_or(0.0)
+}
+
+fn deterministic_time_clamper_secret(configuration: &crate::DeterministicExecution) -> Option<u64> {
+    let epoch = configuration.clock_epoch_ms?;
+    Some(murmur_hash3(
+        epoch as u64 ^ configuration.random_seed.unwrap_or(0) ^ 0xa5b3_c6d8_e91f_2740,
+    ))
+}
+
+fn fresh_time_clamper_secret() -> u64 {
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u32(std::process::id());
+    hasher.write_u128(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default(),
+    );
+    hasher.finish()
+}
+
+fn clamp_time_resolution_milliseconds(value_ms: f64, secret: u64, resolution_us: i64) -> f64 {
+    let microseconds = (value_ms * 1_000.0) as i64;
+    clamp_time_resolution_microseconds(microseconds, secret, resolution_us) as f64 / 1_000.0
+}
+
+fn clamp_time_resolution_microseconds(time_microseconds: i64, secret: u64, resolution: i64) -> i64 {
+    let was_negative = time_microseconds < 0;
+    let positive_time = time_microseconds.saturating_abs();
+    let lower_digits = positive_time % TIME_CLAMPER_LOWER_DIGITS_MOD;
+    let upper_digits = positive_time - lower_digits;
+    let mut clamped_time = lower_digits - lower_digits % resolution;
+    let threshold = clamped_time as f64
+        + resolution as f64 * hash_to_unit_double(murmur_hash3(clamped_time as u64 ^ secret));
+    if lower_digits as f64 >= threshold {
+        clamped_time += resolution;
+    }
+    clamped_time = upper_digits.saturating_add(clamped_time);
+    if was_negative {
+        -clamped_time
+    } else {
+        clamped_time
+    }
+}
+
+fn hash_to_unit_double(value: u64) -> f64 {
+    const EXPONENT_BITS: u64 = 0x3ff0_0000_0000_0000;
+    const MANTISSA_MASK: u64 = 0x000f_ffff_ffff_ffff;
+    f64::from_bits((value & MANTISSA_MASK) | EXPONENT_BITS) - 1.0
+}
+
+fn murmur_hash3(mut value: u64) -> u64 {
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    value ^= value >> 33;
+    value
 }
 
 fn clock_is_deterministic(scope: &v8::PinScope<'_, '_>) -> bool {
@@ -347,5 +424,49 @@ fn math_random(
 ) {
     if let Some(value) = random_f64(scope) {
         result.set(v8::Number::new(scope, value).into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US, clamp_time_resolution_microseconds};
+
+    #[test]
+    fn chromium_style_time_clamper_is_monotonic_jittered_and_quantized() {
+        let secret = 0x0123_4567_89ab_cdef;
+        let resolution = EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US;
+        let mut previous = i64::MIN;
+        let mut saw_pseudorandom_early_transition = false;
+        for input in 0..20_000 {
+            let clamped = clamp_time_resolution_microseconds(input, secret, resolution);
+            let floor = input - input % resolution;
+            assert!(clamped == floor || clamped == floor + resolution);
+            assert_eq!(clamped % resolution, 0);
+            assert!(clamped >= previous);
+            if input % resolution != 0 && clamped == floor + resolution {
+                saw_pseudorandom_early_transition = true;
+            }
+            previous = clamped;
+        }
+        assert!(saw_pseudorandom_early_transition);
+    }
+
+    #[test]
+    fn chromium_style_time_clamper_preserves_negative_symmetry() {
+        let secret = 0xfedc_ba98_7654_3210;
+        for input in [1, 49, 50, 99, 100, 149, 10_000_000_123] {
+            assert_eq!(
+                clamp_time_resolution_microseconds(
+                    -input,
+                    secret,
+                    EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US,
+                ),
+                -clamp_time_resolution_microseconds(
+                    input,
+                    secret,
+                    EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US,
+                )
+            );
+        }
     }
 }

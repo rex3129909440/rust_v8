@@ -52,7 +52,7 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(s, o, p.into()) != Some(true) {
         return Err("cannot create DocumentTimeline".to_owned());
     }
-    super::animation_timeline::attach(s, o, Some(-origin), None);
+    super::animation_timeline::attach_document(s, o, origin);
     s.get_slot_mut::<DocumentTimelineStore>()
         .ok_or_else(|| "DocumentTimeline state was not prepared".to_owned())?
         .objects
@@ -72,7 +72,7 @@ fn construct(
         .ok()
         .map(|options| super::event::number_property(s, options, "originTime", 0.0))
         .unwrap_or(0.0);
-    super::animation_timeline::attach(s, a.this(), Some(-origin), None);
+    super::animation_timeline::attach_document(s, a.this(), origin);
     s.get_slot_mut::<DocumentTimelineStore>()
         .expect("DocumentTimeline state")
         .objects

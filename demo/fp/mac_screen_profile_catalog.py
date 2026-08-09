@@ -175,6 +175,18 @@ MAC_SCREEN_ROWS: tuple[
         "https://www.apple.com/studio-display/specs/",
     ),
     (
+        "mac_external_1920x1080_1x_captured",
+        "external",
+        1920,
+        1080,
+        1920,
+        1080,
+        1.0,
+        False,
+        8,
+        "local-real-device-capture:mac-edge-font-profile-2026-08-07T03-14-02.915Z(1).json",
+    ),
+    (
         "mac_intel13_1280x800_2x",
         "intel13_retina",
         2560,
@@ -280,6 +292,8 @@ _MAC_WORK_AREAS: dict[tuple[int, int], tuple[int, int]] = {
     (2056, 1329): (1227, 39),
     (2240, 1260): (1167, 25),
     (2560, 1440): (1407, 25),
+    # User-provided Chromium 150 capture from a second M5 Mac display.
+    (1920, 1080): (969, 25),
     (1536, 960): (867, 25),
     (1792, 1120): (1027, 25),
     (2048, 1280): (1187, 25),
@@ -382,7 +396,7 @@ def get_mac_screen_profiles(
         device_class = str(profile["deviceClass"]).lower()
         if device_class == "external" and not include_external:
             continue
-        if class_keys and device_class not in class_keys and device_class != "external":
+        if class_keys and device_class not in class_keys:
             continue
         output.append(profile)
     return tuple(output)
@@ -394,22 +408,63 @@ def choose_mac_screen_profile_for_gpu(
     *,
     include_external: bool = True,
 ) -> dict[str, object]:
-    classes = tuple(str(item) for item in gpu_profile.get("screenClasses", ()))
-    # A Mac Studio/Ultra configuration has no built-in panel, so an external
-    # display is mandatory rather than an optional random addition.  Portable
-    # and iMac candidates still honor include_external=False and remain bound
-    # to their model's built-in display class.
-    external_only = bool(classes) and all(
-        item.strip().lower() == "external" for item in classes
+    classes = tuple(
+        dict.fromkeys(
+            str(item).strip().lower()
+            for item in gpu_profile.get("screenClasses", ())
+            if str(item).strip()
+        )
     )
+    if not classes:
+        raise ValueError("selected Mac GPU has no device-class evidence")
+
+    # ``external`` is both the required display class for a Mac mini/Studio
+    # and a possible current display for a portable Mac.  Keep the host class
+    # separate so choosing an external monitor cannot silently turn a
+    # MacBook into a battery-less desktop.
+    host_classes = classes
+    if not include_external and any(item != "external" for item in classes):
+        host_classes = tuple(item for item in classes if item != "external")
+    class_weights = []
+    for host_class in host_classes:
+        class_weights.append(
+            max(
+                1,
+                sum(
+                    int(profile.get("weight", 1))
+                    for profile in MAC_SCREEN_PROFILES
+                    if str(profile["deviceClass"]).lower() == host_class
+                ),
+            )
+        )
+    host_class = rng.choices(host_classes, weights=class_weights, k=1)[0]
+    host_profiles = get_mac_screen_profiles(
+        (host_class,),
+        include_external=True,
+    )
+    if not host_profiles:
+        raise ValueError("no host device profile matches the selected Mac GPU")
+    host_portable = bool(host_profiles[0].get("portable", False))
+
+    display_class = host_class
+    if include_external and host_class != "external" and rng.random() < 0.2:
+        display_class = "external"
     candidates = get_mac_screen_profiles(
-        classes,
-        include_external=include_external or external_only,
+        (display_class,),
+        include_external=True,
     )
     if not candidates:
         raise ValueError("no screen profile matches the selected Mac GPU")
     weights = [int(profile.get("weight", 1)) for profile in candidates]
-    return rng.choices(candidates, weights=weights, k=1)[0]
+    selected = dict(rng.choices(candidates, weights=weights, k=1)[0])
+    selected["hostDeviceClass"] = host_class
+    selected["hostPortable"] = host_portable
+    selected["hostHasCamera"] = (
+        host_portable
+        or "imac" in host_class
+        or selected.get("id") == "mac_studio_display_2560x1440_2x"
+    )
+    return selected
 
 
 __all__ = [

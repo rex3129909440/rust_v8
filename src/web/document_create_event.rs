@@ -39,7 +39,9 @@ fn create_event(
             super::node::throw_dom_exception(
                 scope,
                 "NotSupportedError",
-                "The provided event interface is not supported",
+                &format!(
+                    "Failed to execute 'createEvent' on 'Document': The provided event type ('{interface_name}') is invalid."
+                ),
             );
             return;
         }

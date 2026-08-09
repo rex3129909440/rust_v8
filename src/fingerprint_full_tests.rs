@@ -124,6 +124,27 @@ fn font_css_and_webgpu_platform_differences_are_profile_driven() {
 }
 
 #[test]
+fn unavailable_webgpu_adapter_resolves_to_null_without_hiding_navigator_gpu() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.rendering.webgpu.available = false;
+    let mut runtime = EdgeRuntime::with_options(options).expect("unavailable WebGPU adapter");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            navigator.gpu.requestAdapter().then(adapter => [
+              "gpu" in navigator,
+              adapter === null,
+              Function.prototype.toString.call(GPU.prototype.requestAdapter)
+            ].join("|"))
+            "#,
+        ),
+        "true|true|function requestAdapter() { [native code] }"
+    );
+}
+
+#[test]
 fn zero_sized_window_viewport_is_independent_from_physical_screen() {
     let mut options = EdgeRuntimeOptions::default();
     options.fingerprint.screen.viewport_width = 0.0;
@@ -152,12 +173,73 @@ fn zero_sized_window_viewport_is_independent_from_physical_screen() {
                 frame.contentWindow.innerHeight,
                 typeof matchMedia("(device-height: 720px)").matches,
                 matchMedia("(device-height: 720px)").matches,
-                matchMedia("(aspect-ratio: 16/9)").matches
+                matchMedia("(width: 0px)").matches,
+                matchMedia("(min-width: 1px)").matches,
+                matchMedia("(aspect-ratio: 0/1)").matches,
+                matchMedia("(aspect-ratio: 16/9)").matches,
+                matchMedia("(orientation: portrait)").matches
               ].join("|");
             })()
             "#,
         ),
-        "1280|720|0|0|0|0|0|0|0|0|boolean|true|true"
+        "1280|720|0|0|0|0|0|0|0|0|boolean|true|true|false|true|false|true"
+    );
+}
+
+#[test]
+fn match_media_width_search_cannot_fall_through_to_screen_width() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.screen.width = 1920;
+    options.fingerprint.screen.height = 1080;
+    options.fingerprint.screen.viewport_width = 0.0;
+    options.fingerprint.screen.viewport_height = 0.0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("zero-sized viewport search");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const search = feature => {
+                let lower = 0;
+                let upper = 4096;
+                for (let step = 0; step < 24; step++) {
+                  const middle = (lower + upper) / 2;
+                  if (matchMedia(`(min-${feature}: ${middle}px)`).matches) {
+                    lower = middle;
+                  } else {
+                    upper = middle;
+                  }
+                }
+                return lower.toFixed(1);
+              };
+              return [search("width"), search("device-width")].join("|");
+            })()
+            "#,
+        ),
+        "0.0|1920.0"
+    );
+}
+
+#[test]
+fn match_media_overflow_axes_match_edge_scroll_viewport() {
+    let mut runtime = EdgeRuntime::new().expect("Edge media environment");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            [
+              matchMedia("(overflow-inline: none)").matches,
+              matchMedia("(overflow-inline: scroll)").matches,
+              matchMedia("(overflow-block: none)").matches,
+              matchMedia("(overflow-block: scroll)").matches,
+              matchMedia("(overflow-block: optional-paged)").matches,
+              matchMedia("(overflow-block: paged)").matches
+            ].join("|")
+            "#,
+        ),
+        "false|true|false|true|false|false"
     );
 }
 
@@ -201,6 +283,57 @@ fn zero_sized_iframe_body_auto_height_matches_edge_layout() {
             "#,
         ),
         "0,0,0,0,0,23,0,0,0,23;0,0,0,0,0,0,0,0,0,0"
+    );
+}
+
+#[test]
+fn zero_sized_inline_iframe_still_creates_the_parent_line_box() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.screen.viewport_width = 0.0;
+    options.fingerprint.screen.viewport_height = 0.0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("zero-sized inline iframe layout");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const frame = document.createElement("iframe");
+              frame.style.cssText = "width:0;height:0;border:0";
+              document.body.appendChild(frame);
+              const visible = [
+                document.body.clientHeight,
+                frame.clientHeight,
+                document.body.childElementCount
+              ].join("|");
+              frame.style.display = "none";
+              return `${visible}|${document.body.clientHeight}`;
+            })()
+            "#,
+        ),
+        "18|0|1|0"
+    );
+}
+
+#[test]
+fn standalone_evaluate_materializes_profiled_body_state_before_script_execution() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.document.body_child_element_count = Some(5);
+    options.fingerprint.document.body_client_height = Some(23.0);
+    let mut runtime = EdgeRuntime::with_options(options).expect("profiled default document");
+
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            [
+              document.body.childElementCount,
+              Array.from(document.body.children).every(node => node.tagName === "DIV"),
+              document.body.clientHeight
+            ].join("|")
+            "#,
+        ),
+        "5|true|23"
     );
 }
 
@@ -562,7 +695,7 @@ fn webgl_static_limits_match_the_captured_edge_150_parameter_evidence() {
                 "16|4096|16|30|1024|Float32Array:1,1024|Float32Array:1,1|",
                 "16|16384|32|16384|Int32Array:32767,32767|16384|",
                 "4294967295|4294967295|4294967295|4294967295|4|",
-                "16384|12|120|212992|120|4|120|4|4096|12|120|200704|",
+                "16384|12|120|212988|120|4|120|4|4096|12|120|200704|",
                 "7|8|8|16|2048|2048|2|24|65536|24|2147483647|",
                 "2147483647|4294967294"
             ),

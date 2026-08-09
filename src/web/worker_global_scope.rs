@@ -266,7 +266,7 @@ pub(crate) fn create(
         let location = super::worker_location::create(realm_scope)?;
         let navigator = super::worker_navigator::create(realm_scope)?;
         let crypto = super::crypto::create(realm_scope)?;
-        let performance = super::performance::create(realm_scope)?;
+        let performance = super::performance::create(realm_scope, false)?;
         let scheduler = super::scheduler::create(realm_scope)?;
         let trusted_types = super::trusted_type_policy_factory::create(realm_scope)?;
         let caches = super::cache_storage::create(realm_scope)?;
@@ -2331,9 +2331,11 @@ fn run_animation_frame(
         .global(worker_scope)
         .into();
     let timestamp = super::performance::now_for_current_realm(worker_scope).unwrap_or_else(|| {
-        crate::determinism::high_resolution_milliseconds(crate::determinism::elapsed_milliseconds(
+        crate::determinism::relative_high_resolution_milliseconds(
             worker_scope,
-        ))
+            crate::determinism::elapsed_milliseconds(worker_scope),
+            0.0,
+        )
     });
     let timestamp = v8::Number::new(worker_scope, timestamp);
     let _ = callback.call(worker_scope, receiver, &[timestamp.into()]);

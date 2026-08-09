@@ -1,3 +1,7 @@
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct LocaleFingerprint {
     pub locale: String,
@@ -119,6 +123,8 @@ pub struct WebGlFingerprint {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct WebGpuFingerprint {
+    #[serde(default = "default_true")]
+    pub available: bool,
     pub vendor: String,
     pub architecture: String,
     pub device: String,
@@ -339,7 +345,7 @@ impl Default for WebGlFingerprint {
             webgl2_max_combined_uniform_blocks: 24,
             webgl2_max_uniform_buffer_bindings: 24,
             webgl2_max_uniform_block_size: 65_536,
-            webgl2_max_combined_vertex_uniform_components: 212_992,
+            webgl2_max_combined_vertex_uniform_components: 212_988,
             webgl2_max_combined_fragment_uniform_components: 200_704,
             webgl2_max_transform_feedback_separate_attribs: 4,
             webgl2_max_transform_feedback_interleaved_components: 120,
@@ -374,6 +380,7 @@ impl Default for WebGlFingerprint {
 impl Default for WebGpuFingerprint {
     fn default() -> Self {
         Self {
+            available: true,
             vendor: "Microsoft".to_owned(),
             architecture: "D3D12".to_owned(),
             device: "Edge WebGPU Adapter".to_owned(),

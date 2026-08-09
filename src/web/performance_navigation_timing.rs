@@ -20,7 +20,7 @@ struct NavigationTimingRecord {
     redirect_count: i32,
     critical_ch_restart: f64,
     activation_start: f64,
-    confidence: v8::Global<v8::Object>,
+    confidence: Option<v8::Global<v8::Object>>,
     not_restored_reasons: Option<v8::Global<v8::Object>>,
 }
 
@@ -157,9 +157,6 @@ pub(crate) fn create<'s>(
         duration,
     );
     super::performance_entry::attach(scope, timing, name, "navigation".to_owned(), 0.0, duration);
-    let confidence = v8::Object::new(scope);
-    define_number(scope, confidence, "randomizedTriggerRate", 0.0);
-    define_string(scope, confidence, "value", "high");
     let record = NavigationTimingRecord {
         unload_event_start: 0.0,
         unload_event_end: 0.0,
@@ -173,7 +170,10 @@ pub(crate) fn create<'s>(
         redirect_count: 0,
         critical_ch_restart: 0.0,
         activation_start: 0.0,
-        confidence: v8::Global::new(scope, confidence),
+        // Blink does not populate navigation confidence until the browser
+        // process finalizes its randomized response.  This V8-only runtime
+        // has no browser-process value, so the observable value is null.
+        confidence: None,
         not_restored_reasons: None,
     };
     scope
@@ -182,6 +182,30 @@ pub(crate) fn create<'s>(
         .records
         .insert(timing.get_identity_hash().get(), record);
     Ok(timing)
+}
+
+pub(crate) fn finalize_page_load(
+    scope: &mut v8::PinScope<'_, '_>,
+    timing: v8::Local<'_, v8::Object>,
+    completed_at: f64,
+) {
+    let completed_at = completed_at
+        .max(super::performance_resource_timing::response_end(scope, timing).unwrap_or_default())
+        .max(0.0);
+    if let Some(record) = scope
+        .get_slot_mut::<PerformanceNavigationTimingStore>()
+        .and_then(|store| store.records.get_mut(&timing.get_identity_hash().get()))
+    {
+        record.dom_interactive = completed_at;
+        record.dom_content_loaded_event_start = completed_at;
+        record.dom_content_loaded_event_end = completed_at;
+        record.dom_complete = completed_at;
+        record.load_event_start = completed_at;
+        record.load_event_end = completed_at;
+    }
+    // In Blink, PerformanceNavigationTiming.duration is loadEventEnd rather
+    // than the response duration inherited from PerformanceEntry.
+    super::performance_entry::set_duration(scope, timing, completed_at);
 }
 
 pub(crate) fn create_for_navigation<'s>(
@@ -200,9 +224,40 @@ pub(crate) fn create_for_navigation<'s>(
         duration,
         response_status,
         body_size,
+        body_size,
         content_type,
         String::new(),
     );
+    Ok(timing)
+}
+
+pub(crate) fn create_from_profile<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    profile: &crate::PerformanceEntryFingerprint,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let timing = create(scope, profile.name.clone(), profile.duration)?;
+    super::performance_resource_timing::apply_profile(scope, timing, profile);
+    if let Some(store) = scope.get_slot_mut::<PerformanceNavigationTimingStore>() {
+        store.records.insert(
+            timing.get_identity_hash().get(),
+            NavigationTimingRecord {
+                unload_event_start: profile.unload_event_start,
+                unload_event_end: profile.unload_event_end,
+                dom_interactive: profile.dom_interactive,
+                dom_content_loaded_event_start: profile.dom_content_loaded_event_start,
+                dom_content_loaded_event_end: profile.dom_content_loaded_event_end,
+                dom_complete: profile.dom_complete,
+                load_event_start: profile.load_event_start,
+                load_event_end: profile.load_event_end,
+                navigation_type: profile.navigation_type.clone(),
+                redirect_count: profile.redirect_count as i32,
+                critical_ch_restart: profile.critical_ch_restart,
+                activation_start: profile.activation_start,
+                confidence: None,
+                not_restored_reasons: None,
+            },
+        );
+    }
     Ok(timing)
 }
 
@@ -333,7 +388,11 @@ fn get_confidence(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Local::new(scope, &record.confidence).into());
+        if let Some(confidence) = record.confidence {
+            result.set(v8::Local::new(scope, &confidence).into());
+        } else {
+            result.set(v8::null(scope).into());
+        }
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -442,11 +501,15 @@ fn to_json(
     } else {
         define_value(scope, output, "notRestoredReasons", v8::null(scope).into());
     }
-    define_value(
-        scope,
-        output,
-        "confidence",
-        v8::Local::new(scope, &record.confidence).into(),
-    );
+    if let Some(confidence) = record.confidence {
+        define_value(
+            scope,
+            output,
+            "confidence",
+            v8::Local::new(scope, &confidence).into(),
+        );
+    } else {
+        define_value(scope, output, "confidence", v8::null(scope).into());
+    }
     result.set(output.into());
 }

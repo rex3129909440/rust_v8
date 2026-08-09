@@ -2,6 +2,10 @@
 
 完整中文使用手册：[`docs/SANDBOX_USAGE_ZH.md`](docs/SANDBOX_USAGE_ZH.md)
 
+所有沙箱行为修复都必须追加到
+[`docs/SANDBOX_REPAIR_AUDIT_ZH.md`](docs/SANDBOX_REPAIR_AUDIT_ZH.md)，其中保存证据来源、
+缺陷根因、修改文件、回归结果和未解决项。
+
 `edge_sandbox` is a browser-free Microsoft Edge HTTPS Window runtime. It links
 V8 directly, then installs Edge-specific DOM, BOM, WebGPU, WebXR, media,
 storage, cryptography, CSS and related APIs with handwritten Rust callbacks and
