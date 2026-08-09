@@ -17,6 +17,37 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const TRACE_EXPORT_BATCH_SIZE: u64 = 8_192;
 
+fn initialization_timeout(configured: Option<Duration>) -> Duration {
+    configured
+        .map(|timeout| timeout.saturating_add(EVALUATION_GRACE))
+        .unwrap_or(STARTUP_TIMEOUT)
+        .max(STARTUP_TIMEOUT)
+}
+
+#[cfg(test)]
+mod initialization_timeout_tests {
+    use super::{EVALUATION_GRACE, STARTUP_TIMEOUT, initialization_timeout};
+    use std::time::Duration;
+
+    #[test]
+    fn startup_keeps_the_minimum_worker_initialization_window() {
+        assert_eq!(initialization_timeout(None), STARTUP_TIMEOUT);
+        assert_eq!(
+            initialization_timeout(Some(Duration::from_millis(25))),
+            STARTUP_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn startup_honors_a_longer_configured_execution_timeout() {
+        let configured = Duration::from_secs(60);
+        assert_eq!(
+            initialization_timeout(Some(configured)),
+            configured + EVALUATION_GRACE
+        );
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 enum WorkerCommand {
     Initialize(Box<crate::EdgeRuntimeOptions>),
@@ -191,7 +222,7 @@ impl IsolatedEdgeRuntime {
         let resident_limit = options.limits.max_resident_bytes;
         let response = state.process.as_mut().expect("worker was ensured").request(
             WorkerCommand::Reinitialize(Box::new(options.clone())),
-            STARTUP_TIMEOUT,
+            initialization_timeout(options.limits.timeout),
             resident_limit,
         );
         match response {
@@ -945,7 +976,7 @@ impl WorkerProcess {
         };
         let initialized = process.request(
             WorkerCommand::Initialize(Box::new(options.clone())),
-            STARTUP_TIMEOUT,
+            initialization_timeout(options.limits.timeout),
             options.limits.max_resident_bytes,
         );
         match initialized {

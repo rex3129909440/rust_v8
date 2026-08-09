@@ -197,6 +197,10 @@ jobs:
           sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain 1.93.0 --no-modify-path
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
 
+      - name: Run Rust regression suite
+        shell: bash
+        run: "$CARGO_HOME/bin/cargo test --release --all-targets --locked"
+
       - name: Build native library
         shell: bash
         run: "$CARGO_HOME/bin/cargo build --release --lib --locked"

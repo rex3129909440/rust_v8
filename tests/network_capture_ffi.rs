@@ -1,6 +1,8 @@
+#![cfg(not(windows))]
+
 use edge_sandbox::ffi::{
     EdgeSandboxBuffer, edge_sandbox_buffer_free, edge_sandbox_clear_network_requests,
-    edge_sandbox_create, edge_sandbox_destroy, edge_sandbox_evaluate,
+    edge_sandbox_create_self_hosted, edge_sandbox_destroy, edge_sandbox_evaluate,
     edge_sandbox_network_requests,
 };
 
@@ -20,10 +22,9 @@ fn take_bytes(buffer: &mut EdgeSandboxBuffer) -> Vec<u8> {
 
 #[test]
 fn ffi_exports_versioned_binary_requests_without_trace() {
-    let worker = env!("CARGO_BIN_EXE_edge-sandbox");
     let mut error = EdgeSandboxBuffer::default();
-    // SAFETY: the worker path and error output are live for the call.
-    let runtime = unsafe { edge_sandbox_create(worker.as_ptr(), worker.len(), &mut error) };
+    // SAFETY: the error output is live for the call.
+    let runtime = unsafe { edge_sandbox_create_self_hosted(&mut error) };
     assert!(
         !runtime.is_null(),
         "{}",

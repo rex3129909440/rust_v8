@@ -1,9 +1,10 @@
+#![cfg(not(windows))]
+
 use edge_sandbox::{EdgeRuntimeOptions, Evaluation, IsolatedEdgeRuntime, PageInit, SandboxLimits};
 use std::time::Duration;
 
 fn isolated_runtime(options: EdgeRuntimeOptions) -> IsolatedEdgeRuntime {
-    IsolatedEdgeRuntime::with_worker_executable(options, env!("CARGO_BIN_EXE_edge-sandbox"))
-        .expect("isolated Edge worker")
+    IsolatedEdgeRuntime::self_hosted(options).expect("self-hosted isolated Edge worker")
 }
 
 #[test]

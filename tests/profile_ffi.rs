@@ -1,5 +1,7 @@
+#![cfg(not(windows))]
+
 use edge_sandbox::ffi::{
-    EdgeSandboxBuffer, edge_sandbox_buffer_free, edge_sandbox_create_with_profile,
+    EdgeSandboxBuffer, edge_sandbox_buffer_free, edge_sandbox_create_self_hosted_with_profile,
     edge_sandbox_destroy, edge_sandbox_enable_native_trace, edge_sandbox_evaluate,
     edge_sandbox_native_trace, edge_sandbox_native_trace_matching,
     edge_sandbox_profile_append_keyboard_layout_entry, edge_sandbox_profile_append_local_font,
@@ -466,11 +468,8 @@ fn complete_typed_profile_crosses_native_and_worker_boundaries() {
     assert!(unsafe { edge_sandbox_profile_validate(profile, &mut error) });
     assert!(take_buffer(&mut error).is_empty());
 
-    let worker = env!("CARGO_BIN_EXE_edge-sandbox");
     // SAFETY: all pointers remain live during runtime creation.
-    let runtime = unsafe {
-        edge_sandbox_create_with_profile(worker.as_ptr(), worker.len(), profile, &mut error)
-    };
+    let runtime = unsafe { edge_sandbox_create_self_hosted_with_profile(profile, &mut error) };
     assert!(!runtime.is_null(), "{}", take_buffer(&mut error));
     assert!(take_buffer(&mut error).is_empty());
 

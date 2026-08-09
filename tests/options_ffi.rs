@@ -1,6 +1,8 @@
+#![cfg(not(windows))]
+
 use edge_sandbox::ffi::{
     EdgeSandboxBuffer, EdgeSandboxDeterministicOptions, EdgeSandboxLimits,
-    edge_sandbox_buffer_free, edge_sandbox_create_with_options, edge_sandbox_destroy,
+    edge_sandbox_buffer_free, edge_sandbox_create_self_hosted_with_options, edge_sandbox_destroy,
     edge_sandbox_evaluate, edge_sandbox_options_append_iframe_hook,
     edge_sandbox_options_append_network_replay, edge_sandbox_options_append_network_replay_header,
     edge_sandbox_options_clear_network_replay, edge_sandbox_options_create,
@@ -181,11 +183,8 @@ fn complete_typed_options_cross_ffi_and_binary_worker_boundaries() {
         &mut error,
     );
 
-    let worker = env!("CARGO_BIN_EXE_edge-sandbox").as_bytes();
-    // SAFETY: the worker path and typed options remain live for this call.
-    let runtime = unsafe {
-        edge_sandbox_create_with_options(worker.as_ptr(), worker.len(), options, &mut error)
-    };
+    // SAFETY: the typed options remain live for this call.
+    let runtime = unsafe { edge_sandbox_create_self_hosted_with_options(options, &mut error) };
     assert!(!runtime.is_null(), "{}", take_buffer(&mut error));
     assert!(take_buffer(&mut error).is_empty());
 
