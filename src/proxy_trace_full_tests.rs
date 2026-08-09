@@ -50,6 +50,31 @@ fn native_trace_excludes_user_selected_api_paths_and_expands_array_arguments() {
     );
 }
 
+#[test]
+fn native_trace_retains_large_array_arguments_past_the_old_preview_limit() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    runtime.enable_native_trace().expect("enable native trace");
+    runtime
+        .evaluate("new Blob([Array.from({ length: 64 }, (_, index) => index)])")
+        .expect("evaluate large trace array");
+
+    let blob = runtime
+        .native_trace()
+        .into_iter()
+        .find(|entry| entry.api == "Blob")
+        .expect("Blob constructor trace");
+    assert!(
+        blob.arguments.contains(",63]"),
+        "large array tail was not retained: {}",
+        blob.arguments
+    );
+    assert!(
+        !blob.arguments.contains(" more"),
+        "large array was unexpectedly truncated: {}",
+        blob.arguments
+    );
+}
+
 const GRAPH_SNAPSHOT: &str = r#"
 (() => {
   const start = __EDGE_AUDIT_START__;

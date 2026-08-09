@@ -7,7 +7,12 @@ use std::sync::{
 const MAX_TRACE_LABEL_CHARACTERS: usize = 512;
 const MAX_TRACE_PROPERTY_CHARACTERS: usize = 256;
 const MAX_TRACE_ARRAY_DEPTH: usize = 3;
-const MAX_TRACE_ARRAY_ITEMS: usize = 32;
+// Trace values are an opt-in diagnostic surface.  Keep label/property limits
+// small, but retain enough array items to make a complete browser-profile
+// aggregate observable when tracing is enabled.  The previous 32-item/512-
+// character limits silently hid the tail of large argument arrays.
+const MAX_TRACE_ARRAY_ITEMS: usize = 512;
+const MAX_TRACE_ARRAY_CHARACTERS: usize = 65_536;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct TraceEntry {
@@ -1323,7 +1328,7 @@ fn summarize_array<'s>(
     ancestors.pop();
     bounded_text(
         &format!("[{}]", values.join(",")),
-        MAX_TRACE_LABEL_CHARACTERS,
+        MAX_TRACE_ARRAY_CHARACTERS,
     )
 }
 
