@@ -10,10 +10,22 @@ from demo.fp.pc_navigator_hardware_catalog import (
     get_compatible_pc_navigator_hardware_profiles_for_gpu,
 )
 from demo.fp.screen_profile_catalog import (
+    BASE_PC_SCREEN_SIZE_ROWS,
     PC_SCREEN_PROFILES,
     get_compatible_pc_screen_profiles_for_device,
+    materialize_pc_screen_profile_for_windows,
 )
-from demo.fp.windows_webgl_gpu_catalog import WINDOWS_WEBGL_GPU_CANDIDATES
+from demo.fp.windows_webgl_gpu_catalog import (
+    NVIDIA_OPEN_GPU_EXTENSION_CANDIDATES,
+    WINDOWS_WEBGL_GPU_CANDIDATES,
+)
+from demo.fp.windows_css_profile_catalog import chromium150_windows_css_overrides
+from demo.fp.nvidia_open_gpu_extension_catalog import (
+    DAWN_SOURCE_SHA256,
+    NVIDIA_SOURCE_SHA256,
+    count_device_pairs,
+    count_products,
+)
 from demo.fp.windows_pci_device_catalog import WINDOWS_GPU_DEVICE_VARIANTS
 from examples.windows_edge_profile import windows_edge_150_profile
 
@@ -60,7 +72,8 @@ class WindowsProfileCatalogTests(unittest.TestCase):
         # ANGLE renderer shapes while retaining the same internal device ID.
         self.assertEqual(
             len(renderer_shapes_by_device),
-            sum(len(items) for items in WINDOWS_GPU_DEVICE_VARIANTS.values()),
+            sum(len(items) for items in WINDOWS_GPU_DEVICE_VARIANTS.values())
+            + len(NVIDIA_OPEN_GPU_EXTENSION_CANDIDATES) // 2,
         )
         for device_key, shapes in renderer_shapes_by_device.items():
             self.assertEqual(len(shapes), 2, device_key)
@@ -84,6 +97,25 @@ class WindowsProfileCatalogTests(unittest.TestCase):
             {bool(item["rendererDeviceIdExposed"]) for item in rtx_5060},
             {False, True},
         )
+
+        webgpu_by_base = {
+            str(item["baseProfileId"]): bool(item["webgpuSupported"])
+            for item in WINDOWS_WEBGL_GPU_CANDIDATES
+        }
+        self.assertFalse(webgpu_by_base["win_intel_hd_4000"])
+        self.assertFalse(webgpu_by_base["win_intel_hd_5300"])
+        self.assertTrue(webgpu_by_base["win_intel_hd_5500"])
+        self.assertTrue(webgpu_by_base["win_nvidia_gtx_760"])
+
+        # The current NVIDIA source is an additive inventory. Only complete
+        # product/Device-ID rows whose architecture exists in pinned Edge 150
+        # Dawn enter the browser pool; the full inventory remains inspectable.
+        self.assertGreaterEqual(count_products(), 220)
+        self.assertGreaterEqual(count_device_pairs(), 330)
+        self.assertGreaterEqual(count_products(browser_eligible_only=True), 150)
+        self.assertGreaterEqual(count_device_pairs(browser_eligible_only=True), 250)
+        self.assertRegex(NVIDIA_SOURCE_SHA256, r"^[0-9a-f]{64}$")
+        self.assertRegex(DAWN_SOURCE_SHA256, r"^[0-9a-f]{64}$")
 
     def test_windows_baseline_does_not_inherit_mac_surface_values(self) -> None:
         profile = windows_edge_150_profile()
@@ -115,8 +147,55 @@ class WindowsProfileCatalogTests(unittest.TestCase):
             int(item["physicalRamHintGb"])
             for item in PC_NAVIGATOR_HARDWARE_PROFILES
         }
+        self.assertIn(3, physical_memory_values)
+        self.assertIn(6, physical_memory_values)
         self.assertIn(12, physical_memory_values)
         self.assertIn(96, physical_memory_values)
+
+        logical_processor_values = {
+            int(item["hardwareConcurrency"])
+            for item in PC_NAVIGATOR_HARDWARE_PROFILES
+        }
+        self.assertIn(32, logical_processor_values)
+        self.assertGreaterEqual(max(logical_processor_values), 192)
+
+        # hardwareConcurrency is not deviceMemory and has no eight-thread cap.
+        explicit = windows_edge_150_profile(
+            hardware_concurrency=32,
+            device_memory_gb=32.0,
+        )
+        self.assertEqual(explicit.navigator.hardware_concurrency, 32)
+        self.assertEqual(explicit.navigator.device_memory_gb, 32.0)
+
+    def test_screen_extension_is_additive_and_windows_work_area_is_versioned(self) -> None:
+        self.assertEqual(len(BASE_PC_SCREEN_SIZE_ROWS), 104)
+        self.assertEqual(
+            tuple(
+                str(item["id"])
+                for item in PC_SCREEN_PROFILES[: len(BASE_PC_SCREEN_SIZE_ROWS)]
+            ),
+            tuple(str(row[0]) for row in BASE_PC_SCREEN_SIZE_ROWS),
+        )
+        self.assertGreaterEqual(len(PC_SCREEN_PROFILES), 124)
+        extension = PC_SCREEN_PROFILES[len(BASE_PC_SCREEN_SIZE_ROWS) :]
+        self.assertTrue(extension)
+        self.assertTrue(all(item["evidenceSources"] for item in extension))
+        self.assertEqual(
+            len({str(item["id"]) for item in PC_SCREEN_PROFILES}),
+            len(PC_SCREEN_PROFILES),
+        )
+
+        base = next(
+            item for item in PC_SCREEN_PROFILES
+            if item["id"] == "pc_1920x1080_1x_desktop"
+        )
+        windows_10 = materialize_pc_screen_profile_for_windows(base, "10.0.0")
+        windows_11 = materialize_pc_screen_profile_for_windows(base, "15.0.0")
+        self.assertEqual(windows_10["screen"]["availHeight"], 1_040)
+        self.assertEqual(windows_10["taskbarCssHeight"], 40)
+        self.assertEqual(windows_11["screen"]["availHeight"], 1_032)
+        self.assertEqual(windows_11["taskbarCssHeight"], 48)
+        self.assertEqual(base["screen"]["availHeight"], 1_032)
 
     def test_every_physical_windows_gpu_has_a_large_compatible_space(self) -> None:
         possible_combinations = 0
@@ -149,7 +228,9 @@ class WindowsProfileCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(physical_gpu_count, 280)
         self.assertGreaterEqual(len(PC_NAVIGATOR_HARDWARE_PROFILES), 125)
         self.assertGreaterEqual(len(PC_SCREEN_PROFILES), 100)
-        self.assertGreaterEqual(minimum_per_gpu or 0, 1_000)
+        # Form-factor constraints intentionally remove laptop/desktop cross
+        # products. Keep a broad space without reintroducing invalid pairs.
+        self.assertGreaterEqual(minimum_per_gpu or 0, 800)
         self.assertGreaterEqual(possible_combinations, 500_000)
 
     def test_portable_desktop_workstation_and_arm64_boundaries(self) -> None:
@@ -219,7 +300,12 @@ class WindowsProfileCatalogTests(unittest.TestCase):
             self.assertEqual(profile.window.inner_width, 0.0)
             self.assertEqual(profile.window.inner_height, 0.0)
             self.assertEqual(profile.canvas.font_bounding_box_ascent, 12.0)
-            self.assertIn("width:169px", profile.css.input_text)
+            expected_css = chromium150_windows_css_overrides(
+                float(profile.screen.device_pixel_ratio),
+                profile.navigator.language,
+            )
+            self.assertEqual(profile.css.input_text, expected_css["input_text"])
+            self.assertEqual(profile.css.input_file, expected_css["input_file"])
             self.assertEqual(profile.webgl.max_viewport_width, 32_767)
             self.assertEqual(profile.webgl.max_vertex_uniform_vectors, 4_096)
             self.assertEqual(profile.webgpu.max_buffer_size, 268_435_456)
@@ -241,7 +327,14 @@ class WindowsProfileCatalogTests(unittest.TestCase):
         # GPU catalog growth must not flatten the independently weighted CPU,
         # RAM, and display distributions. Mainstream states remain dominant;
         # workstation-size values stay available only as a low-probability tail.
-        self.assertGreaterEqual(logical_processors[6] + logical_processors[8], 900)
+        self.assertGreaterEqual(
+            sum(count for cores, count in logical_processors.items() if cores <= 16),
+            1_700,
+        )
+        self.assertGreater(
+            sum(count for cores, count in logical_processors.items() if cores >= 32),
+            0,
+        )
         self.assertGreaterEqual(physical_memory[16] + physical_memory[32], 1_350)
         self.assertLess(sum(count for ram, count in physical_memory.items() if ram >= 96), 30)
         self.assertGreaterEqual(
