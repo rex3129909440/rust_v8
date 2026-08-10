@@ -169,6 +169,7 @@ impl EdgeRuntime {
         let context = v8::Local::new(scope, &self.context);
         let scope = &mut v8::ContextScope::new(scope, context);
         v8::tc_scope!(let try_catch, scope);
+        crate::web::animation_timeline::sample_current_realm(try_catch);
         let source = v8::String::new(try_catch, source)
             .ok_or_else(|| "source exceeds V8 limits".to_owned())?;
         let traced = crate::trace::is_enabled(try_catch);

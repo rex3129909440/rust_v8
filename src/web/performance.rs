@@ -423,21 +423,45 @@ fn record(
         .cloned()
 }
 
-fn now_for_record(scope: &v8::PinScope<'_, '_>, record: &PerformanceRecord) -> f64 {
+fn now_for_record_at(
+    scope: &v8::PinScope<'_, '_>,
+    record: &PerformanceRecord,
+    monotonic_time_ms: f64,
+) -> f64 {
     crate::determinism::relative_high_resolution_milliseconds(
         scope,
-        crate::determinism::elapsed_milliseconds(scope),
+        monotonic_time_ms,
         record.monotonic_origin,
     )
 }
 
-pub(crate) fn now_for_realm(scope: &v8::PinScope<'_, '_>, realm_id: i32) -> Option<f64> {
+fn now_for_record(scope: &v8::PinScope<'_, '_>, record: &PerformanceRecord) -> f64 {
+    now_for_record_at(
+        scope,
+        record,
+        crate::determinism::monotonic_snapshot_milliseconds(scope),
+    )
+}
+
+pub(crate) fn now_for_realm_at(
+    scope: &v8::PinScope<'_, '_>,
+    realm_id: i32,
+    monotonic_time_ms: f64,
+) -> Option<f64> {
     scope
         .get_slot::<PerformanceStore>()?
         .records
         .values()
         .find(|record| record.realm_id == realm_id)
-        .map(|record| now_for_record(scope, record))
+        .map(|record| now_for_record_at(scope, record, monotonic_time_ms))
+}
+
+pub(crate) fn now_for_realm(scope: &v8::PinScope<'_, '_>, realm_id: i32) -> Option<f64> {
+    now_for_realm_at(
+        scope,
+        realm_id,
+        crate::determinism::monotonic_snapshot_milliseconds(scope),
+    )
 }
 
 pub(crate) fn now_for_current_realm(scope: &v8::PinScope<'_, '_>) -> Option<f64> {

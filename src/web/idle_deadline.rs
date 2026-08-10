@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub(crate) struct IdleDeadlineStore {
@@ -10,7 +9,7 @@ pub(crate) struct IdleDeadlineStore {
 #[derive(Clone)]
 struct IdleDeadlineRecord {
     did_timeout: bool,
-    expires_at: Instant,
+    deadline_monotonic_ms: f64,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -54,10 +53,10 @@ fn ensure_constructor<'s>(
     Ok(constructor)
 }
 
-pub(crate) fn create<'s>(
+pub(crate) fn create_at<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     did_timeout: bool,
-    budget_milliseconds: f64,
+    deadline_monotonic_ms: f64,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
@@ -65,12 +64,6 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
         return Err("cannot create IdleDeadline".to_owned());
     }
-    let budget = if budget_milliseconds.is_finite() {
-        budget_milliseconds.clamp(0.0, 50.0)
-    } else {
-        0.0
-    };
-    let expires_at = Instant::now() + Duration::from_secs_f64(budget / 1000.0);
     scope
         .get_slot_mut::<IdleDeadlineStore>()
         .ok_or_else(|| "IdleDeadline state was not prepared".to_owned())?
@@ -79,7 +72,7 @@ pub(crate) fn create<'s>(
             object.get_identity_hash().get(),
             IdleDeadlineRecord {
                 did_timeout,
-                expires_at,
+                deadline_monotonic_ms,
             },
         );
     Ok(object)
@@ -128,11 +121,10 @@ fn time_remaining(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let now = Instant::now();
-    let remaining = if record.expires_at > now {
-        (record.expires_at - now).as_secs_f64() * 1000.0
-    } else {
-        0.0
-    };
-    result.set(v8::Number::new(scope, remaining.min(50.0)).into());
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+    let clamped_deadline =
+        crate::determinism::high_resolution_milliseconds(scope, record.deadline_monotonic_ms);
+    let clamped_now = crate::determinism::high_resolution_milliseconds(scope, now);
+    let remaining = (clamped_deadline - clamped_now).clamp(0.0, 50.0);
+    result.set(v8::Number::new(scope, remaining).into());
 }

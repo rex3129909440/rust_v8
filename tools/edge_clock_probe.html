@@ -1,0 +1,116 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Edge clock semantics probe</title>
+<pre id="out">pending</pre>
+<script>
+(async () => {
+  const result = {};
+  const positiveDeltas = (read, count) => {
+    let previous = read();
+    const values = [];
+    for (let index = 0; index < count && values.length < 32; index++) {
+      const current = read();
+      if (current > previous) values.push(current - previous);
+      previous = current;
+    }
+    return values;
+  };
+  result.crossOriginIsolated = crossOriginIsolated;
+  result.performanceDeltas = positiveDeltas(() => performance.now(), 2000000);
+  result.dateDeltas = positiveDeltas(() => Date.now(), 2000000);
+  result.originSkew = performance.timeOrigin + performance.now() - Date.now();
+  result.eventSkew = new Event("probe").timeStamp - performance.now();
+  result.timelineSkew = document.timeline.currentTime - performance.now();
+  result.temporal = typeof Temporal === "object" ? {
+    instantEpochNanoseconds: String(Temporal.Now.instant().epochNanoseconds),
+    instantDateSkew: Number(Temporal.Now.instant().epochMilliseconds) - Date.now(),
+    timeZoneId: Temporal.Now.timeZoneId(),
+    names: Object.getOwnPropertyNames(Temporal.Now),
+    shapes: Object.fromEntries(Object.getOwnPropertyNames(Temporal.Now).map(name => {
+      const value = Temporal.Now[name];
+      return [name, typeof value === "function" ? {
+        name: value.name,
+        length: value.length,
+        source: Function.prototype.toString.call(value)
+      } : typeof value];
+    }))
+  } : null;
+
+  result.raf = await new Promise(resolve => {
+    const values = [];
+    const collect = timestamp => {
+      values.push({ timestamp, now: performance.now(), timeline: document.timeline.currentTime });
+      if (values.length === 3) resolve(values);
+    };
+    requestAnimationFrame(collect);
+    requestAnimationFrame(collect);
+    requestAnimationFrame(collect);
+  });
+
+  result.timeout = await new Promise(resolve => {
+    const started = performance.now();
+    setTimeout(() => resolve({
+      elapsed: performance.now() - started,
+      event: new Event("timeout").timeStamp,
+      now: performance.now(),
+      date: Date.now()
+    }), 10);
+  });
+
+  result.idle = await new Promise(resolve => {
+    requestIdleCallback(deadline => {
+      const first = deadline.timeRemaining();
+      let previous = first;
+      const decreases = [];
+      for (let index = 0; index < 1000000 && decreases.length < 32; index++) {
+        const current = deadline.timeRemaining();
+        if (current < previous) decreases.push(previous - current);
+        previous = current;
+      }
+      resolve({ didTimeout: deadline.didTimeout, first, decreases, last: previous });
+    }, { timeout: 100 });
+  });
+
+  const iframe = document.createElement("iframe");
+  document.body.appendChild(iframe);
+  const parentTimeout = setTimeout(() => {}, 100000);
+  const childTimeout = iframe.contentWindow.setTimeout(() => {}, 100000);
+  clearTimeout(parentTimeout);
+  iframe.contentWindow.clearTimeout(childTimeout);
+  const parentIdle = requestIdleCallback(() => {}, { timeout: 100000 });
+  const childIdle = iframe.contentWindow.requestIdleCallback(() => {}, { timeout: 100000 });
+  cancelIdleCallback(parentIdle);
+  iframe.contentWindow.cancelIdleCallback(childIdle);
+  result.iframe = {
+    parentOrigin: performance.timeOrigin,
+    childOrigin: iframe.contentWindow.performance.timeOrigin,
+    parentNow: performance.now(),
+    childNow: iframe.contentWindow.performance.now(),
+    childEvent: new iframe.contentWindow.Event("iframe").timeStamp,
+    parentTimeout,
+    childTimeout,
+    parentIdle,
+    childIdle
+  };
+
+  try {
+    const audio = new AudioContext();
+    const before = audio.currentTime;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    result.audio = {
+      state: audio.state,
+      sampleRate: audio.sampleRate,
+      before,
+      after: audio.currentTime,
+      output: audio.getOutputTimestamp()
+    };
+    await audio.close();
+  } catch (error) {
+    result.audioError = String(error);
+  }
+
+  document.getElementById("out").textContent = JSON.stringify(result);
+})().catch(error => {
+  document.getElementById("out").textContent = JSON.stringify({ error: String(error), stack: error.stack });
+});
+</script>

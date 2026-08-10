@@ -3164,3 +3164,201 @@ fn webcodecs_codec_support_is_controlled_by_the_fingerprint_profile() {
         "false,true,false,true"
     );
 }
+
+#[test]
+fn window_clock_callback_identifiers_are_realm_local() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const frame = document.createElement("iframe");
+              document.body.appendChild(frame);
+              const child = frame.contentWindow;
+              const parentTimer = setTimeout(() => {}, 10000);
+              const childTimer = child.setTimeout(() => {}, 10000);
+              const parentRaf = requestAnimationFrame(() => {});
+              const childRaf = child.requestAnimationFrame(() => {});
+              const parentIdle = requestIdleCallback(() => {});
+              const childIdle = child.requestIdleCallback(() => {});
+              clearTimeout(parentTimer);
+              child.clearTimeout(childTimer);
+              cancelAnimationFrame(parentRaf);
+              child.cancelAnimationFrame(childRaf);
+              cancelIdleCallback(parentIdle);
+              child.cancelIdleCallback(childIdle);
+              return [
+                parentTimer, childTimer,
+                parentRaf, childRaf,
+                parentIdle, childIdle
+              ].join(",");
+            })()
+            "#,
+        ),
+        "1,1,1,1,1,1"
+    );
+}
+
+#[test]
+fn animation_frame_batch_uses_one_timestamp_and_samples_document_timeline() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.frameClockSamples = [];
+        requestAnimationFrame(timestamp => {
+          frameClockSamples.push([
+            timestamp,
+            document.timeline.currentTime,
+            performance.now()
+          ]);
+        });
+        requestAnimationFrame(timestamp => {
+          frameClockSamples.push([
+            timestamp,
+            document.timeline.currentTime,
+            performance.now()
+          ]);
+        });
+        "#,
+    );
+    let values = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const [first, second] = frameClockSamples;
+          return [
+            frameClockSamples.length,
+            first[0] === second[0],
+            first[0] === first[1],
+            second[0] === second[1],
+            first[2] >= first[0] && first[2] - first[0] < 5,
+            second[2] >= second[0] && second[2] - second[0] < 5
+          ].join("|");
+        })()
+        "#,
+    );
+    assert_eq!(values, "2|true|true|true|true|true");
+}
+
+#[test]
+fn idle_deadlines_and_timeout_flags_use_the_unified_monotonic_clock() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.idleClockSamples = [];
+        requestIdleCallback(deadline => {
+          idleClockSamples.push([
+            "idle",
+            deadline.didTimeout,
+            deadline.timeRemaining()
+          ]);
+        });
+        requestIdleCallback(deadline => {
+          idleClockSamples.push([
+            "timeout",
+            deadline.didTimeout,
+            deadline.timeRemaining()
+          ]);
+        }, { timeout: 0 });
+        "#,
+    );
+    let values = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const idle = idleClockSamples.find(value => value[0] === "idle");
+          const timeout = idleClockSamples.find(value => value[0] === "timeout");
+          return [
+            idleClockSamples.length,
+            idle[1],
+            idle[2] > 0 && idle[2] <= 50,
+            timeout[1],
+            timeout[2]
+          ].join("|");
+        })()
+        "#,
+    );
+    assert_eq!(values, "2|false|true|true|0");
+}
+
+#[test]
+fn abort_signal_timeout_and_scheduler_delays_are_asynchronous_clock_tasks() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.clockTaskOrder = [];
+        const signal = AbortSignal.timeout(5);
+        clockTaskOrder.push(`initial:${signal.aborted}`);
+        signal.addEventListener("abort", () => {
+          clockTaskOrder.push(`abort:${signal.reason.name}`);
+        });
+        scheduler.postTask(() => {
+          clockTaskOrder.push("postTask");
+        }, { delay: 10 }).then(() => scheduler.yield()).then(() => {
+          clockTaskOrder.push("yield");
+        });
+        "#,
+    );
+    assert_eq!(
+        text(&mut runtime, "clockTaskOrder.join('|')"),
+        "initial:false|abort:TimeoutError|postTask|yield"
+    );
+}
+
+#[test]
+fn deterministic_temporal_now_shares_the_date_epoch_without_shape_drift() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.deterministic.clock_epoch_ms = Some(1_700_000_000_000);
+    options.deterministic.clock_step_ms = 0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("deterministic Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const instant = Temporal.Now.instant();
+              return [
+                instant.epochNanoseconds.toString(),
+                Date.now(),
+                Temporal.Now.timeZoneId(),
+                Object.getOwnPropertyNames(Temporal.Now).join(","),
+                Temporal.Now.instant.name,
+                Temporal.Now.instant.length,
+                Function.prototype.toString.call(Temporal.Now.instant),
+                Temporal.Now.plainDateISO().constructor.name,
+                Temporal.Now.plainTimeISO().constructor.name,
+                Temporal.Now.plainDateTimeISO().constructor.name,
+                Temporal.Now.zonedDateTimeISO().constructor.name
+              ].join("|");
+            })()
+            "#,
+        ),
+        "1700000000000000000|1700000000000|Asia/Shanghai|instant,timeZoneId,plainDateTimeISO,zonedDateTimeISO,plainDateISO,plainTimeISO|instant|0|function instant() { [native code] }|PlainDate|PlainTime|PlainDateTime|ZonedDateTime"
+    );
+}
+
+#[test]
+fn deterministic_same_deadline_timers_keep_cross_realm_registration_order() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.deterministic.clock_epoch_ms = Some(1_700_000_000_000);
+    options.deterministic.clock_step_ms = 0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("deterministic Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.sameDeadlineOrder = [];
+        const frame = document.createElement("iframe");
+        document.body.appendChild(frame);
+        frame.contentWindow.setTimeout(() => sameDeadlineOrder.push("child"), 0);
+        setTimeout(() => sameDeadlineOrder.push("parent"), 0);
+        "#,
+    );
+    assert_eq!(
+        text(&mut runtime, "sameDeadlineOrder.join(',')"),
+        "child,parent"
+    );
+}

@@ -11,6 +11,8 @@ on:
         options:
           - all
           - linux
+          - windows
+          - windows-linux
   push:
     branches:
       - main
@@ -22,32 +24,14 @@ permissions:
 
 jobs:
   windows-and-macos:
-    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all'
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'windows' || inputs.platform == 'windows-linux'
     name: ${{ matrix.artifact }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - artifact: edge-sandbox-windows-x64
-            runner: windows-2025
-            native_path: target/release/edge_sandbox.dll
-            library_name: edge_sandbox.dll
-            wheel_platform: win_amd64
-            deployment_target: ""
-          - artifact: edge-sandbox-macos-arm64
-            runner: macos-15
-            native_path: target/release/libedge_sandbox.dylib
-            library_name: libedge_sandbox.dylib
-            wheel_platform: macosx_12_0_arm64
-            deployment_target: "12.0"
-          - artifact: edge-sandbox-macos-x64
-            runner: macos-15-intel
-            native_path: target/release/libedge_sandbox.dylib
-            library_name: libedge_sandbox.dylib
-            wheel_platform: macosx_12_0_x86_64
-            deployment_target: "12.0"
+        include: ${{ fromJSON((github.event_name == 'workflow_dispatch' && (inputs.platform == 'windows' || inputs.platform == 'windows-linux')) && '[{"artifact":"edge-sandbox-windows-x64","runner":"windows-2025","native_path":"target/release/edge_sandbox.dll","library_name":"edge_sandbox.dll","wheel_platform":"win_amd64","deployment_target":""}]' || '[{"artifact":"edge-sandbox-windows-x64","runner":"windows-2025","native_path":"target/release/edge_sandbox.dll","library_name":"edge_sandbox.dll","wheel_platform":"win_amd64","deployment_target":""},{"artifact":"edge-sandbox-macos-arm64","runner":"macos-15","native_path":"target/release/libedge_sandbox.dylib","library_name":"libedge_sandbox.dylib","wheel_platform":"macosx_12_0_arm64","deployment_target":"12.0"},{"artifact":"edge-sandbox-macos-x64","runner":"macos-15-intel","native_path":"target/release/libedge_sandbox.dylib","library_name":"libedge_sandbox.dylib","wheel_platform":"macosx_12_0_x86_64","deployment_target":"12.0"}]') }}
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_TERM_COLOR: always
@@ -173,7 +157,7 @@ jobs:
           compression-level: 0
 
   linux-manylinux:
-    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'linux'
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'linux' || inputs.platform == 'windows-linux'
     name: edge-sandbox-linux-x64
     runs-on: ubuntu-24.04
     timeout-minutes: 120

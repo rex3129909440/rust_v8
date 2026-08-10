@@ -4,6 +4,14 @@ use std::collections::HashMap;
 pub(crate) struct AbortSignalStore {
     constructors: HashMap<i32, v8::Global<v8::Function>>,
     records: HashMap<i32, AbortSignalRecord>,
+    pending_timeouts: Vec<PendingAbortTimeout>,
+}
+
+struct PendingAbortTimeout {
+    due_ms: f64,
+    milliseconds: u64,
+    signal: v8::Global<v8::Object>,
+    context: v8::Global<v8::Context>,
 }
 
 #[derive(Clone)]
@@ -303,15 +311,81 @@ fn static_timeout(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    let ms = a.get(0).uint32_value(scope).unwrap_or(0);
-    let message = format!("The operation timed out after {ms} ms");
-    let reason = v8::String::new(scope, &message)
-        .map(Into::into)
-        .unwrap_or_else(|| v8::undefined(scope).into());
-    match create(scope, Some(reason)) {
-        Ok(v) => r.set(v.into()),
-        Err(m) => crate::webidl::throw_type_error(scope, &m),
+    if a.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'timeout' on 'AbortSignal': 1 argument required, but only 0 present.",
+        );
+        return;
     }
+    let Some(milliseconds) = a.get(0).number_value(scope) else {
+        return;
+    };
+    if !milliseconds.is_finite()
+        || milliseconds < 0.0
+        || milliseconds.trunc() > 9_007_199_254_740_991.0
+    {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'timeout' on 'AbortSignal': Value is outside the 'unsigned long long' value range.",
+        );
+        return;
+    }
+    let milliseconds = milliseconds.trunc() as u64;
+    let Ok(signal) = create(scope, None) else {
+        return;
+    };
+    let pending = PendingAbortTimeout {
+        due_ms: crate::determinism::monotonic_snapshot_milliseconds(scope) + milliseconds as f64,
+        milliseconds,
+        signal: v8::Global::new(scope, signal),
+        context: v8::Global::new(scope, scope.get_current_context()),
+    };
+    if let Some(store) = scope.get_slot_mut::<AbortSignalStore>() {
+        store.pending_timeouts.push(pending);
+    }
+    r.set(signal.into());
+}
+
+pub(crate) fn next_due(scope: &v8::PinScope<'_, '_>) -> Option<f64> {
+    scope.get_slot::<AbortSignalStore>().and_then(|store| {
+        store
+            .pending_timeouts
+            .iter()
+            .map(|pending| pending.due_ms)
+            .min_by(f64::total_cmp)
+    })
+}
+
+pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+    let mut ready = Vec::new();
+    if let Some(store) = scope.get_slot_mut::<AbortSignalStore>() {
+        let mut pending = Vec::with_capacity(store.pending_timeouts.len());
+        for timeout in std::mem::take(&mut store.pending_timeouts) {
+            if timeout.due_ms <= now {
+                ready.push(timeout);
+            } else {
+                pending.push(timeout);
+            }
+        }
+        store.pending_timeouts = pending;
+    }
+    ready.sort_by(|left, right| left.due_ms.total_cmp(&right.due_ms));
+    let ran = !ready.is_empty();
+    for timeout in ready {
+        let context = v8::Local::new(scope, &timeout.context);
+        let timeout_scope = &mut v8::ContextScope::new(scope, context);
+        let signal = v8::Local::new(timeout_scope, &timeout.signal);
+        let message = format!("The operation timed out after {} ms", timeout.milliseconds);
+        let reason =
+            super::dom_exception::create(timeout_scope, message, "TimeoutError".to_owned())
+                .map(Into::into)
+                .unwrap_or_else(|_| v8::undefined(timeout_scope).into());
+        abort(timeout_scope, signal, reason);
+        timeout_scope.perform_microtask_checkpoint();
+    }
+    ran
 }
 
 pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {

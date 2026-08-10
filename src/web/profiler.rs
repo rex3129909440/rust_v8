@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::time::Instant;
 #[derive(Clone)]
 struct ProfilerRecord {
     sample_interval: f64,
     stopped: bool,
-    started: Instant,
+    started: f64,
+    realm_id: i32,
 }
 #[derive(Default)]
 pub(crate) struct ProfilerStore {
@@ -64,6 +64,8 @@ fn construct(
     let init = v8::Local::<v8::Object>::try_from(a.get(0)).ok();
     let interval = property_number(s, init, "sampleInterval").unwrap_or(10.0);
     super::event_target::attach(s, a.this());
+    let started = super::performance::now_for_current_realm(s).unwrap_or(0.0);
+    let realm_id = crate::webidl::realm_id(s);
     s.get_slot_mut::<ProfilerStore>()
         .expect("state")
         .records
@@ -72,7 +74,8 @@ fn construct(
             ProfilerRecord {
                 sample_interval: interval,
                 stopped: false,
-                started: Instant::now(),
+                started,
+                realm_id,
             },
         );
     r.set(a.this().into())
@@ -115,7 +118,9 @@ fn stop(
         return;
     };
     x.stopped = true;
-    let elapsed = x.started.elapsed().as_secs_f64() * 1000.0;
+    let elapsed = (super::performance::now_for_realm(s, x.realm_id).unwrap_or(x.started)
+        - x.started)
+        .max(0.0);
     if let Some(v) = s
         .get_slot_mut::<ProfilerStore>()
         .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))

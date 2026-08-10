@@ -2,10 +2,15 @@ use std::collections::HashMap;
 
 #[derive(Clone)]
 struct SessionRecord {
+    object: v8::Global<v8::Object>,
+    context: v8::Global<v8::Context>,
+    realm_id: i32,
     mode: String,
     ended: bool,
     depth_active: bool,
     next_animation_frame: u32,
+    animation_frame_due_ms: Option<f64>,
+    animation_frames: HashMap<u32, v8::Global<v8::Function>>,
     render_state: v8::Global<v8::Object>,
     input_sources: v8::Global<v8::Object>,
     enabled_features: v8::Global<v8::Array>,
@@ -258,10 +263,15 @@ pub(crate) fn create<'s>(
     let local_floor = v8::String::new(scope, "local-floor").expect("short XR feature");
     let _ = enabled_features.set_index(scope, 0, local_floor.into());
     let record = SessionRecord {
+        object: v8::Global::new(scope, object),
+        context: v8::Global::new(scope, scope.get_current_context()),
+        realm_id: crate::webidl::realm_id(scope),
         mode,
         ended: false,
         depth_active: true,
         next_animation_frame: 1,
+        animation_frame_due_ms: None,
+        animation_frames: HashMap::new(),
         render_state: v8::Global::new(scope, render_state),
         input_sources: v8::Global::new(scope, input_sources),
         enabled_features: v8::Global::new(scope, enabled_features),
@@ -496,11 +506,19 @@ fn cancel_animation_frame(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if record(scope, arguments.this()).is_none() {
+    let handle = arguments.get(0).uint32_value(scope).unwrap_or(0);
+    let Some(session) = scope.get_slot_mut::<XrSessionStore>().and_then(|store| {
+        store
+            .records
+            .get_mut(&arguments.this().get_identity_hash().get())
+    }) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
+    };
+    session.animation_frames.remove(&handle);
+    if session.animation_frames.is_empty() {
+        session.animation_frame_due_ms = None;
     }
-    let _handle = arguments.get(0).uint32_value(scope).unwrap_or(0);
     result.set(v8::undefined(scope).into());
 }
 
@@ -518,6 +536,8 @@ fn end(
         return;
     };
     session.ended = true;
+    session.animation_frames.clear();
+    session.animation_frame_due_ms = None;
     if let Ok(event) = super::event::create(scope, "end") {
         super::event_target::dispatch(scope, arguments.this(), event);
     }
@@ -550,6 +570,8 @@ fn request_animation_frame(
         crate::webidl::throw_type_error(scope, "callback must be a function");
         return;
     };
+    let callback = v8::Global::new(scope, callback);
+    let due_ms = crate::determinism::monotonic_snapshot_milliseconds(scope) + 1_000.0 / 60.0;
     let Some(session) = scope.get_slot_mut::<XrSessionStore>().and_then(|store| {
         store
             .records
@@ -558,17 +580,89 @@ fn request_animation_frame(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if session.ended {
+        result.set(v8::Integer::new_from_unsigned(scope, 0).into());
+        return;
+    }
     let handle = session.next_animation_frame;
     session.next_animation_frame = session.next_animation_frame.saturating_add(1);
-    match super::xr_frame::create(scope, arguments.this()) {
-        Ok(frame) => {
-            let timestamp = v8::Number::new(scope, 0.0);
-            let callback_arguments = [timestamp.into(), frame.into()];
-            let _ = callback.call(scope, arguments.this().into(), &callback_arguments);
-            result.set(v8::Integer::new_from_unsigned(scope, handle).into());
+    session.animation_frames.insert(handle, callback);
+    session.animation_frame_due_ms.get_or_insert(due_ms);
+    result.set(v8::Integer::new_from_unsigned(scope, handle).into());
+}
+
+pub(crate) fn next_due(scope: &v8::PinScope<'_, '_>) -> Option<f64> {
+    scope.get_slot::<XrSessionStore>().and_then(|store| {
+        store
+            .records
+            .values()
+            .filter(|session| !session.ended)
+            .filter_map(|session| session.animation_frame_due_ms)
+            .min_by(f64::total_cmp)
+    })
+}
+
+pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
+    let monotonic_now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+    let mut ready_ids = scope
+        .get_slot::<XrSessionStore>()
+        .map(|store| {
+            store
+                .records
+                .iter()
+                .filter(|(_, session)| {
+                    !session.ended
+                        && session
+                            .animation_frame_due_ms
+                            .is_some_and(|due| due <= monotonic_now)
+                })
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    ready_ids.sort_unstable();
+    let mut ran = false;
+    for session_id in ready_ids {
+        let snapshot = scope
+            .get_slot_mut::<XrSessionStore>()
+            .and_then(|store| store.records.get_mut(&session_id))
+            .map(|session| {
+                session.animation_frame_due_ms = None;
+                (
+                    session.object.clone(),
+                    session.context.clone(),
+                    session.realm_id,
+                    std::mem::take(&mut session.animation_frames),
+                )
+            });
+        let Some((session, context, realm_id, callbacks)) = snapshot else {
+            continue;
+        };
+        if callbacks.is_empty() {
+            continue;
         }
-        Err(message) => crate::webidl::throw_type_error(scope, &message),
+        let timestamp = super::performance::now_for_realm_at(scope, realm_id, monotonic_now)
+            .unwrap_or_else(|| {
+                crate::determinism::relative_high_resolution_milliseconds(scope, monotonic_now, 0.0)
+            });
+        let context = v8::Local::new(scope, &context);
+        let callback_scope = &mut v8::ContextScope::new(scope, context);
+        let session = v8::Local::new(callback_scope, &session);
+        let Ok(frame) = super::xr_frame::create(callback_scope, session) else {
+            continue;
+        };
+        let timestamp = v8::Number::new(callback_scope, timestamp);
+        let callback_arguments = [timestamp.into(), frame.into()];
+        let mut callbacks = callbacks.into_iter().collect::<Vec<_>>();
+        callbacks.sort_by_key(|(handle, _)| *handle);
+        for (_, callback) in callbacks {
+            let callback = v8::Local::new(callback_scope, &callback);
+            let _ = callback.call(callback_scope, session.into(), &callback_arguments);
+            callback_scope.perform_microtask_checkpoint();
+        }
+        ran = true;
     }
+    ran
 }
 
 fn request_hit_test_source(

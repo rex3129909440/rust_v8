@@ -824,3 +824,39 @@ HTML 规范证据：
 - 新构建 `target/debug/edge_sandbox.dll` 经 Python 实际调用返回 `2|0|0|false|true|hidden|hidden|true`，依次证明 BODY 子元素数、clientWidth/clientHeight、焦点、隐藏状态、Document/Performance 联动及六个 BarProp 的配置均生效。
 - schema 11 默认黑盒回归仍为 `trace=5120`、`TextEncoder=15`、`requests=1`、`/tl=1`、无异常；trace 中主文档读取到 `childElementCount=4`、`clientWidth=0`、`clientHeight=0`，iframe BODY 也为 `clientWidth=0/clientHeight=0`。产物位于 `build/profile-body-zero-schema11-check/`。
 - 本次只重建本地 Debug DLL，未生成或安装 wheel，未上传 GitHub，也未发布 PyPI。
+
+## 2026-08-10：全局时钟、精度与调度关系第二轮修复
+
+### Edge/Chromium 证据
+
+- Chromium 当前 `TimeClamper` 明确定义普通上下文 100 微秒、cross-origin isolated 上下文 5 微秒，并用每个时间区间内稳定的伪随机阈值选择相邻网格点：`https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/timing/time_clamper.h`、`time_clamper.cc`。
+- Chromium timing README 要求所有公开的高精度时间戳经 Performance/TimeClamper 路径转换：`https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/timing/README.md`。
+- High Resolution Time Level 3 定义每个 global 自己的 time origin 和单调时间：`https://www.w3.org/TR/hr-time-3/`。
+- HTML timer 算法要求计时器编号表属于当前 global，并规定嵌套超过 5 层后的 4 ms 最小延迟：`https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html`。
+- requestIdleCallback 定义 idle deadline 与 50 ms 上限：`https://w3c.github.io/requestidlecallback/`；DOM 规范定义 `AbortSignal.timeout()` 的异步 active-time 超时：`https://dom.spec.whatwg.org/#dom-abortsignal-timeout`。
+- 使用本机 Edge 150 HTTPS/headless 证据页 `tools/edge_clock_probe.html` 复核：同一帧的多个 RAF 回调时间戳完全相等，`document.timeline.currentTime` 等于该帧时间戳；新 iframe 的 Performance time origin 独立；父/子 realm 的 timer、RAF 与 idle ID 都从自己的编号表开始；Event timestamp 使用当前 Performance 时间轴；普通 idle deadline 接近 50 ms；原生 `Temporal.Now` 六个方法的名称、顺序、长度及 native 形态得到记录。
+
+### 修复内容
+
+- `src/determinism.rs` 增加可复用的单次单调时间快照和统一 epoch 纳秒接口。`Date`、Performance 与确定性 `Temporal.Now` 不再从彼此无关的系统时钟重复取样。
+- `src/web/performance.rs` 可从同一个单调快照派生任意 realm 的 DOMHighResTimeStamp，供一批关联回调共享。
+- Window/iframe 的 timeout、interval、RAF 与 idle callback 状态全部改为 realm-local 编号表、回调表和取消表；子窗口不能再误取消父窗口相同数字的任务。跨 realm 且截止时间相同的 timer 另用全局注册序号保持 FIFO，不依赖 HashMap 或 realm 编号。
+- RAF 在一次渲染批次只采样一次单调时刻，同批回调得到完全相同的参数，并同步采样当前 realm 的 `DocumentTimeline`。Worker RAF 和 XRSession RAF 同样改用关联 Performance 时间轴；XR 回调不再同步获得固定 0。
+- `DocumentTimeline.currentTime` 改为渲染/任务边界采样值，而不是每次 getter 临时读取一个更晚的 `performance.now()`。
+- idle callback 支持 `options.timeout`、`didTimeout` 和统一时钟 deadline；只有没有更高优先级任务的轮次才进入 idle callback。
+- `AbortSignal.timeout()` 从“创建时立即 aborted”修复为到期后异步派发 `TimeoutError`；`scheduler.postTask({delay})` 与 `scheduler.yield()` 从立即完成修复为任务队列调度。
+- 普通模式继续保留 V8 150 原生 Temporal 行为；仅确定性时钟模式原位替换 `Temporal.Now` 六个方法，使 Instant、PlainDate/Time/DateTime、ZonedDateTime 与配置 epoch/时区一致，同时保持原属性顺序、函数名称、length 和 `[native code]`。
+- JS Self-Profiling 的经过时间改用所属 realm 的 Performance 时钟，移除第二个独立 `std::time::Instant`。
+- 本次没有增加 profile 字段，没有修改 profile schema、C ABI、Python binding 或 trace 形态。
+
+### 精度边界
+
+- 当前沙箱的 `crossOriginIsolated=false`，因此全部公开高精度时间仍走 100 微秒网格。Chromium 的 5 微秒常量已经有证据，但在真正支持 COOP/COEP 隔离前不启用，避免产生隔离状态与精度互相矛盾的环境。
+- rAF 参数是渲染机会采样时间；回调体内随后读取的 `performance.now()` 可以略晚，但不得早于帧时间。`document.timeline.currentTime` 在同一批次必须严格等于 rAF 参数。
+- `Date.now()` 仍是整数毫秒；Temporal Instant 在普通模式保留 V8 的亚毫秒能力，在确定性模式精确派生自 `clock_epoch_ms` 与任务推进值。
+
+### 回归验证
+
+- 新增 realm-local ID、同截止时间跨 realm timer 顺序、RAF 批次一致性、DocumentTimeline、idle timeout、AbortSignal、Scheduler 与 Temporal 的六组回归测试。
+- `cargo test --all-targets -- --nocapture`：255 项通过，0 项失败。
+- 本轮没有构建 release DLL/SO、wheel，没有安装包，没有上传 GitHub，也没有发布 PyPI。

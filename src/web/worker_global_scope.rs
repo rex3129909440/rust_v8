@@ -2277,7 +2277,7 @@ pub(crate) fn run_timers(scope: &mut v8::PinScope<'_, '_>) -> bool {
         let Some(callback) = callback else {
             continue;
         };
-        run_animation_frame(scope, realm_id, callback);
+        run_animation_frame(scope, realm_id, callback, now);
         ran = true;
     }
     ran
@@ -2319,6 +2319,7 @@ fn run_animation_frame(
     scope: &mut v8::PinScope<'_, '_>,
     realm_id: i32,
     callback: v8::Global<v8::Function>,
+    monotonic_time_ms: f64,
 ) {
     let Some(record) = record(scope, realm_id).filter(|record| !record.closed) else {
         return;
@@ -2330,13 +2331,14 @@ fn run_animation_frame(
         .get_current_context()
         .global(worker_scope)
         .into();
-    let timestamp = super::performance::now_for_current_realm(worker_scope).unwrap_or_else(|| {
-        crate::determinism::relative_high_resolution_milliseconds(
-            worker_scope,
-            crate::determinism::elapsed_milliseconds(worker_scope),
-            0.0,
-        )
-    });
+    let timestamp = super::performance::now_for_realm_at(worker_scope, realm_id, monotonic_time_ms)
+        .unwrap_or_else(|| {
+            crate::determinism::relative_high_resolution_milliseconds(
+                worker_scope,
+                monotonic_time_ms,
+                0.0,
+            )
+        });
     let timestamp = v8::Number::new(worker_scope, timestamp);
     let _ = callback.call(worker_scope, receiver, &[timestamp.into()]);
     worker_scope.perform_microtask_checkpoint();

@@ -11,6 +11,7 @@ pub(crate) struct DeterminismState {
     elapsed_ms: u64,
     started_at: Instant,
     epoch_origin_ms: f64,
+    epoch_origin_ns: i128,
     time_clamper_secret: u64,
     random_state: u64,
     original_date_by_global: HashMap<i32, v8::Global<v8::Function>>,
@@ -26,11 +27,13 @@ pub(crate) fn prepare(
         .wrapping_add(0x9e37_79b9_7f4a_7c15);
     let time_clamper_secret =
         deterministic_time_clamper_secret(&configuration).unwrap_or_else(fresh_time_clamper_secret);
+    let epoch_origin_ns = system_epoch_nanoseconds();
     isolate.set_slot(DeterminismState {
         configuration,
         elapsed_ms: 0,
         started_at: Instant::now(),
-        epoch_origin_ms: system_epoch_milliseconds(),
+        epoch_origin_ms: epoch_origin_ns as f64 / 1_000_000.0,
+        epoch_origin_ns,
         time_clamper_secret,
         random_state,
         original_date_by_global: HashMap::new(),
@@ -88,6 +91,27 @@ pub(crate) fn elapsed_milliseconds(scope: &v8::PinScope<'_, '_>) -> f64 {
         .get_slot::<DeterminismState>()
         .map(elapsed_milliseconds_from_state)
         .unwrap_or(0.0)
+}
+
+/// Returns one monotonic-clock snapshot that can be reused by related APIs.
+/// Blink samples a rendering opportunity once, then derives every callback's
+/// realm-relative timestamp from that same instant.
+pub(crate) fn monotonic_snapshot_milliseconds(scope: &v8::PinScope<'_, '_>) -> f64 {
+    elapsed_milliseconds(scope)
+}
+
+pub(crate) fn epoch_nanoseconds(scope: &v8::PinScope<'_, '_>) -> i128 {
+    let Some(state) = scope.get_slot::<DeterminismState>() else {
+        return system_epoch_nanoseconds();
+    };
+    if let Some(epoch_ms) = state.configuration.clock_epoch_ms {
+        return i128::from(epoch_ms)
+            .saturating_mul(1_000_000)
+            .saturating_add(i128::from(state.elapsed_ms).saturating_mul(1_000_000));
+    }
+    state
+        .epoch_origin_ns
+        .saturating_add(state.started_at.elapsed().as_nanos() as i128)
 }
 
 pub(crate) fn high_resolution_milliseconds(scope: &v8::PinScope<'_, '_>, value: f64) -> f64 {
@@ -182,6 +206,13 @@ fn system_epoch_milliseconds() -> f64 {
         .unwrap_or(0.0)
 }
 
+fn system_epoch_nanoseconds() -> i128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as i128)
+        .unwrap_or(0)
+}
+
 fn deterministic_time_clamper_secret(configuration: &crate::DeterministicExecution) -> Option<u64> {
     let epoch = configuration.clock_epoch_ms?;
     Some(murmur_hash3(
@@ -240,7 +271,7 @@ fn murmur_hash3(mut value: u64) -> u64 {
     value
 }
 
-fn clock_is_deterministic(scope: &v8::PinScope<'_, '_>) -> bool {
+pub(crate) fn clock_is_deterministic(scope: &v8::PinScope<'_, '_>) -> bool {
     scope
         .get_slot::<DeterminismState>()
         .is_some_and(|state| state.configuration.clock_epoch_ms.is_some())

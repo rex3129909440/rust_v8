@@ -14,29 +14,43 @@ struct TimerRecord {
     delay_ms: f64,
     due_ms: f64,
     nesting_level: u32,
+    sequence: u64,
 }
 
-#[derive(Default)]
-pub(crate) struct TimerState {
+struct RealmTimerState {
     next_id: i32,
     timeouts: HashMap<i32, TimerRecord>,
     intervals: HashMap<i32, TimerRecord>,
     running_nesting_level: u32,
 }
 
+#[derive(Default)]
+pub(crate) struct TimerState {
+    realms: HashMap<i32, RealmTimerState>,
+    next_sequence: u64,
+}
+
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
-    isolate.set_slot(TimerState {
+    isolate.set_slot(TimerState::default());
+}
+
+fn new_realm_state() -> RealmTimerState {
+    RealmTimerState {
         next_id: 1,
         timeouts: HashMap::new(),
         intervals: HashMap::new(),
         running_nesting_level: 0,
-    });
+    }
 }
 
 pub(crate) fn clear(scope: &mut v8::PinScope<'_, '_>, id: i32) {
-    if let Some(state) = scope.get_slot_mut::<TimerState>() {
-        state.timeouts.remove(&id);
-        state.intervals.remove(&id);
+    let realm_id = crate::webidl::realm_id(scope);
+    if let Some(realm) = scope
+        .get_slot_mut::<TimerState>()
+        .and_then(|state| state.realms.get_mut(&realm_id))
+    {
+        realm.timeouts.remove(&id);
+        realm.intervals.remove(&id);
     }
 }
 
@@ -46,30 +60,7 @@ pub(crate) fn reserve_timeout(
     arguments: Vec<v8::Global<v8::Value>>,
     delay_ms: f64,
 ) -> i32 {
-    let callback = timer_callback(scope, callback);
-    let context = v8::Global::new(scope, scope.get_current_context());
-    let nesting_level = scope
-        .get_slot::<TimerState>()
-        .map_or(1, |state| state.running_nesting_level.saturating_add(1));
-    let delay_ms = timer_delay_for_nesting(delay_ms, nesting_level);
-    let due_ms = crate::determinism::elapsed_milliseconds(scope) + delay_ms;
-    let Some(state) = scope.get_slot_mut::<TimerState>() else {
-        return 0;
-    };
-    let id = state.next_id;
-    state.next_id = state.next_id.saturating_add(1).max(1);
-    state.timeouts.insert(
-        id,
-        TimerRecord {
-            callback,
-            context,
-            arguments,
-            delay_ms,
-            due_ms,
-            nesting_level,
-        },
-    );
-    id
+    reserve(scope, callback, arguments, delay_ms, false)
 }
 
 pub(crate) fn reserve_interval(
@@ -78,94 +69,128 @@ pub(crate) fn reserve_interval(
     arguments: Vec<v8::Global<v8::Value>>,
     delay_ms: f64,
 ) -> i32 {
+    reserve(scope, callback, arguments, delay_ms, true)
+}
+
+fn reserve(
+    scope: &mut v8::PinScope<'_, '_>,
+    callback: v8::Local<'_, v8::Value>,
+    arguments: Vec<v8::Global<v8::Value>>,
+    delay_ms: f64,
+    repeating: bool,
+) -> i32 {
     let callback = timer_callback(scope, callback);
     let context = v8::Global::new(scope, scope.get_current_context());
+    let realm_id = crate::webidl::realm_id(scope);
     let nesting_level = scope
         .get_slot::<TimerState>()
-        .map_or(1, |state| state.running_nesting_level.saturating_add(1));
+        .and_then(|state| state.realms.get(&realm_id))
+        .map_or(1, |realm| realm.running_nesting_level.saturating_add(1));
     let delay_ms = timer_delay_for_nesting(delay_ms, nesting_level);
-    let due_ms = crate::determinism::elapsed_milliseconds(scope) + delay_ms;
+    let due_ms = crate::determinism::monotonic_snapshot_milliseconds(scope) + delay_ms;
     let Some(state) = scope.get_slot_mut::<TimerState>() else {
         return 0;
     };
-    let id = state.next_id;
-    state.next_id = state.next_id.saturating_add(1).max(1);
-    state.intervals.insert(
-        id,
-        TimerRecord {
-            callback,
-            context,
-            arguments,
-            delay_ms,
-            due_ms,
-            nesting_level,
-        },
-    );
+    let sequence = state.next_sequence;
+    state.next_sequence = sequence.saturating_add(1);
+    let realm = state.realms.entry(realm_id).or_insert_with(new_realm_state);
+    let id = realm.next_id;
+    realm.next_id = realm.next_id.saturating_add(1).max(1);
+    let record = TimerRecord {
+        callback,
+        context,
+        arguments,
+        delay_ms,
+        due_ms,
+        nesting_level,
+        sequence,
+    };
+    if repeating {
+        realm.intervals.insert(id, record);
+    } else {
+        realm.timeouts.insert(id, record);
+    }
     id
 }
 
 pub(crate) fn next_due(scope: &v8::PinScope<'_, '_>) -> Option<f64> {
     scope.get_slot::<TimerState>().and_then(|state| {
         state
-            .timeouts
+            .realms
             .values()
-            .chain(state.intervals.values())
+            .flat_map(|realm| realm.timeouts.values().chain(realm.intervals.values()))
             .map(|record| record.due_ms)
             .min_by(f64::total_cmp)
     })
 }
 
 pub(crate) fn run_ready(scope: &mut v8::PinScope<'_, '_>) -> bool {
-    let now = crate::determinism::elapsed_milliseconds(scope);
-    let mut ready = Vec::new();
-    if let Some(state) = scope.get_slot_mut::<TimerState>() {
-        let mut timeout_ids = state
-            .timeouts
-            .iter()
-            .filter(|(_, record)| record.due_ms <= now)
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>();
-        timeout_ids.sort_unstable();
-        for id in timeout_ids {
-            if let Some(record) = state.timeouts.remove(&id) {
-                ready.push((record.due_ms, id, record));
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+    let mut ready = scope
+        .get_slot::<TimerState>()
+        .map(|state| {
+            let mut ready = Vec::new();
+            for (realm_id, realm) in &state.realms {
+                ready.extend(
+                    realm
+                        .timeouts
+                        .iter()
+                        .filter(|(_, timer)| timer.due_ms <= now)
+                        .map(|(id, timer)| (timer.due_ms, timer.sequence, *realm_id, *id, false)),
+                );
+                ready.extend(
+                    realm
+                        .intervals
+                        .iter()
+                        .filter(|(_, timer)| timer.due_ms <= now)
+                        .map(|(id, timer)| (timer.due_ms, timer.sequence, *realm_id, *id, true)),
+                );
             }
-        }
-        let mut interval_ids = state
-            .intervals
-            .iter()
-            .filter(|(_, record)| record.due_ms <= now)
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>();
-        interval_ids.sort_unstable();
-        for id in interval_ids {
-            if let Some(record) = state.intervals.get_mut(&id) {
-                let snapshot = record.clone();
-                record.due_ms += record.delay_ms.max(1.0);
-                ready.push((snapshot.due_ms, id, snapshot));
-            }
-        }
-    }
+            ready
+        })
+        .unwrap_or_default();
     ready.sort_by(|left, right| {
         left.0
             .total_cmp(&right.0)
             .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.cmp(&right.3))
     });
-    let ran = !ready.is_empty();
-    for (_, _, record) in ready {
-        if let Some(state) = scope.get_slot_mut::<TimerState>() {
-            state.running_nesting_level = record.nesting_level;
+
+    let mut ran = false;
+    for (_, _, realm_id, id, repeating) in ready {
+        let timer = scope
+            .get_slot_mut::<TimerState>()
+            .and_then(|state| state.realms.get_mut(&realm_id))
+            .and_then(|realm| {
+                if repeating {
+                    let timer = realm.intervals.get_mut(&id)?;
+                    let snapshot = timer.clone();
+                    timer.due_ms += timer.delay_ms.max(1.0);
+                    Some(snapshot)
+                } else {
+                    realm.timeouts.remove(&id)
+                }
+            });
+        let Some(timer) = timer else {
+            continue;
+        };
+        if let Some(realm) = scope
+            .get_slot_mut::<TimerState>()
+            .and_then(|state| state.realms.get_mut(&realm_id))
+        {
+            realm.running_nesting_level = timer.nesting_level;
         }
-        let context = v8::Local::new(scope, &record.context);
+        let context = v8::Local::new(scope, &timer.context);
         let callback_scope = &mut v8::ContextScope::new(scope, context);
         let receiver: v8::Local<v8::Value> = callback_scope
             .get_current_context()
             .global(callback_scope)
             .into();
-        match record.callback {
+        match timer.callback {
             TimerCallback::Function(callback) => {
                 let callback = v8::Local::new(callback_scope, &callback);
-                let arguments = record
+                let arguments = timer
                     .arguments
                     .iter()
                     .map(|argument| v8::Local::new(callback_scope, argument))
@@ -181,9 +206,13 @@ pub(crate) fn run_ready(scope: &mut v8::PinScope<'_, '_>) -> bool {
             }
         }
         callback_scope.perform_microtask_checkpoint();
-        if let Some(state) = callback_scope.get_slot_mut::<TimerState>() {
-            state.running_nesting_level = 0;
+        if let Some(realm) = callback_scope
+            .get_slot_mut::<TimerState>()
+            .and_then(|state| state.realms.get_mut(&realm_id))
+        {
+            realm.running_nesting_level = 0;
         }
+        ran = true;
     }
     ran
 }

@@ -4998,8 +4998,10 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
 }
 
 pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
+    let ran_abort_timeout = abort_signal::run_pending_tasks(scope);
+    let ran_scheduler = scheduler::run_pending_tasks(scope);
+    let ran_xr = xr_session::run_pending_tasks(scope);
     let ran_animation = animation_frame_state::run_ready(scope);
-    let ran_idle_callback = idle_callback_state::run(scope);
     let ran_image = html_image_element::run_pending_tasks(scope);
     let ran_media = html_media_element::run_pending_tasks(scope);
     let ran_timer = timer_state::run_ready(scope);
@@ -5009,7 +5011,23 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     service_worker_container::run_pending_tasks(scope);
     let ran_audio_worklet = audio_worklet_node::run_pending(scope);
     let ran_audio_source = audio_scheduled_source_node::run_pending(scope);
-    if ran_animation
+    let ran_higher_priority = ran_abort_timeout
+        || ran_scheduler
+        || ran_xr
+        || ran_animation
+        || ran_timer
+        || ran_worker
+        || ran_script
+        || ran_link
+        || ran_image
+        || ran_media
+        || ran_audio_worklet
+        || ran_audio_source;
+    let ran_idle_callback = !ran_higher_priority && idle_callback_state::run(scope);
+    if ran_abort_timeout
+        || ran_scheduler
+        || ran_xr
+        || ran_animation
         || ran_idle_callback
         || ran_timer
         || ran_worker
@@ -5024,6 +5042,9 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     }
     let next_due = [
         animation_frame_state::next_due(scope),
+        abort_signal::next_due(scope),
+        scheduler::next_due(scope),
+        xr_session::next_due(scope),
         timer_state::next_due(scope),
         worker::next_due(scope),
         audio_scheduled_source_node::next_due(scope),
@@ -5037,7 +5058,10 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     if !crate::determinism::wait_until_elapsed(scope, due_ms) {
         return false;
     }
-    animation_frame_state::run_ready(scope)
+    abort_signal::run_pending_tasks(scope)
+        | scheduler::run_pending_tasks(scope)
+        | xr_session::run_pending_tasks(scope)
+        | animation_frame_state::run_ready(scope)
         | timer_state::run_ready(scope)
         | worker::run_pending_tasks(scope)
         | audio_scheduled_source_node::run_pending(scope)

@@ -681,6 +681,17 @@ Date、`performance.now()`、Event timestamp、timer、requestAnimationFrame 和
 - `Date.now()` 是整数毫秒墙钟；`performance.timeOrigin + performance.now()` 与它近似对应，但不承诺逐次严格相等。
 - 确定性模式仍按 `clock_step_ms` 推进任务时间；相同配置会得到相同的时间收敛阈值。
 
+调度型时钟也使用同一条单调时间轴：
+
+- `setTimeout`/`setInterval` 的编号、嵌套层级和取消表按 Window/iframe realm 隔离；嵌套超过 5 层后应用 HTML 的最小 4 ms 延迟。
+- 同一渲染机会中的全部 `requestAnimationFrame` 回调共用一个时间快照；该值同时用于采样当前 realm 的 `document.timeline.currentTime`。iframe、Window 与 Worker 的 RAF 编号互相独立。
+- `requestIdleCallback` 只在本轮没有更高优先级任务时运行；普通 idle period 最多提供 50 ms，显式 `timeout` 到期时 `didTimeout=true` 且 `timeRemaining()` 为 0。
+- `AbortSignal.timeout()` 通过异步时钟任务触发 `TimeoutError`；`scheduler.postTask({delay})`、`scheduler.yield()` 和 XR session RAF 不再同步返回固定时间。
+- `Profiler` 的经过时间改用关联的 Performance 单调时钟，不再另建可被系统调度扰动的计时源。
+- 普通模式保留 V8 150 原生 `Temporal.Now`；确定性模式下六个 `Temporal.Now` 方法与 `Date` 共用配置的 epoch，其中 `instant()` 使用纳秒 epoch，默认时区读取 locale profile。函数名称、长度、描述符顺序和 `[native code]` 形态不变。
+
+当前 `crossOriginIsolated` 固定为 `false`，因此公开高精度时间采用 Chromium 的 100 微秒路径。以后只有在真正实现 COOP/COEP 隔离语义后，才能把同一套 TimeClamper 切换到隔离上下文的 5 微秒路径；不能仅通过 profile 声明来提高精度。
+
 ## 12. 资源限制和超时
 
 ```python

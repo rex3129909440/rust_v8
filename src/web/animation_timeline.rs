@@ -4,10 +4,12 @@ use std::collections::HashMap;
 pub(crate) struct AnimationTimelineStore {
     constructor: crate::webidl::RealmConstructor,
     records: HashMap<i32, AnimationTimelineRecord>,
+    document_samples: HashMap<i32, f64>,
 }
 
 #[derive(Clone)]
 struct AnimationTimelineRecord {
+    realm_id: i32,
     current_time: Option<f64>,
     document_origin: Option<f64>,
     duration: Option<f64>,
@@ -71,10 +73,12 @@ pub(crate) fn attach(
     current_time: Option<f64>,
     duration: Option<f64>,
 ) {
+    let realm_id = crate::webidl::realm_id(scope);
     if let Some(store) = scope.get_slot_mut::<AnimationTimelineStore>() {
         store.records.insert(
             object.get_identity_hash().get(),
             AnimationTimelineRecord {
+                realm_id,
                 current_time,
                 document_origin: None,
                 duration,
@@ -88,16 +92,41 @@ pub(crate) fn attach_document(
     object: v8::Local<'_, v8::Object>,
     origin: f64,
 ) {
+    let realm_id = crate::webidl::realm_id(scope);
     if let Some(store) = scope.get_slot_mut::<AnimationTimelineStore>() {
+        let current_time = store
+            .document_samples
+            .get(&realm_id)
+            .copied()
+            .unwrap_or(0.0);
         store.records.insert(
             object.get_identity_hash().get(),
             AnimationTimelineRecord {
-                current_time: None,
+                realm_id,
+                current_time: Some(current_time),
                 document_origin: Some(origin),
                 duration: None,
             },
         );
     }
+}
+
+pub(crate) fn sample_realm_at(scope: &mut v8::PinScope<'_, '_>, realm_id: i32, timestamp: f64) {
+    let Some(store) = scope.get_slot_mut::<AnimationTimelineStore>() else {
+        return;
+    };
+    store.document_samples.insert(realm_id, timestamp);
+    for record in store.records.values_mut() {
+        if record.realm_id == realm_id && record.document_origin.is_some() {
+            record.current_time = Some(timestamp);
+        }
+    }
+}
+
+pub(crate) fn sample_current_realm(scope: &mut v8::PinScope<'_, '_>) {
+    let realm_id = crate::webidl::realm_id(scope);
+    let timestamp = super::performance::now_for_realm(scope, realm_id).unwrap_or(0.0);
+    sample_realm_at(scope, realm_id, timestamp);
 }
 
 fn record(
@@ -138,7 +167,7 @@ fn get_current_time(
         return;
     };
     let current_time = if let Some(origin) = record.document_origin {
-        super::performance::now_for_current_realm(s).map(|now| now - origin)
+        record.current_time.map(|sample| sample - origin)
     } else {
         record.current_time
     };
