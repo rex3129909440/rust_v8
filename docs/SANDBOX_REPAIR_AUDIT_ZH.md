@@ -860,3 +860,12 @@ HTML 规范证据：
 - 新增 realm-local ID、同截止时间跨 realm timer 顺序、RAF 批次一致性、DocumentTimeline、idle timeout、AbortSignal、Scheduler 与 Temporal 的六组回归测试。
 - `cargo test --all-targets -- --nocapture`：255 项通过，0 项失败。
 - 本轮没有构建 release DLL/SO、wheel，没有安装包，没有上传 GitHub，也没有发布 PyPI。
+
+### 3.2.8 发布记录
+
+- 时钟修复源码提交为 `8bf76f3`，已推送到 `rex3129909440/rust_v8` 的 `main` 分支。
+- GitHub Actions 运行 `#12`（run ID `31372474373`）只构建 Linux x64 与 Windows x64；两个 job 均成功，Linux release 回归、两端 wheel 安装及沙箱冒烟测试全部通过。
+- 发布 `rexiaohe-sandbox==3.2.8`，没有重新使用或重命名旧版二进制：
+  - `rexiaohe_sandbox-3.2.8-py3-none-manylinux_2_28_x86_64.whl`，SHA-256 `9a3c6400e95d4ac3eda89cde6326df2897ba5d5d46a35cf596f20442ca0547fc`；
+  - `rexiaohe_sandbox-3.2.8-py3-none-win_amd64.whl`，SHA-256 `a5727b7170b8cd734ac64fd21270ceba934138ffae94f8105d9c46877981ce09`。
+- 两个 wheel 都携带同一版本 Python binding、26 个 country-profile 数据文件以及各自平台本次 CI 生成的原生库；PyPI 线上文件大小与 SHA-256 均和本地下载的 Actions artifact 完全一致。
