@@ -4886,12 +4886,21 @@ mod tests {
         let mut error = EdgeSandboxBuffer::default();
         let family = b"Native Audit Sans";
         let path = if cfg!(windows) {
-            b"C:\\Windows\\Fonts\\arial.ttf".as_slice()
+            "C:\\Windows\\Fonts\\arial.ttf"
         } else if cfg!(target_os = "macos") {
-            b"/System/Library/Fonts/Helvetica.ttc".as_slice()
+            "/System/Library/Fonts/Helvetica.ttc"
         } else {
-            b"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".as_slice()
+            [
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+            ]
+            .into_iter()
+            .find(|candidate| std::path::Path::new(candidate).is_file())
+            .expect("a system OpenType font is required for the typed FFI test")
         };
+        let path = path.as_bytes();
 
         // SAFETY: every pointer remains readable during these synchronous calls.
         unsafe {

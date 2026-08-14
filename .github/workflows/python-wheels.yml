@@ -176,7 +176,7 @@ jobs:
 
       - name: Install Linux font dependencies
         shell: bash
-        run: dnf install -y fontconfig-devel
+        run: dnf install -y fontconfig-devel dejavu-sans-fonts
 
       - name: Install Rust 1.93
         shell: bash
