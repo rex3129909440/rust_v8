@@ -15,11 +15,21 @@ fn get(
         return;
     };
     let local = record
-        .tag_name
-        .rsplit(':')
-        .next()
-        .unwrap_or(&record.tag_name);
-    let local = if record.namespace_uri.as_deref() == Some("http://www.w3.org/1999/xhtml") {
+        .namespace_uri
+        .as_ref()
+        .map_or(record.tag_name.as_str(), |_| {
+            record
+                .tag_name
+                .split_once(':')
+                .map_or(record.tag_name.as_str(), |(_, local)| local)
+        });
+    let html_document =
+        super::node::owner_document(scope, arguments.this()).is_some_and(|document| {
+            super::document::content_type(scope, document) == Some("text/html")
+        });
+    let local = if record.namespace_uri.as_deref() == Some("http://www.w3.org/1999/xhtml")
+        && html_document
+    {
         local.to_ascii_lowercase()
     } else {
         local.to_owned()

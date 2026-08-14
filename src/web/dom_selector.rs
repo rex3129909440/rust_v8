@@ -16,11 +16,26 @@ struct Compound {
     first_child: bool,
     last_child: bool,
     only_child: bool,
+    first_of_type: bool,
+    last_of_type: bool,
+    only_of_type: bool,
     empty: bool,
     root: bool,
     checked: bool,
     disabled: bool,
     enabled: bool,
+    required: bool,
+    optional: bool,
+    read_only: bool,
+    read_write: bool,
+    link: bool,
+    lang: Option<String>,
+    direction: Option<String>,
+    default_state: bool,
+    indeterminate: bool,
+    valid: bool,
+    invalid: bool,
+    pseudo_element: bool,
     not: Vec<ComplexSelector>,
     any: Vec<ComplexSelector>,
     has: Vec<String>,
@@ -50,6 +65,7 @@ struct NthSelector {
     b: i32,
     from_end: bool,
     of_type: bool,
+    of: Vec<ComplexSelector>,
 }
 
 struct ComplexSelector {
@@ -85,20 +101,21 @@ pub(crate) fn query_selector_all<'s>(
     selector: &str,
 ) -> Result<Vec<v8::Local<'s, v8::Object>>, String> {
     let selectors = parse_selector_list(selector)?;
-    let mut candidates = descendants(scope, root);
-    if super::element::record(scope, root).is_some()
-        && selectors
-            .iter()
-            .any(|selector| selector.compounds.iter().any(|compound| compound.scope))
-    {
-        candidates.insert(0, root);
-    }
+    let candidates = descendants(scope, root);
+    let scope_root = if super::document::is_document(scope, root) {
+        super::document::document_child_elements(scope, root)
+            .into_iter()
+            .next()
+            .unwrap_or(root)
+    } else {
+        root
+    };
     Ok(candidates
         .into_iter()
         .filter(|candidate| {
             selectors
                 .iter()
-                .any(|selector| matches_complex(scope, *candidate, root, selector))
+                .any(|selector| matches_complex(scope, *candidate, scope_root, selector))
         })
         .collect())
 }
@@ -113,6 +130,21 @@ pub(crate) fn matches_selector(
     Ok(selectors
         .iter()
         .any(|selector| matches_complex(scope, element, scope_root, selector)))
+}
+
+pub(crate) fn throw_api_error(
+    scope: &mut v8::PinScope<'_, '_>,
+    method: &str,
+    interface: &str,
+    selector: &str,
+) {
+    let prefix = format!("Failed to execute '{method}' on '{interface}'");
+    let message = if selector.is_empty() {
+        format!("{prefix}: The provided selector is empty.")
+    } else {
+        format!("{prefix}: '{selector}' is not a valid selector.")
+    };
+    super::node::throw_dom_exception(scope, "SyntaxError", &message);
 }
 
 fn matches_complex(
@@ -192,9 +224,23 @@ fn matches_compound(
     if selector.scope && element.get_identity_hash().get() != scope_root.get_identity_hash().get() {
         return false;
     }
+    if selector.pseudo_element {
+        return false;
+    }
     if let Some(tag) = &selector.tag {
         let tag = tag.rsplit('|').next().unwrap_or(tag);
-        if tag != "*" && !record.tag_name.eq_ignore_ascii_case(tag) {
+        let case_insensitive = record.namespace_uri.as_deref()
+            == Some("http://www.w3.org/1999/xhtml")
+            && super::node::owner_document(scope, element).is_some_and(|document| {
+                super::document::content_type_value(scope, document).as_deref() == Some("text/html")
+            });
+        if tag != "*"
+            && if case_insensitive {
+                !record.tag_name.eq_ignore_ascii_case(tag)
+            } else {
+                record.tag_name != *tag
+            }
+        {
             return false;
         }
     }
@@ -220,7 +266,9 @@ fn matches_compound(
             continue;
         }
         let expected = &attribute.value;
-        let matches = if attribute.case_insensitive {
+        let matches = if attribute.case_insensitive
+            || html_attribute_value_is_ascii_case_insensitive(scope, element, &attribute.name)
+        {
             attribute_matches(
                 attribute.operator,
                 &actual.to_ascii_lowercase(),
@@ -258,6 +306,33 @@ fn matches_compound(
     if selector.only_child && element_siblings.len() != 1 {
         return false;
     }
+    let same_type_siblings = element_siblings
+        .iter()
+        .copied()
+        .filter(|sibling| {
+            super::element::record(scope, *sibling).is_some_and(|sibling_record| {
+                sibling_record.tag_name == record.tag_name
+                    && sibling_record.namespace_uri == record.namespace_uri
+            })
+        })
+        .collect::<Vec<_>>();
+    if selector.first_of_type
+        && same_type_siblings
+            .first()
+            .is_none_or(|first| !first.strict_equals(element.into()))
+    {
+        return false;
+    }
+    if selector.last_of_type
+        && same_type_siblings
+            .last()
+            .is_none_or(|last| !last.strict_equals(element.into()))
+    {
+        return false;
+    }
+    if selector.only_of_type && same_type_siblings.len() != 1 {
+        return false;
+    }
     if selector.empty
         && super::node::children(scope, element)
             .into_iter()
@@ -275,16 +350,89 @@ fn matches_compound(
     {
         return false;
     }
-    let is_checked = super::element::attribute_value(scope, element, "checked").is_some()
-        || super::element::attribute_value(scope, element, "selected").is_some();
+    let is_checked = super::html_input_element::record(scope, element)
+        .is_some_and(|record| record.checked)
+        || super::html_option_element::record(scope, element).is_some_and(|record| record.selected);
     if selector.checked && !is_checked {
         return false;
     }
-    let is_disabled = super::element::attribute_value(scope, element, "disabled").is_some();
+    let disableable = matches!(
+        record.tag_name.to_ascii_uppercase().as_str(),
+        "BUTTON" | "FIELDSET" | "INPUT" | "OPTGROUP" | "OPTION" | "SELECT" | "TEXTAREA"
+    );
+    let disabled_by_optgroup = record.tag_name.eq_ignore_ascii_case("OPTION")
+        && super::node::parent(scope, element).is_some_and(|parent| {
+            super::element::record(scope, parent).is_some_and(|parent_record| {
+                parent_record.tag_name.eq_ignore_ascii_case("OPTGROUP")
+                    && super::element::attribute_value(scope, parent, "disabled").is_some()
+            })
+        });
+    let is_disabled = disableable
+        && (super::element::attribute_value(scope, element, "disabled").is_some()
+            || disabled_by_optgroup
+            || super::html_element::disabled_by_fieldset(scope, element, &record.tag_name));
     if selector.disabled && !is_disabled {
         return false;
     }
-    if selector.enabled && is_disabled {
+    if selector.enabled && (!disableable || is_disabled) {
+        return false;
+    }
+    let requireable = matches!(
+        record.tag_name.to_ascii_uppercase().as_str(),
+        "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA"
+    );
+    let is_required = requireable
+        && !record.tag_name.eq_ignore_ascii_case("BUTTON")
+        && super::element::attribute_value(scope, element, "required").is_some();
+    if selector.required && !is_required {
+        return false;
+    }
+    if selector.optional && (!requireable || is_required) {
+        return false;
+    }
+    let read_write = is_read_write(scope, element, &record.tag_name, is_disabled);
+    let read_only = is_read_only(scope, element, &record.tag_name, is_disabled);
+    if selector.read_write && !read_write {
+        return false;
+    }
+    if selector.read_only && !read_only {
+        return false;
+    }
+    let is_link = matches!(record.tag_name.to_ascii_uppercase().as_str(), "A" | "AREA")
+        && super::element::attribute_value(scope, element, "href").is_some();
+    if selector.link && !is_link {
+        return false;
+    }
+    if let Some(language) = &selector.lang
+        && !language_matches(scope, element, language)
+    {
+        return false;
+    }
+    if let Some(direction) = &selector.direction
+        && inherited_attribute(scope, element, "dir")
+            .unwrap_or_else(|| "ltr".to_owned())
+            .to_ascii_lowercase()
+            != direction.to_ascii_lowercase()
+    {
+        return false;
+    }
+    let is_default = super::html_input_element::record(scope, element)
+        .is_some_and(|record| record.default_checked)
+        || super::html_option_element::record(scope, element)
+            .is_some_and(|record| record.default_selected);
+    if selector.default_state && !is_default {
+        return false;
+    }
+    let is_indeterminate = super::html_input_element::record(scope, element)
+        .is_some_and(|record| record.indeterminate);
+    if selector.indeterminate && !is_indeterminate {
+        return false;
+    }
+    let validity = selector_validity(scope, element);
+    if selector.valid && validity != Some(true) {
+        return false;
+    }
+    if selector.invalid && validity != Some(false) {
         return false;
     }
     if selector
@@ -315,13 +463,16 @@ fn matches_compound(
             .iter()
             .copied()
             .filter(|sibling| {
-                !nth.of_type
+                (!nth.of_type
                     || super::element::record(scope, *sibling).is_some_and(|sibling_record| {
-                        sibling_record
-                            .tag_name
-                            .eq_ignore_ascii_case(&record.tag_name)
+                        sibling_record.tag_name == record.tag_name
                             && sibling_record.namespace_uri == record.namespace_uri
-                    })
+                    }))
+                    && (nth.of.is_empty()
+                        || nth
+                            .of
+                            .iter()
+                            .any(|selector| matches_complex(scope, *sibling, *sibling, selector)))
             })
             .collect::<Vec<_>>();
         if nth.from_end {
@@ -339,6 +490,132 @@ fn matches_compound(
         }
     }
     true
+}
+
+fn html_attribute_value_is_ascii_case_insensitive(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> bool {
+    if !name.eq_ignore_ascii_case("type") {
+        return false;
+    }
+    let Some(record) = super::element::record(scope, element) else {
+        return false;
+    };
+    if record.namespace_uri.as_deref() != Some("http://www.w3.org/1999/xhtml") {
+        return false;
+    }
+    let Some(document) = super::node::owner_document(scope, element) else {
+        return false;
+    };
+    if super::document::content_type_value(scope, document).as_deref() != Some("text/html") {
+        return false;
+    }
+    matches!(
+        record.tag_name.to_ascii_uppercase().as_str(),
+        "BUTTON" | "INPUT" | "LI" | "OL" | "UL"
+    )
+}
+
+fn inherited_attribute(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Option<String> {
+    let mut current = Some(element);
+    while let Some(candidate) = current {
+        if let Some(value) = super::element::attribute_value(scope, candidate, name)
+            && !value.is_empty()
+        {
+            return Some(value);
+        }
+        current = super::node::parent(scope, candidate)
+            .filter(|parent| super::element::record(scope, *parent).is_some());
+    }
+    None
+}
+
+fn language_matches(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    requested: &str,
+) -> bool {
+    let Some(language) = inherited_attribute(scope, element, "lang") else {
+        return false;
+    };
+    language.eq_ignore_ascii_case(requested)
+        || language
+            .get(..requested.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(requested))
+            && language.as_bytes().get(requested.len()) == Some(&b'-')
+}
+
+fn is_read_write(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    tag_name: &str,
+    disabled: bool,
+) -> bool {
+    if let Some(record) = super::html_input_element::record(scope, element) {
+        let text_like = matches!(
+            record.input_type.as_str(),
+            "email" | "number" | "password" | "search" | "tel" | "text" | "url"
+        );
+        return text_like && !record.read_only && !disabled;
+    }
+    if let Some(record) = super::html_text_area_element::record(scope, element) {
+        return !record.booleans.get("readOnly").copied().unwrap_or(false) && !disabled;
+    }
+    if tag_name.eq_ignore_ascii_case("DIV") {
+        return super::element::attribute_value(scope, element, "contenteditable")
+            .is_some_and(|value| value.is_empty() || value.eq_ignore_ascii_case("true"));
+    }
+    false
+}
+
+fn is_read_only(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    _tag_name: &str,
+    disabled: bool,
+) -> bool {
+    if let Some(record) = super::html_input_element::record(scope, element) {
+        let text_like = matches!(
+            record.input_type.as_str(),
+            "email" | "number" | "password" | "search" | "tel" | "text" | "url"
+        );
+        return !text_like || record.read_only || disabled;
+    }
+    if let Some(record) = super::html_text_area_element::record(scope, element) {
+        return record.booleans.get("readOnly").copied().unwrap_or(false) || disabled;
+    }
+    false
+}
+
+fn selector_validity(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+) -> Option<bool> {
+    if let Some(record) = super::html_input_element::record(scope, element) {
+        return super::html_input_element::will_validate(&record)
+            .then(|| !super::html_input_element::invalid(&record));
+    }
+    if let Some(record) = super::html_select_element::record(scope, element) {
+        return (!record.disabled).then(|| !super::html_select_element::invalid(scope, element));
+    }
+    if let Some(record) = super::html_text_area_element::record(scope, element) {
+        return super::html_text_area_element::is_candidate(&record)
+            .then(|| super::html_text_area_element::is_valid(&record));
+    }
+    if super::html_form_element::record(scope, element).is_some() {
+        return Some(
+            super::html_form_element::collect_controls(scope, element)
+                .into_iter()
+                .all(|control| selector_validity(scope, control) != Some(false)),
+        );
+    }
+    None
 }
 
 fn attribute_matches(operator: AttributeOperator, actual: &str, expected: &str) -> bool {
@@ -458,6 +735,9 @@ fn parse_complex(source: &str) -> Result<ComplexSelector, String> {
     if source.is_empty() {
         return Err("The provided selector is empty".to_owned());
     }
+    if source.starts_with(['>', '+', '~']) || source.ends_with(['>', '+', '~']) {
+        return Err("Invalid selector combinator".to_owned());
+    }
     let mut compounds = Vec::new();
     let mut combinators = Vec::new();
     let mut start = 0;
@@ -472,6 +752,26 @@ fn parse_complex(source: &str) -> Result<ComplexSelector, String> {
                 quote = None;
             }
             index += 1;
+            continue;
+        }
+        if character == '\\' {
+            let mut next = index + 1;
+            if next >= chars.len() {
+                return Err("Invalid escape sequence".to_owned());
+            }
+            if chars[next].1.is_ascii_hexdigit() {
+                let mut digits = 0;
+                while next < chars.len() && digits < 6 && chars[next].1.is_ascii_hexdigit() {
+                    next += 1;
+                    digits += 1;
+                }
+                if next < chars.len() && chars[next].1.is_ascii_whitespace() {
+                    next += 1;
+                }
+            } else {
+                next += 1;
+            }
+            index = next;
             continue;
         }
         match character {
@@ -549,30 +849,29 @@ fn parse_compound(source: &str) -> Result<Compound, String> {
     let mut selector = Compound::default();
     let bytes = source.as_bytes();
     let mut index = 0;
-    if bytes
-        .first()
-        .is_some_and(|byte| *byte == b'*' || is_name_start(*byte))
-    {
-        let end = consume_name(bytes, index);
-        selector.tag = Some(source[index..end].to_owned());
+    if bytes.first().is_some_and(|byte| {
+        *byte == b'*' || *byte == b'\\' || is_name_start(*byte) || !byte.is_ascii()
+    }) {
+        let (name, end) = consume_identifier(source, index)?;
+        selector.tag = Some(name);
         index = end;
     }
     while index < bytes.len() {
         match bytes[index] {
             b'#' => {
-                let end = consume_name(bytes, index + 1);
+                let (name, end) = consume_identifier(source, index + 1)?;
                 if end == index + 1 {
                     return Err("Invalid id selector".to_owned());
                 }
-                selector.id = Some(source[index + 1..end].to_owned());
+                selector.id = Some(name);
                 index = end;
             }
             b'.' => {
-                let end = consume_name(bytes, index + 1);
+                let (name, end) = consume_identifier(source, index + 1)?;
                 if end == index + 1 {
                     return Err("Invalid class selector".to_owned());
                 }
-                selector.classes.push(source[index + 1..end].to_owned());
+                selector.classes.push(name);
                 index = end;
             }
             b'[' => {
@@ -583,8 +882,28 @@ fn parse_compound(source: &str) -> Result<Compound, String> {
                 index = end + 1;
             }
             b':' => {
-                let end = consume_name(bytes, index + 1);
-                let pseudo = &source[index + 1..end];
+                if bytes.get(index + 1) == Some(&b':') {
+                    let (name, end) = consume_identifier(source, index + 2)?;
+                    if !matches!(
+                        name.to_ascii_lowercase().as_str(),
+                        "after"
+                            | "backdrop"
+                            | "before"
+                            | "file-selector-button"
+                            | "first-letter"
+                            | "first-line"
+                            | "marker"
+                            | "placeholder"
+                            | "selection"
+                    ) {
+                        return Err("Unsupported pseudo-element".to_owned());
+                    }
+                    selector.pseudo_element = true;
+                    index = end;
+                    continue;
+                }
+                let (pseudo_name, end) = consume_identifier(source, index + 1)?;
+                let pseudo = pseudo_name.as_str();
                 let lower = pseudo.to_ascii_lowercase();
                 let argument = if bytes.get(end) == Some(&b'(') {
                     let close = find_closing(bytes, end, b'(', b')')?;
@@ -599,29 +918,69 @@ fn parse_compound(source: &str) -> Result<Compound, String> {
                     "first-child" => selector.first_child = true,
                     "last-child" => selector.last_child = true,
                     "only-child" => selector.only_child = true,
+                    "first-of-type" => selector.first_of_type = true,
+                    "last-of-type" => selector.last_of_type = true,
+                    "only-of-type" => selector.only_of_type = true,
                     "empty" => selector.empty = true,
                     "root" => selector.root = true,
                     "checked" => selector.checked = true,
                     "disabled" => selector.disabled = true,
                     "enabled" => selector.enabled = true,
+                    "required" => selector.required = true,
+                    "optional" => selector.optional = true,
+                    "read-only" => selector.read_only = true,
+                    "read-write" => selector.read_write = true,
+                    "link" | "any-link" => selector.link = true,
+                    "lang" => {
+                        selector.lang = Some(
+                            required_argument(pseudo, argument)?
+                                .trim_matches(['\'', '"'])
+                                .to_owned(),
+                        )
+                    }
+                    "dir" => {
+                        let direction = required_argument(pseudo, argument)?.to_ascii_lowercase();
+                        if !matches!(direction.as_str(), "ltr" | "rtl") {
+                            return Err("Invalid :dir argument".to_owned());
+                        }
+                        selector.direction = Some(direction)
+                    }
+                    "default" => selector.default_state = true,
+                    "indeterminate" => selector.indeterminate = true,
+                    "valid" => selector.valid = true,
+                    "invalid" => selector.invalid = true,
                     "not" => selector
                         .not
                         .extend(parse_selector_list(required_argument(pseudo, argument)?)?),
-                    "is" | "where" => selector
-                        .any
-                        .extend(parse_selector_list(required_argument(pseudo, argument)?)?),
-                    "has" => selector.has.extend(
-                        split_top_level(required_argument(pseudo, argument)?, ',')?
-                            .into_iter()
-                            .map(str::to_owned),
-                    ),
+                    "is" | "where" => {
+                        selector
+                            .any
+                            .extend(parse_forgiving_selector_list(required_argument(
+                                pseudo, argument,
+                            )?)?)
+                    }
+                    "has" => selector
+                        .has
+                        .extend(parse_relative_selector_list(required_argument(
+                            pseudo, argument,
+                        )?)?),
                     "nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type" => {
-                        let (a, b) = parse_nth(required_argument(pseudo, argument)?)?;
+                        let argument = required_argument(pseudo, argument)?;
+                        let (expression, of) = split_nth_of(argument);
+                        let (a, b) = parse_nth(expression)?;
+                        let of = match of {
+                            Some(source) if lower.contains("of-type") => {
+                                return Err("Invalid nth expression".to_owned());
+                            }
+                            Some(source) => parse_selector_list(source)?,
+                            None => Vec::new(),
+                        };
                         selector.nth.push(NthSelector {
                             a,
                             b,
                             from_end: lower.contains("last"),
                             of_type: lower.contains("of-type"),
+                            of,
                         });
                     }
                     _ => return Err(format!("Unsupported pseudo-class :{pseudo}")),
@@ -639,11 +998,14 @@ fn parse_attribute(source: &str) -> Result<AttributeSelector, String> {
         return Err("Empty attribute selector".to_owned());
     }
     let mut case_insensitive = false;
-    if let Some((body, flag)) = source.rsplit_once(char::is_whitespace)
-        && matches!(flag.trim(), "i" | "I" | "s" | "S")
-    {
-        case_insensitive = flag.trim().eq_ignore_ascii_case("i");
-        source = body.trim_end();
+    if let Some((body, flag)) = source.rsplit_once(char::is_whitespace) {
+        if matches!(flag.trim(), "s" | "S") {
+            return Err("Unsupported attribute selector flag".to_owned());
+        }
+        if matches!(flag.trim(), "i" | "I") {
+            case_insensitive = true;
+            source = body.trim_end();
+        }
     }
     let operators = [
         ("~=", AttributeOperator::Includes),
@@ -725,6 +1087,46 @@ fn parse_nth(source: &str) -> Result<(i32, i32), String> {
     }
 }
 
+fn split_nth_of(source: &str) -> (&str, Option<&str>) {
+    let lower = source.to_ascii_lowercase();
+    for marker in [" of ", "\tof ", " of\t", "\nof ", " of\n"] {
+        if let Some(index) = lower.find(marker) {
+            let offset = marker.find("of").unwrap_or(1);
+            return (
+                source[..index].trim(),
+                Some(source[index + offset + 2..].trim()),
+            );
+        }
+    }
+    (source.trim(), None)
+}
+
+fn parse_forgiving_selector_list(source: &str) -> Result<Vec<ComplexSelector>, String> {
+    let selectors = split_top_level(source, ',')?
+        .into_iter()
+        .filter_map(|selector| parse_complex(selector.trim()).ok())
+        .collect::<Vec<_>>();
+    if selectors.is_empty() {
+        Err("Invalid forgiving selector list".to_owned())
+    } else {
+        Ok(selectors)
+    }
+}
+
+fn parse_relative_selector_list(source: &str) -> Result<Vec<String>, String> {
+    let mut output = Vec::new();
+    for selector in split_top_level(source, ',')? {
+        let selector = selector.trim();
+        let body = selector
+            .strip_prefix(['>', '+', '~'])
+            .unwrap_or(selector)
+            .trim();
+        parse_complex(body)?;
+        output.push(selector.to_owned());
+    }
+    Ok(output)
+}
+
 fn split_top_level(source: &str, separator: char) -> Result<Vec<&str>, String> {
     let mut output = Vec::new();
     let mut start = 0;
@@ -761,14 +1163,55 @@ fn split_top_level(source: &str, separator: char) -> Result<Vec<&str>, String> {
     Ok(output)
 }
 
-fn consume_name(source: &[u8], start: usize) -> usize {
+fn consume_identifier(source: &str, start: usize) -> Result<(String, usize), String> {
+    let bytes = source.as_bytes();
     let mut end = start;
-    while end < source.len()
-        && (source[end].is_ascii_alphanumeric() || matches!(source[end], b'-' | b'_' | b'|' | b'*'))
-    {
-        end += 1;
+    let mut output = String::new();
+    while end < bytes.len() {
+        let byte = bytes[end];
+        if byte == b'\\' {
+            end += 1;
+            if end >= bytes.len() {
+                return Err("Invalid escape sequence".to_owned());
+            }
+            if bytes[end].is_ascii_hexdigit() {
+                let hex_start = end;
+                while end < bytes.len() && end - hex_start < 6 && bytes[end].is_ascii_hexdigit() {
+                    end += 1;
+                }
+                let value = u32::from_str_radix(&source[hex_start..end], 16)
+                    .map_err(|_| "Invalid escape sequence".to_owned())?;
+                output.push(char::from_u32(value).unwrap_or('\u{fffd}'));
+                if end < bytes.len() && bytes[end].is_ascii_whitespace() {
+                    end += 1;
+                }
+                continue;
+            }
+            let character = source[end..]
+                .chars()
+                .next()
+                .ok_or_else(|| "Invalid escape sequence".to_owned())?;
+            output.push(character);
+            end += character.len_utf8();
+            continue;
+        }
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'|' | b'*') {
+            output.push(byte as char);
+            end += 1;
+            continue;
+        }
+        if !byte.is_ascii() {
+            let character = source[end..]
+                .chars()
+                .next()
+                .ok_or_else(|| "Invalid identifier".to_owned())?;
+            output.push(character);
+            end += character.len_utf8();
+            continue;
+        }
+        break;
     }
-    end
+    Ok((output, end))
 }
 
 fn is_name_start(value: u8) -> bool {

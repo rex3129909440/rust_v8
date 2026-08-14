@@ -78,9 +78,19 @@ fn construct(
         return;
     }
     let Ok(stream) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The provided value is not a WritableStream");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'WritableStreamDefaultWriter': parameter 1 is not of type 'WritableStream'.",
+        );
         return;
     };
+    if super::writable_stream::record(scope, stream).is_none() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'WritableStreamDefaultWriter': parameter 1 is not of type 'WritableStream'.",
+        );
+        return;
+    }
     if let Err(message) = attach(scope, arguments.this(), stream) {
         crate::webidl::throw_type_error(scope, &message);
         return;
@@ -153,12 +163,42 @@ fn active_stream<'s>(
     Some(v8::Local::new(scope, &record.stream))
 }
 
+fn active_stream_for_promise<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    writer: v8::Local<'_, v8::Object>,
+    invalid_receiver_message: &str,
+    mut result: v8::ReturnValue<'_>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let Some(record) = record(scope, writer) else {
+        if let Some(promise) =
+            crate::webidl::rejected_type_error_promise(scope, invalid_receiver_message)
+        {
+            result.set(promise.into());
+        }
+        return None;
+    };
+    if record.released {
+        if let Some(promise) =
+            crate::webidl::rejected_type_error_promise(scope, "The writer lock has been released")
+        {
+            result.set(promise.into());
+        }
+        return None;
+    }
+    Some(v8::Local::new(scope, &record.stream))
+}
+
 fn get_closed(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(stream) = active_stream(scope, arguments.this()) else {
+    let Some(stream) = active_stream_for_promise(
+        scope,
+        arguments.this(),
+        "Failed to read the 'closed' property from 'WritableStreamDefaultWriter': Illegal invocation",
+        result,
+    ) else {
         return;
     };
     let Some(record) = super::writable_stream::record(scope, stream) else {
@@ -213,7 +253,12 @@ fn get_ready(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(stream) = active_stream(scope, arguments.this()) else {
+    let Some(stream) = active_stream_for_promise(
+        scope,
+        arguments.this(),
+        "Failed to read the 'ready' property from 'WritableStreamDefaultWriter': Illegal invocation",
+        result,
+    ) else {
         return;
     };
     let Some(record) = super::writable_stream::record(scope, stream) else {
@@ -240,7 +285,12 @@ fn abort(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(stream) = active_stream(scope, arguments.this()) else {
+    let Some(stream) = active_stream_for_promise(
+        scope,
+        arguments.this(),
+        "Failed to execute 'abort' on 'WritableStreamDefaultWriter': Illegal invocation",
+        result,
+    ) else {
         return;
     };
     match super::writable_stream::abort_stream(scope, stream, arguments.get(0)) {
@@ -254,7 +304,12 @@ fn close(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(stream) = active_stream(scope, arguments.this()) else {
+    let Some(stream) = active_stream_for_promise(
+        scope,
+        arguments.this(),
+        "Failed to execute 'close' on 'WritableStreamDefaultWriter': Illegal invocation",
+        result,
+    ) else {
         return;
     };
     match super::writable_stream::close_stream(scope, stream) {
@@ -291,7 +346,12 @@ fn write(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(stream) = active_stream(scope, arguments.this()) else {
+    let Some(stream) = active_stream_for_promise(
+        scope,
+        arguments.this(),
+        "Failed to execute 'write' on 'WritableStreamDefaultWriter': Illegal invocation",
+        result,
+    ) else {
         return;
     };
     match super::writable_stream::write_value(scope, stream, arguments.get(0)) {

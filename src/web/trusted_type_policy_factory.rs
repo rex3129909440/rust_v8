@@ -159,6 +159,10 @@ fn create_policy(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(scope, "1 argument required");
         return;

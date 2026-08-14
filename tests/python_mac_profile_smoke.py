@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -23,7 +23,12 @@ from mac_edge_profile import (  # noqa: E402
     local_time_zone,
     mac_edge_150_profile,
 )
-from edge_profile import EdgeProfile, LocalFontProfile, PermissionsProfile  # noqa: E402
+from edge_profile import (  # noqa: E402
+    EdgeProfile,
+    LocalFontProfile,
+    NavigatorProfile,
+    PermissionsProfile,
+)
 from run_sandbox import EdgeSandbox  # noqa: E402
 
 
@@ -359,7 +364,7 @@ class MacEdgeProfileTests(unittest.TestCase):
             sandbox.close()
         self.assertEqual(
             value,
-            "error:1|error:NotAllowedError|error:NotAllowedError|true",
+            "error:1|error:NotAllowedError|error:SecurityError|true",
         )
 
     def test_css_font_metrics_and_webgpu_are_loaded_from_the_mac_profile(self) -> None:
@@ -584,6 +589,8 @@ class MacEdgeProfileTests(unittest.TestCase):
             missing,
             [
                 "profile.navigator.do_not_track",
+                "profile.navigator.network.connection_type",
+                "profile.navigator.network.downlink_max",
                 "profile.geolocation",
                 "profile.timing",
                 "profile.performance.entries",
@@ -611,6 +618,14 @@ class MacEdgeProfileTests(unittest.TestCase):
             ),
             allow_unknown_font_families=False,
             local_fonts_permission="granted",
+        )
+        profile = replace(
+            profile,
+            navigator=replace(
+                profile.navigator,
+                user_activation_has_been_active=True,
+                user_activation_is_active=False,
+            ),
         )
         sandbox = EdgeSandbox(library=LIBRARY, profile=profile)
         try:
@@ -642,7 +657,16 @@ class MacEdgeProfileTests(unittest.TestCase):
 
         mac_sandbox = EdgeSandbox(
             library=LIBRARY,
-            profile=mac_edge_150_profile(local_fonts_permission="granted"),
+            profile=(
+                lambda profile: replace(
+                    profile,
+                    navigator=replace(
+                        profile.navigator,
+                        user_activation_has_been_active=True,
+                        user_activation_is_active=False,
+                    ),
+                )
+            )(mac_edge_150_profile(local_fonts_permission="granted")),
         )
         try:
             mac_fonts = mac_sandbox.evaluate(probe)
@@ -652,6 +676,10 @@ class MacEdgeProfileTests(unittest.TestCase):
         default_sandbox = EdgeSandbox(
             library=LIBRARY,
             profile=EdgeProfile(
+                navigator=NavigatorProfile(
+                    user_activation_has_been_active=True,
+                    user_activation_is_active=False,
+                ),
                 permissions=PermissionsProfile(local_fonts="granted")
             ),
         )

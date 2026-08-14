@@ -182,10 +182,14 @@ pub(crate) fn get_handler(
     kind: HandlerKind,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| match kind {
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let handler = match kind {
         HandlerKind::StateChange => record.on_state,
         HandlerKind::Error => record.on_error,
-    });
+    };
     super::window_event_handler_support::return_handler(scope, handler, result);
 }
 

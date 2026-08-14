@@ -14,19 +14,49 @@ fn create_element_ns(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let namespace = if arguments.get(0).is_null() {
-        None
-    } else {
-        let namespace = crate::webidl::value_to_string(scope, arguments.get(0));
-        (!namespace.is_empty()).then_some(namespace)
-    };
-    let qualified_name = crate::webidl::value_to_string(scope, arguments.get(1));
-    if let Err((name, message)) =
-        super::document::validate_qualified_name(namespace.as_deref(), &qualified_name, false)
-    {
-        super::node::throw_dom_exception(scope, name, message);
+    if arguments.length() < 2 {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'createElementNS' on 'Document': 2 arguments required, but only {} present.",
+                arguments.length()
+            ),
+        );
         return;
     }
+    let namespace = if arguments.get(0).is_null_or_undefined() {
+        None
+    } else {
+        let Some(namespace) = crate::webidl::dom_string_with_context(
+            scope,
+            arguments.get(0),
+            "Failed to execute 'createElementNS' on 'Document'",
+        ) else {
+            return;
+        };
+        (!namespace.is_empty()).then_some(namespace)
+    };
+    let Some(qualified_name) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(1),
+        "Failed to execute 'createElementNS' on 'Document'",
+    ) else {
+        return;
+    };
+    if let Err((name, _)) =
+        super::document::validate_qualified_name(namespace.as_deref(), &qualified_name, false)
+    {
+        let message = super::document::qualified_name_error_message(
+            "createElementNS",
+            "Document",
+            name,
+            namespace.as_deref(),
+            &qualified_name,
+        );
+        super::node::throw_dom_exception(scope, name, &message);
+        return;
+    }
+    let qualified_name = super::document::canonical_qualified_name(&qualified_name);
     let local_name = qualified_name
         .rsplit_once(':')
         .map(|(_, local_name)| local_name)
@@ -37,6 +67,12 @@ fn create_element_ns(
         }
         Some("http://www.w3.org/1998/Math/MathML") => {
             super::math_ml_element::create(scope, local_name.to_owned())
+        }
+        Some("http://www.w3.org/1999/xhtml") if local_name == local_name.to_ascii_lowercase() => {
+            super::document::create_html_element_by_name(scope, local_name)
+        }
+        Some("http://www.w3.org/1999/xhtml") => {
+            super::html_unknown_element::create(scope, &qualified_name)
         }
         _ => super::element::create(scope, qualified_name.clone(), namespace.clone()),
     };

@@ -9,10 +9,13 @@ pub(crate) struct NetworkInformationStore {
 #[derive(Clone)]
 pub(crate) struct NetworkInformationRecord {
     pub(crate) onchange: Option<v8::Global<v8::Value>>,
+    pub(crate) ontypechange: Option<v8::Global<v8::Value>>,
     pub(crate) effective_type: String,
     pub(crate) rtt: u32,
     pub(crate) downlink: f64,
     pub(crate) save_data: bool,
+    pub(crate) connection_type: String,
+    pub(crate) downlink_max: f64,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -49,6 +52,9 @@ fn ensure_constructor<'s>(
     super::network_information_rtt_property::define(scope, prototype)?;
     super::network_information_downlink_property::define(scope, prototype)?;
     super::network_information_save_data_property::define(scope, prototype)?;
+    super::network_information_type_property::define(scope, prototype)?;
+    super::network_information_downlink_max_property::define(scope, prototype)?;
+    super::network_information_ontypechange_property::define(scope, prototype)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     let parent = super::event_target::ensure_constructor(scope)?;
     crate::webidl::inherit(scope, constructor, parent)?;
@@ -80,13 +86,35 @@ pub(crate) fn create<'s>(
             object.get_identity_hash().get(),
             NetworkInformationRecord {
                 onchange: None,
+                ontypechange: None,
                 effective_type: network.effective_type,
                 rtt: network.rtt,
                 downlink: network.downlink,
                 save_data: network.save_data,
+                connection_type: network.connection_type,
+                downlink_max: network.downlink_max,
             },
         );
     Ok(object)
+}
+pub(crate) fn set_ontypechange(
+    scope: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let value = if a.get(0).is_null_or_undefined() {
+        None
+    } else {
+        Some(v8::Global::new(scope, a.get(0)))
+    };
+    if let Some(record) = scope
+        .get_slot_mut::<NetworkInformationStore>()
+        .and_then(|store| store.records.get_mut(&a.this().get_identity_hash().get()))
+    {
+        record.ontypechange = value;
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
 }
 fn illegal_constructor(
     scope: &mut v8::PinScope<'_, '_>,

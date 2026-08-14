@@ -517,6 +517,18 @@ fn resolved_promise(
     result.set(promise.into());
 }
 
+fn reject_illegal_invocation_promise(
+    scope: &mut v8::PinScope<'_, '_>,
+    method: &str,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let message =
+        format!("Failed to execute '{method}' on 'RTCPeerConnection': Illegal invocation");
+    if let Some(promise) = crate::webidl::rejected_type_error_promise(scope, &message) {
+        result.set(promise.into());
+    }
+}
+
 fn return_record_string(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
@@ -901,7 +913,7 @@ fn add_ice_candidate(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        reject_illegal_invocation_promise(scope, "addIceCandidate", result);
         return;
     }
     let undefined = v8::undefined(scope);
@@ -913,6 +925,10 @@ fn add_stream(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(stream) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "addStream requires a MediaStream");
         return;
@@ -928,6 +944,10 @@ fn add_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(track) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "addTrack requires a MediaStreamTrack");
         return;
@@ -958,6 +978,10 @@ fn add_transceiver(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let source = arguments.get(0);
     if source.is_undefined() {
         crate::webidl::throw_type_error(scope, "addTransceiver requires a track or kind");
@@ -1053,7 +1077,7 @@ fn create_answer(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        reject_illegal_invocation_promise(scope, "createAnswer", result);
         return;
     }
     let sdp = crate::fingerprint::edge(scope).media.rtc_answer_sdp.clone();
@@ -1100,7 +1124,7 @@ fn create_offer(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        reject_illegal_invocation_promise(scope, "createOffer", result);
         return;
     }
     let sdp = crate::fingerprint::edge(scope).media.rtc_offer_sdp.clone();
@@ -1236,7 +1260,7 @@ fn get_stats(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        reject_illegal_invocation_promise(scope, "getStats", result);
         return;
     }
     match super::rtc_stats_report::create(scope, Vec::new()) {
@@ -1250,14 +1274,14 @@ fn remove_stream(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(stream) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        return;
-    };
-    let identity = stream.get_identity_hash().get();
     let Some(snapshot) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    let Ok(stream) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
+        return;
+    };
+    let identity = stream.get_identity_hash().get();
     let position = snapshot.local_streams.iter().position(|candidate| {
         let candidate = v8::Local::new(scope, candidate);
         candidate.get_identity_hash().get() == identity
@@ -1274,11 +1298,11 @@ fn remove_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(sender) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        return;
-    };
     let Some(snapshot) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Ok(sender) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         return;
     };
     let known = snapshot.senders.iter().any(|candidate| {
@@ -1328,6 +1352,10 @@ fn set_local_description(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        reject_illegal_invocation_promise(scope, "setLocalDescription", result);
+        return;
+    }
     let description = read_description(scope, arguments.get(0), "offer");
     if !update(scope, arguments.this(), |record| {
         record.local_description = Some(description);
@@ -1343,6 +1371,10 @@ fn set_remote_description(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        reject_illegal_invocation_promise(scope, "setRemoteDescription", result);
+        return;
+    }
     let description = read_description(scope, arguments.get(0), "answer");
     if !update(scope, arguments.this(), |record| {
         record.remote_description = Some(description);

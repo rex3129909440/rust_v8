@@ -71,7 +71,11 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLStyleElement".to_owned());
     }
     super::html_element::attach(scope, object, "STYLE");
-    let blocking = super::dom_token_list::create(scope, "")?;
+    let blocking = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::Blocking,
+    )?;
     let blocking = v8::Global::new(scope, blocking);
     scope
         .get_slot_mut::<HtmlStyleElementStore>()

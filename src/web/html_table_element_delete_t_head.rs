@@ -10,7 +10,7 @@ pub(crate) fn define(
 fn delete_t_head(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    delete_special(scope, arguments.this(), SpecialChild::Head);
+    super::html_table_element::delete_t_head(scope, arguments, result);
 }

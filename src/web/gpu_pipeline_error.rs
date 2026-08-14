@@ -52,7 +52,16 @@ fn construct(
         crate::webidl::throw_type_error(scope, "Please use the 'new' operator");
         return;
     }
-    let message = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(message) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
+    if arguments.get(1).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'GPUPipelineError': The provided value is not of type 'GPUPipelineErrorInit'.",
+        );
+        return;
+    }
     let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
     let reason = options
         .and_then(|object| {

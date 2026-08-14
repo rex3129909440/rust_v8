@@ -14,7 +14,11 @@ fn get(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let html = super::dom_html::serialize_node(scope, arguments.this());
+    let html = super::node::owner_document(scope, arguments.this())
+        .and_then(|document| super::document::content_type_value(scope, document))
+        .filter(|content_type| content_type != "text/html")
+        .and_then(|_| super::dom_html::serialize_xml_node(scope, arguments.this()).ok())
+        .unwrap_or_else(|| super::dom_html::serialize_node(scope, arguments.this()));
     if let Some(html) = v8::String::new(scope, &html) {
         result.set(html.into());
     }

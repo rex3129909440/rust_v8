@@ -87,15 +87,24 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "AudioEncoder requires an init dictionary");
-        return;
-    };
-    let Some(output) = callback(scope, init, "output") else {
-        crate::webidl::throw_type_error(scope, "AudioEncoder output callback is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioEncoder': The provided value is not of type 'AudioEncoderInit'.",
+        );
         return;
     };
     let Some(error) = callback(scope, init, "error") else {
-        crate::webidl::throw_type_error(scope, "AudioEncoder error callback is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioEncoder': Failed to read the 'error' property from 'AudioEncoderInit': Required member is undefined.",
+        );
+        return;
+    };
+    let Some(output) = callback(scope, init, "output") else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioEncoder': Failed to read the 'output' property from 'AudioEncoderInit': Required member is undefined.",
+        );
         return;
     };
     super::event_target::attach(scope, arguments.this());
@@ -177,8 +186,11 @@ fn get_ondequeue(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.ondequeue);
-    super::window_event_handler_support::return_handler(scope, handler, result);
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(scope, record.ondequeue, result);
 }
 
 fn set_ondequeue(
@@ -195,6 +207,10 @@ fn configure(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let configuration = super::webcodecs_config_support::dictionary(scope, arguments.get(0));
     let Some(codec) = super::webcodecs_config_support::string_member(scope, configuration, "codec")
     else {
@@ -317,7 +333,7 @@ fn flush(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(current) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "AudioEncoder", "flush", result);
         return;
     };
     if current.state != "configured" {

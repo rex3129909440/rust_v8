@@ -153,7 +153,12 @@ fn get_closed(
     if let Some(v) = record(s, a.this()) {
         r.set(v8::Local::new(s, &v.closed).into())
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            s,
+            "Failed to read the 'closed' property from 'MediaKeySession': Illegal invocation",
+        ) {
+            r.set(promise.into())
+        }
     }
 }
 fn get_key_statuses(
@@ -172,22 +177,22 @@ fn get_onstatus(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.onstatus),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.onstatus, r)
 }
 fn get_onmessage(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.onmessage),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.onmessage, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -232,12 +237,22 @@ fn resolve(
         r.set(promise.into())
     }
 }
-fn active(s: &mut v8::PinScope<'_, '_>, a: v8::FunctionCallbackArguments<'_>) -> bool {
-    if record(s, a.this()).is_some_and(|v| v.active) {
-        true
-    } else {
-        crate::webidl::throw_type_error(s, "MediaKeySession is closed");
-        false
+fn active(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    method_name: &str,
+    r: v8::ReturnValue<'_>,
+) -> bool {
+    match record(s, a.this()) {
+        Some(record) if record.active => true,
+        Some(_) => {
+            crate::webidl::throw_type_error(s, "MediaKeySession is closed");
+            false
+        }
+        None => {
+            crate::webidl::reject_illegal_invocation_promise(s, "MediaKeySession", method_name, r);
+            false
+        }
     }
 }
 fn generate_request(
@@ -245,7 +260,7 @@ fn generate_request(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if active(s, a) {
+    if active(s, a, "generateRequest", r) {
         resolve(s, v8::undefined(s).into(), r)
     }
 }
@@ -254,7 +269,7 @@ fn load(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if active(s, a) {
+    if active(s, a, "load", r) {
         resolve(s, v8::Boolean::new(s, false).into(), r)
     }
 }
@@ -263,7 +278,7 @@ fn remove(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if active(s, a) {
+    if active(s, a, "remove", r) {
         resolve(s, v8::undefined(s).into(), r)
     }
 }
@@ -272,7 +287,7 @@ fn update(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if active(s, a) {
+    if active(s, a, "update", r) {
         resolve(s, v8::undefined(s).into(), r)
     }
 }
@@ -286,7 +301,7 @@ fn close(
             .get_slot_mut::<MediaKeySessionStore>()
             .and_then(|store| store.records.get_mut(&a.this().get_identity_hash().get()))
         else {
-            crate::webidl::throw_type_error(s, "Illegal invocation");
+            crate::webidl::reject_illegal_invocation_promise(s, "MediaKeySession", "close", r);
             return;
         };
         record.active = false;

@@ -12,7 +12,7 @@ fn set_end(
     let Some(current) = super::range::record_or_throw(scope, arguments.this()) else {
         return;
     };
-    let Some((node, offset)) = super::range::boundary_arguments(scope, &arguments) else {
+    let Some((node, offset)) = super::range::boundary_arguments(scope, &arguments, "setEnd") else {
         return;
     };
     let node_local = v8::Local::new(scope, &node);

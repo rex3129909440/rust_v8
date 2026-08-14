@@ -13,6 +13,7 @@ const MAX_TRACE_ARRAY_DEPTH: usize = 3;
 // character limits silently hid the tail of large argument arrays.
 const MAX_TRACE_ARRAY_ITEMS: usize = 512;
 const MAX_TRACE_ARRAY_CHARACTERS: usize = 65_536;
+const MAX_TRACE_OBJECT_PROPERTIES: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct TraceEntry {
@@ -47,8 +48,87 @@ struct NativeCallbackRecord {
     original_data: Option<v8::Global<v8::Value>>,
     active: Arc<AtomicBool>,
     kind: NativeCallbackKind,
+    length: i32,
+    summary_kind: NativeSummaryKind,
     member: String,
     label: std::cell::RefCell<String>,
+    pending_exception: std::cell::RefCell<Option<String>>,
+}
+
+thread_local! {
+    static CURRENT_NATIVE_CALLBACK: std::cell::Cell<*const NativeCallbackRecord> =
+        const { std::cell::Cell::new(std::ptr::null()) };
+    static CURRENT_NATIVE_ARGUMENT_COUNT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    static CURRENT_NATIVE_IS_CONSTRUCT_CALL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct CurrentNativeCallbackGuard {
+    previous: *const NativeCallbackRecord,
+    previous_argument_count: i32,
+    previous_is_construct_call: bool,
+}
+
+impl CurrentNativeCallbackGuard {
+    fn enter(
+        callback: &NativeCallbackRecord,
+        argument_count: i32,
+        is_construct_call: bool,
+    ) -> Self {
+        let pointer = callback as *const NativeCallbackRecord;
+        let previous = CURRENT_NATIVE_CALLBACK.with(|current| current.replace(pointer));
+        let previous_argument_count =
+            CURRENT_NATIVE_ARGUMENT_COUNT.with(|current| current.replace(argument_count));
+        let previous_is_construct_call =
+            CURRENT_NATIVE_IS_CONSTRUCT_CALL.with(|current| current.replace(is_construct_call));
+        Self {
+            previous,
+            previous_argument_count,
+            previous_is_construct_call,
+        }
+    }
+}
+
+impl Drop for CurrentNativeCallbackGuard {
+    fn drop(&mut self) {
+        CURRENT_NATIVE_CALLBACK.with(|current| current.set(self.previous));
+        CURRENT_NATIVE_ARGUMENT_COUNT.with(|current| current.set(self.previous_argument_count));
+        CURRENT_NATIVE_IS_CONSTRUCT_CALL
+            .with(|current| current.set(self.previous_is_construct_call));
+    }
+}
+
+pub(crate) fn current_constructor_name() -> Option<String> {
+    CURRENT_NATIVE_CALLBACK.with(|current| {
+        let pointer = current.get();
+        if pointer.is_null() {
+            return None;
+        }
+        // SAFETY: the pointer is installed only while the native callback's
+        // boxed record is alive in the isolate-owned trace state.
+        let callback = unsafe { &*pointer };
+        (callback.kind == NativeCallbackKind::Constructor).then(|| callback.member.clone())
+    })
+}
+
+pub(crate) fn current_constructor_missing_arguments() -> Option<(String, i32, i32)> {
+    CURRENT_NATIVE_CALLBACK.with(|current| {
+        let pointer = current.get();
+        if pointer.is_null() || !CURRENT_NATIVE_IS_CONSTRUCT_CALL.with(std::cell::Cell::get) {
+            return None;
+        }
+        // SAFETY: the pointer is installed only while the native callback's
+        // boxed record is alive in the isolate-owned trace state.
+        let callback = unsafe { &*pointer };
+        let present = CURRENT_NATIVE_ARGUMENT_COUNT.with(std::cell::Cell::get);
+        (callback.kind == NativeCallbackKind::Constructor && present < callback.length)
+            .then(|| (callback.member.clone(), callback.length, present))
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NativeSummaryKind {
+    Standard,
+    Json,
 }
 
 struct NativeFunctionRecord {
@@ -64,6 +144,18 @@ struct NativePrototypeRecord {
 struct NativeValueLabel {
     value: v8::Global<v8::Value>,
     label: String,
+}
+
+struct JsonIntrinsicMethodRecord {
+    original: v8::Global<v8::Function>,
+    wrapper: Option<v8::Global<v8::Function>>,
+}
+
+struct JsonIntrinsicRealmRecord {
+    json: v8::Global<v8::Object>,
+    label: String,
+    parse: JsonIntrinsicMethodRecord,
+    stringify: JsonIntrinsicMethodRecord,
 }
 
 #[derive(Clone, Copy)]
@@ -93,6 +185,7 @@ struct NativeTraceState {
     functions_by_hash: HashMap<i32, Vec<usize>>,
     labels: Vec<NativeValueLabel>,
     labels_by_hash: HashMap<i32, Vec<usize>>,
+    json_realms: Vec<JsonIntrinsicRealmRecord>,
 }
 
 impl Default for NativeTraceState {
@@ -114,6 +207,7 @@ impl Default for NativeTraceState {
             functions_by_hash: HashMap::new(),
             labels: Vec::new(),
             labels_by_hash: HashMap::new(),
+            json_realms: Vec::new(),
         }
     }
 }
@@ -532,6 +626,7 @@ pub(crate) fn create_native_function<'s>(
         constructor_behavior,
         original,
         kind,
+        NativeSummaryKind::Standard,
         None,
     )
 }
@@ -553,6 +648,7 @@ pub(crate) fn create_native_function_with_data<'s>(
         constructor_behavior,
         original,
         kind,
+        NativeSummaryKind::Standard,
         Some(data),
     )
 }
@@ -564,6 +660,7 @@ fn create_native_function_raw<'s>(
     constructor_behavior: v8::ConstructorBehavior,
     original: v8::FunctionCallback,
     kind: NativeCallbackKind,
+    summary_kind: NativeSummaryKind,
     original_data: Option<v8::Global<v8::Value>>,
 ) -> Result<v8::Local<'s, v8::Function>, String> {
     let is_constructor = matches!(&constructor_behavior, v8::ConstructorBehavior::Allow);
@@ -582,8 +679,11 @@ fn create_native_function_raw<'s>(
         original_data,
         active: active.clone(),
         kind,
+        length,
+        summary_kind,
         member,
         label: std::cell::RefCell::new(name.to_owned()),
+        pending_exception: std::cell::RefCell::new(None),
     });
     let callback = (&*record as *const NativeCallbackRecord).cast_mut();
     let data = v8::External::new(scope, callback.cast());
@@ -780,6 +880,274 @@ pub(crate) fn native_callback_data<'s>(
         .unwrap_or_else(|| arguments.data())
 }
 
+pub(crate) fn install_json_intrinsic_trace(
+    scope: &mut v8::PinScope<'_, '_>,
+    realm_label: &str,
+) -> Result<(), String> {
+    let json = current_json_intrinsic(scope)?;
+    let existing = scope.get_slot::<NativeTraceState>().and_then(|state| {
+        state
+            .json_realms
+            .iter()
+            .position(|record| v8::Local::new(scope, &record.json).strict_equals(json.into()))
+    });
+    if existing.is_some() {
+        return relabel_json_intrinsic_trace(scope, realm_label);
+    }
+    let parse = json_intrinsic_method(scope, json, "parse")?;
+    let stringify = json_intrinsic_method(scope, json, "stringify")?;
+    let json_global = v8::Global::new(scope, json);
+    let parse = v8::Global::new(scope, parse);
+    let stringify = v8::Global::new(scope, stringify);
+    let state = scope
+        .get_slot_mut::<NativeTraceState>()
+        .ok_or_else(|| "native trace state was not prepared".to_owned())?;
+    let index = state.json_realms.len();
+    state.json_realms.push(JsonIntrinsicRealmRecord {
+        json: json_global,
+        label: realm_label.to_owned(),
+        parse: JsonIntrinsicMethodRecord {
+            original: parse,
+            wrapper: None,
+        },
+        stringify: JsonIntrinsicMethodRecord {
+            original: stringify,
+            wrapper: None,
+        },
+    });
+    label_native_value(scope, json.into(), &format!("{realm_label}.JSON"));
+    enable_json_realm(scope, index)?;
+    Ok(())
+}
+
+pub(crate) fn relabel_json_intrinsic_trace(
+    scope: &mut v8::PinScope<'_, '_>,
+    realm_label: &str,
+) -> Result<(), String> {
+    let json = current_json_intrinsic(scope)?;
+    let index = scope
+        .get_slot::<NativeTraceState>()
+        .and_then(|state| {
+            state
+                .json_realms
+                .iter()
+                .position(|record| v8::Local::new(scope, &record.json).strict_equals(json.into()))
+        })
+        .ok_or_else(|| "JSON intrinsic trace realm was not registered".to_owned())?;
+    let (parse, stringify) = {
+        let state = scope
+            .get_slot_mut::<NativeTraceState>()
+            .ok_or_else(|| "native trace state was not prepared".to_owned())?;
+        let record = state
+            .json_realms
+            .get_mut(index)
+            .ok_or_else(|| "JSON intrinsic trace realm disappeared".to_owned())?;
+        record.label = realm_label.to_owned();
+        (
+            record.parse.wrapper.clone(),
+            record.stringify.wrapper.clone(),
+        )
+    };
+    label_native_value(scope, json.into(), &format!("{realm_label}.JSON"));
+    for (name, function) in [("parse", parse), ("stringify", stringify)] {
+        if let Some(function) = function {
+            let function = v8::Local::new(scope, &function);
+            relabel_native_function(scope, function, &format!("{realm_label}.JSON.{name}"));
+        }
+    }
+    Ok(())
+}
+
+fn current_json_intrinsic<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let global = scope.get_current_context().global(scope);
+    let json_key = crate::webidl::string(scope, "JSON")?;
+    global
+        .get(scope, json_key.into())
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+        .ok_or_else(|| "JSON intrinsic is unavailable".to_owned())
+}
+
+fn json_intrinsic_method<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    json: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Result<v8::Local<'s, v8::Function>, String> {
+    let key = crate::webidl::string(scope, name)?;
+    json.get(scope, key.into())
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+        .ok_or_else(|| format!("JSON.{name} is unavailable"))
+}
+
+fn enable_json_realm(scope: &mut v8::PinScope<'_, '_>, index: usize) -> Result<(), String> {
+    let (json, label, parse_original, parse_wrapper, stringify_original, stringify_wrapper) = {
+        let state = scope
+            .get_slot::<NativeTraceState>()
+            .ok_or_else(|| "native trace state was not prepared".to_owned())?;
+        let record = state
+            .json_realms
+            .get(index)
+            .ok_or_else(|| "JSON intrinsic trace realm disappeared".to_owned())?;
+        (
+            record.json.clone(),
+            record.label.clone(),
+            record.parse.original.clone(),
+            record.parse.wrapper.clone(),
+            record.stringify.original.clone(),
+            record.stringify.wrapper.clone(),
+        )
+    };
+    let json = v8::Local::new(scope, &json);
+    label_native_value(scope, json.into(), &format!("{label}.JSON"));
+    let parse = match parse_wrapper {
+        Some(wrapper) => v8::Local::new(scope, &wrapper),
+        None => {
+            let original = v8::Local::new(scope, &parse_original);
+            create_json_wrapper(scope, original, &label, "parse", 2)?
+        }
+    };
+    let stringify = match stringify_wrapper {
+        Some(wrapper) => v8::Local::new(scope, &wrapper),
+        None => {
+            let original = v8::Local::new(scope, &stringify_original);
+            create_json_wrapper(scope, original, &label, "stringify", 3)?
+        }
+    };
+    define_json_method(scope, json, "parse", parse)?;
+    define_json_method(scope, json, "stringify", stringify)?;
+    let parse_global = v8::Global::new(scope, parse);
+    let stringify_global = v8::Global::new(scope, stringify);
+    let state = scope
+        .get_slot_mut::<NativeTraceState>()
+        .ok_or_else(|| "native trace state was not prepared".to_owned())?;
+    let record = state
+        .json_realms
+        .get_mut(index)
+        .ok_or_else(|| "JSON intrinsic trace realm disappeared".to_owned())?;
+    if record.parse.wrapper.is_none() {
+        record.parse.wrapper = Some(parse_global);
+    }
+    if record.stringify.wrapper.is_none() {
+        record.stringify.wrapper = Some(stringify_global);
+    }
+    Ok(())
+}
+
+fn create_json_wrapper<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    original: v8::Local<'_, v8::Function>,
+    realm_label: &str,
+    name: &str,
+    length: i32,
+) -> Result<v8::Local<'s, v8::Function>, String> {
+    let original_value: v8::Local<v8::Value> = original.into();
+    let original_data = v8::Global::new(scope, original_value);
+    let wrapper = create_native_function_raw(
+        scope,
+        name,
+        length,
+        v8::ConstructorBehavior::Throw,
+        v8::MapFnTo::map_fn_to(forward_json_intrinsic),
+        NativeCallbackKind::Function,
+        NativeSummaryKind::Json,
+        Some(original_data),
+    )?;
+    relabel_native_function(scope, wrapper, &format!("{realm_label}.JSON.{name}"));
+    Ok(wrapper)
+}
+
+fn define_json_method(
+    scope: &mut v8::PinScope<'_, '_>,
+    json: v8::Local<'_, v8::Object>,
+    name: &str,
+    function: v8::Local<'_, v8::Function>,
+) -> Result<(), String> {
+    let key = crate::webidl::string(scope, name)?;
+    if json.define_own_property(
+        scope,
+        key.into(),
+        function.into(),
+        v8::PropertyAttribute::DONT_ENUM,
+    ) == Some(true)
+    {
+        Ok(())
+    } else {
+        Err(format!("cannot install JSON.{name} trace callback"))
+    }
+}
+
+fn forward_json_intrinsic(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let original = native_callback_data(scope, &arguments);
+    let Ok(original) = v8::Local::<v8::Function>::try_from(original) else {
+        crate::webidl::throw_type_error(scope, "JSON intrinsic trace target is unavailable");
+        return;
+    };
+    let receiver: v8::Local<v8::Value> = arguments.this().into();
+    let recording = scope
+        .get_slot::<NativeTraceState>()
+        .is_some_and(|state| state.recording);
+    if !recording {
+        let value = match arguments.length() {
+            0 => original.call(scope, receiver, &[]),
+            1 => original.call(scope, receiver, &[arguments.get(0)]),
+            2 => original.call(scope, receiver, &[arguments.get(0), arguments.get(1)]),
+            3 => original.call(
+                scope,
+                receiver,
+                &[arguments.get(0), arguments.get(1), arguments.get(2)],
+            ),
+            _ => {
+                let values = (0..arguments.length())
+                    .map(|index| arguments.get(index))
+                    .collect::<Vec<_>>();
+                original.call(scope, receiver, &values)
+            }
+        };
+        if let Some(value) = value {
+            result.set(value);
+        }
+        return;
+    }
+    let values = (0..arguments.length())
+        .map(|index| arguments.get(index))
+        .collect::<Vec<_>>();
+    v8::tc_scope!(let try_catch, scope);
+    let _user_execution = enter_user_execution(try_catch);
+    if let Some(value) = original.call(try_catch, receiver, &values) {
+        result.set(value);
+        return;
+    }
+    let exception = try_catch
+        .exception()
+        .map(|value| summarize_json(try_catch, value))
+        .unwrap_or_else(|| "exception".to_owned());
+    set_native_callback_exception(try_catch, &arguments, exception);
+    let _ = try_catch.rethrow();
+}
+
+fn set_native_callback_exception(
+    _: &v8::PinScope<'_, '_>,
+    arguments: &v8::FunctionCallbackArguments<'_>,
+    exception: String,
+) {
+    let Ok(external) = v8::Local::<v8::External>::try_from(arguments.data()) else {
+        return;
+    };
+    let callback = external.value().cast::<NativeCallbackRecord>();
+    if !callback.is_null() {
+        // SAFETY: the External points at a callback record retained by the
+        // isolate trace state for the lifetime of the native function.
+        unsafe { &*callback }
+            .pending_exception
+            .replace(Some(exception));
+    }
+}
+
 pub(crate) fn relabel_native_function(
     scope: &mut v8::PinScope<'_, '_>,
     function: v8::Local<'_, v8::Function>,
@@ -886,9 +1254,13 @@ unsafe extern "C" fn native_callback_trampoline(info: *const v8::FunctionCallbac
     }
     // SAFETY: the External points at a boxed record owned by the isolate slot.
     let callback = unsafe { &*callback };
+    let _current_callback =
+        CurrentNativeCallbackGuard::enter(callback, parts.length, info.is_construct_call());
+    crate::webidl::clear_pending_conversion_type_error();
+    callback.pending_exception.borrow_mut().take();
     if !callback.active.load(Ordering::Relaxed) {
-        // SAFETY: the original callback uses the same V8 ABI and callback info.
-        unsafe { (callback.original)(info) };
+        invoke_original_with_try_catch(info, callback.original);
+        throw_pending_conversion_type_error(info);
         register_constructed_platform_object(info, callback);
         return;
     }
@@ -899,22 +1271,67 @@ unsafe extern "C" fn native_callback_trampoline(info: *const v8::FunctionCallbac
         native_callback_begin(&mut scope, info, callback)
     };
 
-    // The original receives the untouched callback info. V8 therefore keeps
-    // the real receiver, newTarget, return slot and exception semantics.
-    unsafe { (callback.original)(info) };
+    // The original receives the untouched callback info. The surrounding V8
+    // TryCatch preserves exceptions raised during Web IDL ToPrimitive and
+    // ToString conversions even if the Rust callback continues after a V8
+    // conversion method returns None.
+    invoke_original_with_try_catch(info, callback.original);
+    throw_pending_conversion_type_error(info);
     register_constructed_platform_object(info, callback);
 
-    if let Some((sequence, result_label, kind, opaque_html_all)) = started {
+    if let Some((sequence, result_label, kind, summary_kind, opaque_html_all)) = started {
         let storage = std::pin::pin!(unsafe { v8::CallbackScope::new(info) });
         let mut scope = storage.init();
+        let exception = callback.pending_exception.borrow_mut().take();
         native_callback_finish(
             &mut scope,
             info,
             sequence,
             &result_label,
             kind,
+            summary_kind,
             opaque_html_all,
+            exception,
         );
+    }
+}
+
+fn invoke_original_with_try_catch(info: &v8::FunctionCallbackInfo, original: v8::FunctionCallback) {
+    let storage = std::pin::pin!(unsafe { v8::CallbackScope::new(info) });
+    let mut callback_scope = storage.init();
+    v8::tc_scope!(let try_catch, &mut callback_scope);
+    // SAFETY: the original callback uses the same V8 ABI and untouched
+    // FunctionCallbackInfo supplied by V8.
+    unsafe { original(info) };
+    if try_catch.has_caught() {
+        let primitive_conversion_failed = try_catch
+            .exception()
+            .and_then(|exception| exception.to_string(try_catch))
+            .map(|text| text.to_rust_string_lossy(try_catch))
+            .is_some_and(|text| text == "TypeError: Cannot convert object to primitive value");
+        if primitive_conversion_failed && let Some(constructor_name) = current_constructor_name() {
+            try_catch.reset();
+            let message = format!(
+                "Failed to construct '{constructor_name}': Cannot convert object to primitive value"
+            );
+            if let Some(message) = v8::String::new(try_catch, &message) {
+                try_catch.throw_exception(v8::Exception::type_error(try_catch, message));
+                let _ = try_catch.rethrow();
+            }
+        } else {
+            let _ = try_catch.rethrow();
+        }
+    }
+}
+
+fn throw_pending_conversion_type_error(info: &v8::FunctionCallbackInfo) {
+    let Some(message) = crate::webidl::take_pending_conversion_type_error() else {
+        return;
+    };
+    let storage = std::pin::pin!(unsafe { v8::CallbackScope::new(info) });
+    let scope = storage.init();
+    if let Some(message) = v8::String::new(&scope, &message) {
+        scope.throw_exception(v8::Exception::type_error(&scope, message));
     }
 }
 
@@ -944,7 +1361,13 @@ fn native_callback_begin(
     scope: &mut v8::PinScope<'_, '_>,
     info: &v8::FunctionCallbackInfo,
     callback: &NativeCallbackRecord,
-) -> Option<(Option<u64>, String, NativeCallbackKind, bool)> {
+) -> Option<(
+    Option<u64>,
+    String,
+    NativeCallbackKind,
+    NativeSummaryKind,
+    bool,
+)> {
     let should_record = scope
         .get_slot::<NativeTraceState>()
         .is_some_and(|state| state.recording && state.interceptor_depth == 0);
@@ -981,7 +1404,13 @@ fn native_callback_begin(
         .get_slot::<NativeTraceState>()
         .is_some_and(|state| state.excludes_api(&api))
     {
-        return Some((None, String::new(), callback.kind, false));
+        return Some((
+            None,
+            String::new(),
+            callback.kind,
+            callback.summary_kind,
+            false,
+        ));
     }
     let operation = match callback.kind {
         NativeCallbackKind::Getter => "get",
@@ -992,7 +1421,11 @@ fn native_callback_begin(
     };
     let mut argument_text = Vec::with_capacity(arguments.length().max(0) as usize);
     for index in 0..arguments.length() {
-        argument_text.push(summarize(scope, arguments.get(index)));
+        let value = arguments.get(index);
+        argument_text.push(match callback.summary_kind {
+            NativeSummaryKind::Standard => summarize(scope, value),
+            NativeSummaryKind::Json => summarize_json(scope, value),
+        });
     }
     let result_label = match callback.kind {
         NativeCallbackKind::Getter => api.clone(),
@@ -1010,7 +1443,13 @@ fn native_callback_begin(
     );
     let opaque_html_all = callback.kind == NativeCallbackKind::Getter
         && callback.label.borrow().as_str() == "Document.prototype.get all";
-    Some((sequence, result_label, callback.kind, opaque_html_all))
+    Some((
+        sequence,
+        result_label,
+        callback.kind,
+        callback.summary_kind,
+        opaque_html_all,
+    ))
 }
 
 fn native_callback_finish(
@@ -1019,7 +1458,9 @@ fn native_callback_finish(
     sequence: Option<u64>,
     result_label: &str,
     kind: NativeCallbackKind,
+    summary_kind: NativeSummaryKind,
     opaque_html_all: bool,
+    exception: Option<String>,
 ) {
     let Some(sequence) = sequence else {
         if let Some(state) = scope.get_slot_mut::<NativeTraceState>() {
@@ -1033,10 +1474,15 @@ fn native_callback_finish(
     // introspection on that representation reaches an empty V8 optional in
     // no-exceptions builds, so trace records the browser-visible brand without
     // probing the value.
-    let summary = if opaque_html_all {
+    let summary = if let Some(exception) = exception {
+        format!("threw {exception}")
+    } else if opaque_html_all {
         "[object HTMLAllCollection]".to_owned()
     } else {
-        summarize(scope, value)
+        match summary_kind {
+            NativeSummaryKind::Standard => summarize(scope, value),
+            NativeSummaryKind::Json => summarize_json(scope, value),
+        }
     };
     if !result_label.is_empty() && value.is_object() {
         let existing = native_label_for_value(scope, value);
@@ -1214,6 +1660,161 @@ fn summarize<'s>(scope: &v8::PinScope<'s, '_>, value: v8::Local<'s, v8::Value>) 
     summarize_inner(scope, value, 0, &mut Vec::new())
 }
 
+fn summarize_json<'s>(scope: &v8::PinScope<'s, '_>, value: v8::Local<'s, v8::Value>) -> String {
+    if value.is_string() {
+        let text = crate::webidl::value_to_string(scope, value);
+        return format!(
+            "\"{}\"",
+            escape_with_limit(&text, MAX_TRACE_ARRAY_CHARACTERS.saturating_sub(2))
+        );
+    }
+    summarize_json_inner(scope, value, 0, &mut Vec::new())
+}
+
+fn summarize_json_inner<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+    depth: usize,
+    ancestors: &mut Vec<v8::Local<'s, v8::Object>>,
+) -> String {
+    if value.is_string() {
+        let text = crate::webidl::value_to_string(scope, value);
+        return format!(
+            "\"{}\"",
+            escape_with_limit(&text, MAX_TRACE_ARRAY_CHARACTERS.saturating_sub(2))
+        );
+    }
+    if value.is_proxy() {
+        return "[object Proxy]".to_owned();
+    }
+    if let Ok(array) = v8::Local::<v8::Array>::try_from(value) {
+        return summarize_json_array(scope, array, depth, ancestors);
+    }
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+        return summarize_inner(scope, value, depth, ancestors);
+    };
+    let constructor = object.get_constructor_name().to_rust_string_lossy(scope);
+    if constructor != "Object" || native_label_for_value(scope, value).is_some() {
+        return summarize_inner(scope, value, depth, ancestors);
+    }
+    summarize_json_object(scope, object, depth, ancestors)
+}
+
+fn summarize_json_array<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    array: v8::Local<'s, v8::Array>,
+    depth: usize,
+    ancestors: &mut Vec<v8::Local<'s, v8::Object>>,
+) -> String {
+    if depth >= MAX_TRACE_ARRAY_DEPTH {
+        return "[Array]".to_owned();
+    }
+    let object = v8::Local::<v8::Object>::from(array);
+    if ancestors
+        .iter()
+        .any(|ancestor| ancestor.strict_equals(object.into()))
+    {
+        return "[Circular]".to_owned();
+    }
+    ancestors.push(object);
+    let length = array.length() as usize;
+    let retained = length.min(MAX_TRACE_ARRAY_ITEMS);
+    let mut values = Vec::with_capacity(retained + usize::from(length > retained));
+    for index in 0..retained {
+        values.push(
+            own_data_value_by_index(scope, object, index as u32)
+                .map(|value| summarize_json_inner(scope, value, depth + 1, ancestors))
+                .unwrap_or_else(|| "[accessor-or-empty]".to_owned()),
+        );
+    }
+    if length > retained {
+        values.push(format!("... {} more", length - retained));
+    }
+    ancestors.pop();
+    bounded_text(
+        &format!("[{}]", values.join(",")),
+        MAX_TRACE_ARRAY_CHARACTERS,
+    )
+}
+
+fn summarize_json_object<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    depth: usize,
+    ancestors: &mut Vec<v8::Local<'s, v8::Object>>,
+) -> String {
+    if depth >= MAX_TRACE_ARRAY_DEPTH {
+        return "{Object}".to_owned();
+    }
+    if ancestors
+        .iter()
+        .any(|ancestor| ancestor.strict_equals(object.into()))
+    {
+        return "[Circular]".to_owned();
+    }
+    ancestors.push(object);
+    let arguments = v8::GetPropertyNamesArgs {
+        mode: v8::KeyCollectionMode::OwnOnly,
+        property_filter: v8::PropertyFilter::ONLY_ENUMERABLE | v8::PropertyFilter::SKIP_SYMBOLS,
+        index_filter: v8::IndexFilter::IncludeIndices,
+        key_conversion: v8::KeyConversionMode::ConvertToString,
+    };
+    let Some(keys) = object.get_own_property_names(scope, arguments) else {
+        ancestors.pop();
+        return "{Object}".to_owned();
+    };
+    let actual = keys.length() as usize;
+    let retained = actual.min(MAX_TRACE_OBJECT_PROPERTIES);
+    let mut properties = Vec::with_capacity(retained + usize::from(actual > retained));
+    for index in 0..retained {
+        let Some(key_value) = keys.get_index(scope, index as u32) else {
+            continue;
+        };
+        let Some(key) = key_value.to_string(scope) else {
+            continue;
+        };
+        let name = key.to_rust_string_lossy(scope);
+        let value = own_data_value_by_name(scope, object, key.into())
+            .map(|value| summarize_json_inner(scope, value, depth + 1, ancestors))
+            .unwrap_or_else(|| "[accessor]".to_owned());
+        properties.push(format!(
+            "\"{}\":{}",
+            escape_with_limit(&name, MAX_TRACE_PROPERTY_CHARACTERS),
+            value
+        ));
+    }
+    if actual > retained {
+        properties.push(format!("... {} more", actual - retained));
+    }
+    ancestors.pop();
+    bounded_text(
+        &format!("{{{}}}", properties.join(",")),
+        MAX_TRACE_ARRAY_CHARACTERS,
+    )
+}
+
+fn own_data_value_by_index<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    index: u32,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let key = v8::String::new(scope, &index.to_string())?;
+    own_data_value_by_name(scope, object, key.into())
+}
+
+fn own_data_value_by_name<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    key: v8::Local<'s, v8::Name>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let descriptor = object.get_own_property_descriptor(scope, key)?;
+    let descriptor = v8::Local::<v8::Object>::try_from(descriptor).ok()?;
+    let value_key = v8::String::new(scope, "value")?;
+    (descriptor.has_own_property(scope, value_key.into()) == Some(true))
+        .then(|| descriptor.get(scope, value_key.into()))
+        .flatten()
+}
+
 fn summarize_inner<'s>(
     scope: &v8::PinScope<'s, '_>,
     value: v8::Local<'s, v8::Value>,
@@ -1354,6 +1955,33 @@ fn escape_and_limit(value: &str) -> String {
         }
     }
     if value.chars().count() > 96 {
+        output.push('…');
+    }
+    output
+}
+
+fn escape_with_limit(value: &str, maximum_characters: usize) -> String {
+    let mut output = String::new();
+    let mut output_characters = 0usize;
+    let mut truncated = false;
+    for character in value.chars() {
+        let escaped = match character {
+            '\n' => "\\n".to_owned(),
+            '\r' => "\\r".to_owned(),
+            '\t' => "\\t".to_owned(),
+            '\\' => "\\\\".to_owned(),
+            '"' => "\\\"".to_owned(),
+            other => other.to_string(),
+        };
+        let escaped_characters = escaped.chars().count();
+        if output_characters.saturating_add(escaped_characters) > maximum_characters {
+            truncated = true;
+            break;
+        }
+        output.push_str(&escaped);
+        output_characters += escaped_characters;
+    }
+    if truncated && output_characters < maximum_characters {
         output.push('…');
     }
     output

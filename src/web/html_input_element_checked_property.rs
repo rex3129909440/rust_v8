@@ -18,11 +18,7 @@ fn get_checked(
 fn set_checked(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    let value = a.get(0).boolean_value(s);
-    update(s, a.this(), |x| {
-        x.checked = value;
-        x.checked_dirty = true;
-    });
+    super::html_input_element::set_checked(s, a, result);
 }

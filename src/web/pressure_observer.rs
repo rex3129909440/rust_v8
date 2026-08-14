@@ -8,6 +8,7 @@ struct ObserverData {
 #[derive(Default)]
 pub(crate) struct PressureObserverStore {
     constructor: crate::webidl::RealmConstructor,
+    known_sources: HashMap<i32, v8::Global<v8::Array>>,
     records: HashMap<i32, ObserverData>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
@@ -40,22 +41,52 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
     crate::webidl::define_method(s, p, "takeRecords", 0, take_records)?;
     crate::webidl::define_method(s, p, "unobserve", 1, unobserve)?;
     crate::webidl::finish_constructor(s, p, c)?;
-    let key = v8::String::new(s, "knownSources").unwrap();
     let array = v8::Array::new(s, 1);
     let value = v8::String::new(s, "cpu").unwrap();
     let _ = array.set_index(s, 0, value.into());
-    let _ = c.define_own_property(
+    if array.set_integrity_level(s, v8::IntegrityLevel::Frozen) != Some(true) {
+        return Err("cannot freeze PressureObserver.knownSources".to_owned());
+    }
+    let stored_sources = v8::Global::new(s, array);
+    s.get_slot_mut::<PressureObserverStore>()
+        .ok_or_else(|| "PressureObserver state was not prepared".to_owned())?
+        .known_sources
+        .insert(realm_id, stored_sources);
+    let getter = crate::webidl::create_function(
         s,
-        key.into(),
-        array.into(),
-        v8::PropertyAttribute::READ_ONLY,
-    );
+        "get knownSources",
+        0,
+        v8::ConstructorBehavior::Throw,
+        get_known_sources,
+    )?;
+    crate::trace::relabel_native_function(s, getter, "PressureObserver.get knownSources");
+    let undefined = v8::undefined(s);
+    let mut descriptor = v8::PropertyDescriptor::new_from_get_set(getter.into(), undefined.into());
+    descriptor.set_enumerable(true);
+    descriptor.set_configurable(true);
+    let key = v8::String::new(s, "knownSources").unwrap();
+    if c.define_property(s, key.into(), &descriptor) != Some(true) {
+        return Err("cannot define PressureObserver.knownSources".to_owned());
+    }
     let realm_constructor = v8::Global::new(s, c);
     s.get_slot_mut::<PressureObserverStore>()
         .unwrap()
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(c)
+}
+fn get_known_sources(
+    s: &mut v8::PinScope<'_, '_>,
+    _: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+) {
+    if let Some(array) = s
+        .get_slot::<PressureObserverStore>()
+        .and_then(|store| store.known_sources.get(&crate::webidl::realm_id(s)))
+        .cloned()
+    {
+        r.set(v8::Local::new(s, &array).into());
+    }
 }
 fn construct(
     s: &mut v8::PinScope<'_, '_>,
@@ -67,7 +98,10 @@ fn construct(
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "callback required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PressureObserver': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     let callback = v8::Global::new(s, callback);
@@ -110,11 +144,11 @@ fn observe(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    let source = crate::webidl::value_to_string(s, a.get(0));
     let Some(snapshot) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PressureObserver", "observe", r);
         return;
     };
+    let source = crate::webidl::value_to_string(s, a.get(0));
     let item = match super::pressure_record::create(s, source.clone(), "nominal".to_owned(), 0.0) {
         Ok(v) => v,
         Err(e) => {
@@ -180,5 +214,6 @@ fn unobserve(
 pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {
     if let Some(store) = scope.get_slot_mut::<PressureObserverStore>() {
         store.constructor.remove(realm_id);
+        store.known_sources.remove(&realm_id);
     }
 }

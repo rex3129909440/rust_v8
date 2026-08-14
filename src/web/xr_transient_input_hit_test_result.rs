@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrTransientInputHitTestResultStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrTransientInputHitTestResultStore::default());
@@ -46,15 +49,34 @@ fn illegal(
 }
 fn null(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::null(s).into())
 }
 fn array(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Array::new(s, 0).into())
+}
+fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = s
+        .get_slot::<XrTransientInputHitTestResultStore>()
+        .is_some_and(|store| {
+            store
+                .instances
+                .contains(&a.this().get_identity_hash().get())
+        });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }

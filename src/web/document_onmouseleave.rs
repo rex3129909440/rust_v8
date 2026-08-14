@@ -11,7 +11,6 @@ fn get(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !super::document::is_document(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
     match super::document::handler_value(scope, arguments.this(), "onmouseleave") {
@@ -25,7 +24,5 @@ fn set(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    if !super::document::set_handler(scope, arguments.this(), "onmouseleave", arguments.get(0)) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-    }
+    let _ = super::document::set_handler(scope, arguments.this(), "onmouseleave", arguments.get(0));
 }

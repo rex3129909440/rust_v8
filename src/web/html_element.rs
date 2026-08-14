@@ -1,9 +1,34 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub(crate) struct HtmlElementStore {
     pub(crate) constructors: HashMap<i32, v8::Global<v8::Function>>,
     pub(crate) records: HashMap<i32, HtmlElementRecord>,
+    pub(crate) click_in_progress: HashSet<i32>,
+}
+
+pub(crate) fn begin_click_activation(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> bool {
+    scope
+        .get_slot_mut::<HtmlElementStore>()
+        .is_some_and(|store| {
+            store
+                .click_in_progress
+                .insert(object.get_identity_hash().get())
+        })
+}
+
+pub(crate) fn finish_click_activation(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) {
+    if let Some(store) = scope.get_slot_mut::<HtmlElementStore>() {
+        store
+            .click_in_progress
+            .remove(&object.get_identity_hash().get());
+    }
 }
 
 #[derive(Clone)]
@@ -193,6 +218,9 @@ pub(crate) fn ensure_constructor<'s>(
     super::html_element_focus_group_start_property::define(scope, prototype)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     super::html_element_onpointerrawupdate_property::define(scope, prototype)?;
+    for name in ["ontouchcancel", "ontouchend", "ontouchmove", "ontouchstart"] {
+        super::html_element_touch_handlers::define(scope, prototype, name)?;
+    }
     let parent = super::element::ensure_constructor(scope)?;
     crate::webidl::inherit(scope, constructor, parent)?;
 
@@ -267,6 +295,7 @@ pub(crate) fn attach(
                 popover_visible: false,
             },
         );
+    super::custom_element_registry::track_candidate(scope, object);
 }
 
 pub(crate) fn is_html_element(
@@ -288,13 +317,73 @@ pub(crate) fn dispatch_handler(
 ) {
     let name = format!("on{event_type}");
     let handler = record(scope, target).and_then(|record| record.handlers.get(&name).cloned());
-    let Some(handler) = handler else {
+    if let Some(handler) = handler {
+        let value = v8::Local::new(scope, &handler);
+        if let Ok(function) = v8::Local::<v8::Function>::try_from(value) {
+            v8::tc_scope!(let try_catch, scope);
+            let _ = function.call(try_catch, target.into(), &[event.into()]);
+        }
+        return;
+    }
+    let Some(source) = super::element::attribute_value(scope, target, &name) else {
         return;
     };
-    let value = v8::Local::new(scope, &handler);
+    let wrapped = format!("(function(event){{\n{source}\n}})");
+    let Some(source) = v8::String::new(scope, &wrapped) else {
+        return;
+    };
+    v8::tc_scope!(let try_catch, scope);
+    let Some(value) =
+        v8::Script::compile(try_catch, source, None).and_then(|script| script.run(try_catch))
+    else {
+        return;
+    };
     if let Ok(function) = v8::Local::<v8::Function>::try_from(value) {
-        v8::tc_scope!(let try_catch, scope);
         let _ = function.call(try_catch, target.into(), &[event.into()]);
+    }
+}
+
+pub(crate) fn set_content_attribute_handler(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+    name: &str,
+    source: &str,
+) {
+    if record(scope, target).is_none() {
+        return;
+    }
+    let function_name = name.to_ascii_lowercase();
+    let wrapped = format!("(function {function_name}(event){{\n{source}\n}})");
+    let Some(source) = v8::String::new(scope, &wrapped) else {
+        return;
+    };
+    v8::tc_scope!(let try_catch, scope);
+    let handler = v8::Script::compile(try_catch, source, None)
+        .and_then(|script| script.run(try_catch))
+        .filter(|value| value.is_function())
+        .map(|value| v8::Global::new(try_catch, value));
+    if let Some(record) = try_catch
+        .get_slot_mut::<HtmlElementStore>()
+        .and_then(|store| store.records.get_mut(&target.get_identity_hash().get()))
+    {
+        if let Some(handler) = handler {
+            record.handlers.insert(function_name, handler);
+        } else {
+            record.handlers.remove(&function_name);
+        }
+    }
+}
+
+pub(crate) fn clear_content_attribute_handler(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+    name: &str,
+) {
+    if let Some(record) = scope
+        .get_slot_mut::<HtmlElementStore>()
+        .and_then(|store| store.records.get_mut(&target.get_identity_hash().get()))
+    {
+        record.handlers.remove(&name.to_ascii_lowercase());
     }
 }
 
@@ -325,10 +414,10 @@ pub(crate) fn sync_style_attribute(
 
 pub(crate) fn illegal_constructor(
     scope: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    crate::webidl::throw_type_error(scope, "Illegal constructor");
+    super::custom_element_registry::html_constructor(scope, arguments, result, None);
 }
 
 pub(crate) fn tagged_object<'s>(
@@ -513,11 +602,14 @@ pub(crate) fn get_tab_index(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Integer::new(scope, record.tab_index).into());
-    } else {
+    if record(scope, arguments.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
     }
+    let value = super::element::attribute_value(scope, arguments.this(), "tabindex")
+        .and_then(|value| parse_tab_index(&value))
+        .unwrap_or_else(|| default_tab_index(scope, arguments.this()));
+    result.set(v8::Integer::new(scope, value).into());
 }
 
 pub(crate) fn set_tab_index(
@@ -526,14 +618,52 @@ pub(crate) fn set_tab_index(
     _: v8::ReturnValue<'_>,
 ) {
     let value = arguments.get(0).int32_value(scope).unwrap_or(0);
-    if let Some(record) = scope.get_slot_mut::<HtmlElementStore>().and_then(|store| {
-        store
-            .records
-            .get_mut(&arguments.this().get_identity_hash().get())
-    }) {
-        record.tab_index = value;
-    } else {
+    if record(scope, arguments.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    super::element::set_reflected_string(scope, arguments.this(), "tabindex", value.to_string());
+}
+
+fn parse_tab_index(value: &str) -> Option<i32> {
+    let bytes = value.as_bytes();
+    let mut position = bytes.iter().position(|byte| !byte.is_ascii_whitespace())?;
+    let negative = match bytes.get(position) {
+        Some(b'-') => {
+            position += 1;
+            true
+        }
+        Some(b'+') => {
+            position += 1;
+            false
+        }
+        _ => false,
+    };
+    let start = position;
+    while bytes.get(position).is_some_and(u8::is_ascii_digit) {
+        position += 1;
+    }
+    if position == start {
+        return None;
+    }
+    let magnitude = value[start..position].parse::<i64>().ok()?;
+    let signed = if negative { -magnitude } else { magnitude };
+    i32::try_from(signed).ok()
+}
+
+fn default_tab_index(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> i32 {
+    let Some(element) = super::element::record(scope, object) else {
+        return -1;
+    };
+    if matches!(
+        element.tag_name.as_str(),
+        "A" | "AREA" | "BUTTON" | "IFRAME" | "INPUT" | "OBJECT" | "SELECT" | "TEXTAREA"
+    ) || super::element::attribute_value(scope, object, "contenteditable")
+        .is_some_and(|value| !value.eq_ignore_ascii_case("false"))
+    {
+        0
+    } else {
+        -1
     }
 }
 
@@ -547,11 +677,31 @@ pub(crate) fn attach_internals(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    if let Some(existing) = existing {
-        result.set(v8::Local::new(scope, &existing).into());
+    if existing.is_some() {
+        super::node::throw_dom_exception(
+            scope,
+            "NotSupportedError",
+            "Failed to execute 'attachInternals' on 'HTMLElement': ElementInternals for the specified element was already attached.",
+        );
         return;
     }
-    match super::element_internals::create(scope, None, None) {
+    if !super::custom_element_registry::is_custom(scope, arguments.this()) {
+        super::node::throw_dom_exception(
+            scope,
+            "NotSupportedError",
+            "Failed to execute 'attachInternals' on 'HTMLElement': Unable to attach ElementInternals to non-custom elements.",
+        );
+        return;
+    }
+    if super::custom_element_registry::internals_disabled(scope, arguments.this()) {
+        super::node::throw_dom_exception(
+            scope,
+            "NotSupportedError",
+            "Failed to execute 'attachInternals' on 'HTMLElement': ElementInternals is disabled by disabledFeature static field.",
+        );
+        return;
+    }
+    match super::element_internals::create(scope, arguments.this(), None, None) {
         Ok(internals) => {
             let stored = v8::Global::new(scope, internals);
             if let Some(record) = scope.get_slot_mut::<HtmlElementStore>().and_then(|store| {
@@ -572,7 +722,10 @@ pub(crate) fn blur(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_focused(scope, arguments.this(), false);
+    let target = v8::Global::new(scope, arguments.this());
+    if let Err(message) = blur_with_events(scope, target) {
+        crate::webidl::throw_type_error(scope, &message);
+    }
 }
 
 pub(crate) fn focus(
@@ -580,7 +733,208 @@ pub(crate) fn focus(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_focused(scope, arguments.this(), true);
+    let target = v8::Global::new(scope, arguments.this());
+    if let Err(message) = focus_with_events(scope, target) {
+        crate::webidl::throw_type_error(scope, &message);
+    }
+}
+
+pub(crate) fn focus_with_events(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Global<v8::Object>,
+) -> Result<bool, String> {
+    let object = v8::Local::new(scope, &object);
+    if !is_programmatically_focusable(scope, object) {
+        return Ok(false);
+    }
+    let Some(document) = super::node::record(scope, object)
+        .and_then(|record| record.owner_document)
+        .map(|document| v8::Local::new(scope, &document))
+    else {
+        return Ok(false);
+    };
+    let previous = super::document::stored_value(scope, document, "activeElement")
+        .and_then(|value| v8::Local::<v8::Object>::try_from(v8::Local::new(scope, &value)).ok())
+        .map(|previous| v8::Global::new(scope, previous));
+    if previous
+        .as_ref()
+        .is_some_and(|previous| v8::Local::new(scope, previous).strict_equals(object.into()))
+    {
+        return Ok(false);
+    }
+    let object = v8::Global::new(scope, object);
+    if let Some(previous) = previous.as_ref() {
+        let previous_local = v8::Local::new(scope, previous);
+        set_focused(scope, previous_local, false);
+        dispatch_trusted_focus_event(scope, previous.clone(), "blur", false, Some(object.clone()))?;
+        dispatch_trusted_focus_event(
+            scope,
+            previous.clone(),
+            "focusout",
+            true,
+            Some(object.clone()),
+        )?;
+    }
+    let object_local = v8::Local::new(scope, &object);
+    set_focused(scope, object_local, true);
+    dispatch_trusted_focus_event(scope, object.clone(), "focus", false, previous.clone())?;
+    dispatch_trusted_focus_event(scope, object, "focusin", true, previous)?;
+    Ok(true)
+}
+
+pub(crate) fn blur_with_events(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Global<v8::Object>,
+) -> Result<bool, String> {
+    let object = v8::Local::new(scope, &object);
+    let Some(document) = super::node::record(scope, object)
+        .and_then(|record| record.owner_document)
+        .map(|document| v8::Local::new(scope, &document))
+    else {
+        return Ok(false);
+    };
+    let active = super::document::stored_value(scope, document, "activeElement")
+        .and_then(|value| v8::Local::<v8::Object>::try_from(v8::Local::new(scope, &value)).ok());
+    if !active.is_some_and(|active| active.strict_equals(object.into())) {
+        return Ok(false);
+    }
+    set_focused(scope, object, false);
+    let object = v8::Global::new(scope, object);
+    dispatch_trusted_focus_event(scope, object.clone(), "blur", false, None)?;
+    dispatch_trusted_focus_event(scope, object, "focusout", true, None)?;
+    Ok(true)
+}
+
+fn dispatch_trusted_focus_event(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Global<v8::Object>,
+    event_type: &str,
+    bubbles: bool,
+    related_target: Option<v8::Global<v8::Object>>,
+) -> Result<(), String> {
+    let event =
+        super::focus_event::create_with_data(scope, event_type, bubbles, true, related_target)?;
+    super::event::set_trusted(scope, event, true);
+    let target = v8::Local::new(scope, &target);
+    super::event_target::dispatch(scope, target, event);
+    Ok(())
+}
+
+pub(crate) fn is_programmatically_focusable(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> bool {
+    let Some(node) = super::node::record(scope, object) else {
+        return false;
+    };
+    if !super::node::is_connected(scope, object)
+        || !super::element_layout::compute(scope, object).rendered
+        || super::element::attribute_value(scope, object, "disabled").is_some()
+        || has_inert_ancestor(scope, object)
+        || disabled_by_fieldset(scope, object, &node.node_name)
+    {
+        return false;
+    }
+    let visibility =
+        super::get_computed_style_global::computed_property_value(scope, object, "visibility");
+    if matches!(
+        visibility.to_ascii_lowercase().as_str(),
+        "hidden" | "collapse"
+    ) {
+        return false;
+    }
+    if node.node_name == "INPUT"
+        && super::element::attribute_value(scope, object, "type")
+            .is_some_and(|value| value.eq_ignore_ascii_case("hidden"))
+    {
+        return false;
+    }
+    if matches!(
+        node.node_name.as_str(),
+        "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA" | "IFRAME" | "OBJECT"
+    ) {
+        return true;
+    }
+    if matches!(node.node_name.as_str(), "A" | "AREA")
+        && super::element::attribute_value(scope, object, "href").is_some()
+    {
+        return true;
+    }
+    if super::element::attribute_value(scope, object, "contenteditable")
+        .is_some_and(|value| !value.eq_ignore_ascii_case("false"))
+    {
+        return true;
+    }
+    super::element::attribute_value(scope, object, "tabindex")
+        .and_then(|value| value.parse::<i32>().ok())
+        .is_some()
+}
+
+pub(crate) fn is_sequentially_focusable(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> bool {
+    if !is_programmatically_focusable(scope, object) {
+        return false;
+    }
+    super::element::attribute_value(scope, object, "tabindex")
+        .and_then(|value| value.parse::<i32>().ok())
+        .is_none_or(|value| value >= 0)
+}
+
+fn has_inert_ancestor(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    let mut current = Some(object);
+    while let Some(candidate) = current {
+        if super::element::record(scope, candidate).is_some()
+            && super::element::attribute_value(scope, candidate, "inert").is_some()
+        {
+            return true;
+        }
+        current = super::node::parent(scope, candidate);
+    }
+    false
+}
+
+pub(crate) fn disabled_by_fieldset(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    node_name: &str,
+) -> bool {
+    if !matches!(node_name, "BUTTON" | "INPUT" | "SELECT" | "TEXTAREA") {
+        return false;
+    }
+    let mut ancestor = super::node::parent(scope, object);
+    while let Some(candidate) = ancestor {
+        if super::html_field_set_element::record(scope, candidate).is_some_and(|record| {
+            record.disabled
+                || super::element::attribute_value(scope, candidate, "disabled").is_some()
+        }) {
+            let first_legend = super::node::children(scope, candidate)
+                .into_iter()
+                .find(|child| {
+                    super::element::record(scope, *child)
+                        .is_some_and(|record| record.tag_name == "LEGEND")
+                });
+            let inside_first_legend = first_legend.is_some_and(|legend| {
+                let mut current = Some(object);
+                while let Some(node) = current {
+                    if node.get_identity_hash() == legend.get_identity_hash() {
+                        return true;
+                    }
+                    if node.get_identity_hash() == candidate.get_identity_hash() {
+                        break;
+                    }
+                    current = super::node::parent(scope, node);
+                }
+                false
+            });
+            if !inside_first_legend {
+                return true;
+            }
+        }
+        ancestor = super::node::parent(scope, candidate);
+    }
+    false
 }
 
 pub(crate) fn set_focused(
@@ -636,6 +990,27 @@ pub(crate) fn click(
             .map(v8::Local::<v8::Value>::from)
             .unwrap_or_else(|_| v8::undefined(scope).into());
         let _ = function.call(scope, receiver, &[event]);
+        return;
+    }
+    if let Some(source) = super::element::attribute_value(scope, arguments.this(), "onclick") {
+        let wrapped = format!("(function(event){{\n{source}\n}})");
+        let Some(source) = v8::String::new(scope, &wrapped) else {
+            return;
+        };
+        v8::tc_scope!(let try_catch, scope);
+        let Some(value) =
+            v8::Script::compile(try_catch, source, None).and_then(|script| script.run(try_catch))
+        else {
+            return;
+        };
+        let Ok(function) = v8::Local::<v8::Function>::try_from(value) else {
+            return;
+        };
+        let event = super::event::create(try_catch, "click")
+            .map(v8::Local::<v8::Value>::from)
+            .unwrap_or_else(|_| v8::undefined(try_catch).into());
+        let receiver: v8::Local<v8::Value> = arguments.this().into();
+        let _ = function.call(try_catch, receiver, &[event]);
     }
 }
 

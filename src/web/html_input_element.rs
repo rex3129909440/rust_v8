@@ -146,6 +146,7 @@ pub(crate) fn ensure_constructor<'s>(
     super::html_input_element_show_picker::define(scope, prototype)?;
     super::html_input_element_step_down::define(scope, prototype)?;
     super::html_input_element_step_up::define(scope, prototype)?;
+    super::html_input_element_capture_property::define(scope, prototype)?;
     super::html_input_element_webkit_entries_property::define(scope, prototype)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     let stored = v8::Global::new(scope, constructor);
@@ -298,6 +299,23 @@ pub(crate) fn update(
     }
 }
 
+pub(crate) fn copy_clone_state(
+    scope: &mut v8::PinScope<'_, '_>,
+    source: v8::Local<'_, v8::Object>,
+    clone: v8::Local<'_, v8::Object>,
+) {
+    let Some(source) = record(scope, source) else {
+        return;
+    };
+    update(scope, clone, |target| {
+        target.value = source.value;
+        target.value_dirty = source.value_dirty;
+        target.checked = source.checked;
+        target.checked_dirty = source.checked_dirty;
+        target.indeterminate = source.indeterminate;
+    });
+}
+
 pub(crate) fn attribute_changed(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -311,6 +329,7 @@ pub(crate) fn attribute_changed(
         return;
     };
     let text = value.unwrap_or_default();
+    let mut normalize_radio_group = false;
     match name.to_ascii_lowercase().as_str() {
         "accept" => record.accept = text.to_owned(),
         "alt" => record.alt = text.to_owned(),
@@ -319,6 +338,7 @@ pub(crate) fn attribute_changed(
             record.default_checked = value.is_some();
             if !record.checked_dirty {
                 record.checked = record.default_checked;
+                normalize_radio_group = record.checked && record.input_type == "radio";
             }
         }
         "dirname" => record.dir_name = text.to_owned(),
@@ -329,9 +349,19 @@ pub(crate) fn attribute_changed(
         "formnovalidate" => record.form_no_validate = value.is_some(),
         "formtarget" => record.form_target = text.to_owned(),
         "height" => record.height = text.parse().unwrap_or(0),
-        "max" => record.max = text.to_owned(),
+        "max" => {
+            record.max = text.to_owned();
+            if record.input_type == "range" {
+                record.value = sanitize_for_record(record, record.value.clone());
+            }
+        }
         "maxlength" => record.max_length = text.parse().unwrap_or(-1),
-        "min" => record.min = text.to_owned(),
+        "min" => {
+            record.min = text.to_owned();
+            if record.input_type == "range" {
+                record.value = sanitize_for_record(record, record.value.clone());
+            }
+        }
         "minlength" => record.min_length = text.parse().unwrap_or(-1),
         "multiple" => record.multiple = value.is_some(),
         "name" => record.name = text.to_owned(),
@@ -346,7 +376,10 @@ pub(crate) fn attribute_changed(
             record.input_type = normalized_type(text).to_owned();
             if record.input_type == "file" {
                 record.value.clear();
+            } else {
+                record.value = sanitize_for_record(record, record.value.clone());
             }
+            normalize_radio_group = record.checked && record.input_type == "radio";
         }
         "value" => {
             record.default_value = text.to_owned();
@@ -361,6 +394,9 @@ pub(crate) fn attribute_changed(
         "incremental" => record.incremental = value.is_some(),
         "popovertarget" => record.popover_target = None,
         _ => {}
+    }
+    if normalize_radio_group {
+        normalize_checked_radio_group(scope, object);
     }
 }
 
@@ -685,6 +721,48 @@ pub(crate) fn set_checked(
         x.checked = value;
         x.checked_dirty = true;
     });
+    if value {
+        normalize_checked_radio_group(s, a.this());
+    }
+}
+
+fn normalize_checked_radio_group(
+    scope: &mut v8::PinScope<'_, '_>,
+    radio: v8::Local<'_, v8::Object>,
+) {
+    let Some(current) = record(scope, radio) else {
+        return;
+    };
+    if current.input_type != "radio" || !current.checked || current.name.is_empty() {
+        return;
+    }
+    let root = super::node::root_node(scope, radio);
+    let owner = super::html_form_element::ancestor_form(scope, radio)
+        .map(|form| form.get_identity_hash().get());
+    let candidates = super::node::tree_order(scope, root);
+    for candidate in candidates {
+        if candidate.strict_equals(radio.into()) {
+            continue;
+        }
+        let Some(other) = record(scope, candidate) else {
+            continue;
+        };
+        if other.input_type != "radio"
+            || other.name != current.name
+            || super::html_form_element::ancestor_form(scope, candidate)
+                .map(|form| form.get_identity_hash().get())
+                != owner
+        {
+            continue;
+        }
+        if let Some(other) = scope
+            .get_slot_mut::<HtmlInputElementStore>()
+            .and_then(|store| store.records.get_mut(&candidate.get_identity_hash().get()))
+        {
+            other.checked = false;
+            other.checked_dirty = true;
+        }
+    }
 }
 pub(crate) fn get_dir_name(
     s: &mut v8::PinScope<'_, '_>,
@@ -914,7 +992,12 @@ pub(crate) fn set_max(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_string(s, a, |x, v| x.max = v);
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
+    let value = crate::webidl::value_to_string(s, a.get(0));
+    super::element::set_reflected_string(s, a.this(), "max", value);
 }
 pub(crate) fn get_max_length(
     s: &mut v8::PinScope<'_, '_>,
@@ -942,7 +1025,12 @@ pub(crate) fn set_min(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_string(s, a, |x, v| x.min = v);
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
+    let value = crate::webidl::value_to_string(s, a.get(0));
+    super::element::set_reflected_string(s, a.this(), "min", value);
 }
 pub(crate) fn get_min_length(
     s: &mut v8::PinScope<'_, '_>,
@@ -1157,20 +1245,94 @@ pub(crate) fn set_default_value(
     super::element::set_reflected_string(s, a.this(), "value", value);
 }
 pub(crate) fn sanitize_value(input_type: &str, value: String) -> String {
-    if input_type == "number" || input_type == "range" {
+    if input_type == "number" {
         if value.is_empty() || value.parse::<f64>().is_ok() {
             value
         } else {
             String::new()
         }
+    } else if input_type == "range" {
+        sanitize_range(&value, "", "", "")
+    } else if input_type == "color" {
+        sanitize_color(&value)
     } else if input_type == "date" {
         if parse_date(&value).is_some() {
             value
         } else {
             String::new()
         }
+    } else if matches!(
+        input_type,
+        "text" | "search" | "tel" | "url" | "email" | "password"
+    ) {
+        value.replace(['\r', '\n'], "")
     } else {
         value
+    }
+}
+
+fn sanitize_for_record(record: &InputRecord, value: String) -> String {
+    if record.input_type == "range" {
+        sanitize_range(&value, &record.min, &record.max, &record.step)
+    } else {
+        sanitize_value(&record.input_type, value)
+    }
+}
+
+fn sanitize_range(value: &str, minimum: &str, maximum: &str, step: &str) -> String {
+    let minimum = minimum
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0);
+    let maximum = maximum
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .unwrap_or(100.0)
+        .max(minimum);
+    let fallback = minimum + (maximum - minimum) / 2.0;
+    let mut number = value
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+        .clamp(minimum, maximum);
+    if !step.eq_ignore_ascii_case("any") {
+        let step = step
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(1.0);
+        number = (minimum + ((number - minimum) / step).round() * step).clamp(minimum, maximum);
+    }
+    format_number(number)
+}
+
+fn sanitize_color(value: &str) -> String {
+    let Some(computed) = super::css_calculation::computed_color("color", value).or_else(|| {
+        super::css_calculation::normalize_property_value("color", value)
+            .filter(|normalized| normalized.starts_with("rgb("))
+    }) else {
+        return "#000000".to_owned();
+    };
+    let Some(open) = computed.find('(') else {
+        return "#000000".to_owned();
+    };
+    let Some(close) = computed.rfind(')') else {
+        return "#000000".to_owned();
+    };
+    let channels = computed[open + 1..close]
+        .split([',', ' ', '/'])
+        .filter(|value| !value.is_empty())
+        .take(3)
+        .filter_map(|value| value.trim_end_matches('%').parse::<f64>().ok())
+        .map(|value| value.round().clamp(0.0, 255.0) as u8)
+        .collect::<Vec<_>>();
+    if channels.len() == 3 {
+        format!("#{:02x}{:02x}{:02x}", channels[0], channels[1], channels[2])
+    } else {
+        "#000000".to_owned()
     }
 }
 pub(crate) fn get_value(
@@ -1178,7 +1340,22 @@ pub(crate) fn get_value(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    get_string(s, a, r, |x| &x.value);
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    let value = if matches!(record.input_type.as_str(), "checkbox" | "radio")
+        && !record.value_dirty
+        && super::element::attribute_value(s, a.this(), "value").is_none()
+    {
+        "on"
+    } else {
+        &record.value
+    };
+    if let Some(value) = v8::String::new(s, value) {
+        let mut r = r;
+        r.set(value.into());
+    }
 }
 pub(crate) fn set_value(
     s: &mut v8::PinScope<'_, '_>,
@@ -1186,11 +1363,16 @@ pub(crate) fn set_value(
     _: v8::ReturnValue<'_>,
 ) {
     let value = crate::webidl::value_to_string(s, a.get(0));
+    if record(s, a.this()).is_some_and(|record| record.input_type == "file") && !value.is_empty() {
+        super::node::throw_dom_exception(
+            s,
+            "InvalidStateError",
+            "Failed to set the 'value' property on 'HTMLInputElement': This input element accepts a filename, which may only be programmatically set to the empty string.",
+        );
+        return;
+    }
     update(s, a.this(), |x| {
-        if x.input_type == "file" && !value.is_empty() {
-            return;
-        }
-        x.value = sanitize_value(&x.input_type, value);
+        x.value = sanitize_for_record(x, value);
         x.value_dirty = true;
         let length = x.value.chars().count() as u32;
         x.selection_start = length;
@@ -1740,7 +1922,11 @@ pub(crate) fn check_validity(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, a.this()) {
-        r.set(v8::Boolean::new(scope, !will_validate(&record) || !invalid(&record)).into());
+        let valid = !will_validate(&record) || !invalid(&record);
+        if !valid {
+            super::html_form_element::dispatch_invalid_event(scope, a.this());
+        }
+        r.set(v8::Boolean::new(scope, valid).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }

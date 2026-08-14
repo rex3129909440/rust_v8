@@ -12,18 +12,13 @@ fn get_caption(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_optional(s, a, r, |x| &x.caption);
+    super::html_table_element::get_caption(s, a, r);
 }
 
 fn set_caption(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    set_special_child(
-        scope,
-        arguments.this(),
-        arguments.get(0),
-        SpecialChild::Caption,
-    );
+    super::html_table_element::set_caption(scope, arguments, result);
 }

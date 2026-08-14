@@ -92,6 +92,18 @@ fn add_animation(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<AnimationTriggerStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(
             scope,
@@ -155,6 +167,18 @@ fn remove_animation(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<AnimationTriggerStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(
             scope,

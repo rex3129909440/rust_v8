@@ -104,9 +104,17 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLLinkElement".to_owned());
     }
     super::html_element::attach(scope, object, "LINK");
-    let rel_list = super::dom_token_list::create(scope, "")?;
+    let rel_list = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::LinkRel,
+    )?;
     let sizes = super::dom_token_list::create(scope, "")?;
-    let blocking = super::dom_token_list::create(scope, "")?;
+    let blocking = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::Blocking,
+    )?;
     let record = LinkRecord {
         disabled: false,
         href: String::new(),
@@ -670,9 +678,15 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     };
     let context = v8::Local::new(scope, &pending.context);
     let event_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_current_task_realm(event_scope);
+    let task_start = super::performance_observer::task_start(event_scope);
     let element = v8::Local::new(event_scope, &pending.element);
     if let Ok(event) = super::event::create(event_scope, pending.event_type) {
         super::event_target::dispatch(event_scope, element, event);
+    }
+    event_scope.perform_microtask_checkpoint();
+    if super::performance_observer::record_completed_task(event_scope, task_start, false) {
+        event_scope.perform_microtask_checkpoint();
     }
     true
 }

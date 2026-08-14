@@ -89,11 +89,17 @@ fn construct(
         return;
     }
     let Ok(context) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ChannelMergerNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     };
     if !super::base_audio_context::is_context(scope, context) {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ChannelMergerNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     }
     let inputs = input_count(scope, arguments.get(1));

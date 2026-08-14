@@ -154,7 +154,12 @@ fn is_session_supported(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "XRSystem",
+            "isSessionSupported",
+            result,
+        );
         return;
     }
     let mode = crate::webidl::value_to_string(scope, arguments.get(0));
@@ -168,7 +173,12 @@ fn request_session(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "XRSystem",
+            "requestSession",
+            result,
+        );
         return;
     }
     let mode = crate::webidl::value_to_string(scope, arguments.get(0));

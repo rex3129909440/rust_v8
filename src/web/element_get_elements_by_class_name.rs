@@ -20,14 +20,15 @@ fn get_elements_by_class_name(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let classes = crate::webidl::value_to_string(scope, arguments.get(0))
-        .split_ascii_whitespace()
-        .map(str::to_owned)
-        .collect();
+    let source = crate::webidl::value_to_string(scope, arguments.get(0));
+    let classes = source.split_ascii_whitespace().map(str::to_owned).collect();
     match super::html_collection::create_live(
         scope,
         arguments.this(),
-        super::html_collection::HtmlCollectionQuery::ClassNames(classes),
+        super::html_collection::HtmlCollectionQuery::ClassNames {
+            names: classes,
+            source,
+        },
     ) {
         Ok(collection) => result.set(collection.into()),
         Err(message) => crate::webidl::throw_type_error(scope, &message),

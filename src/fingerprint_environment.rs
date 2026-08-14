@@ -4,6 +4,23 @@ pub struct FontFingerprint {
     pub allow_unknown_families: bool,
     pub local_fonts: Vec<LocalFontFingerprint>,
     pub metrics: Vec<FontMetricFingerprint>,
+    /// Resolve CSS families against the current host OS font collection.
+    /// Disabled by default so a Windows/macOS/Linux profile does not silently
+    /// inherit a different CI host's installed fonts.
+    #[serde(default)]
+    pub use_system_fonts: bool,
+    /// Explicit OpenType files used by the native shaper.  TTF/OTF/TTC/OTC
+    /// are parsed directly; the face index selects a collection member.
+    #[serde(default)]
+    pub binary_sources: Vec<FontBinarySourceFingerprint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct FontBinarySourceFingerprint {
+    pub family: String,
+    pub path: String,
+    #[serde(default)]
+    pub face_index: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -339,7 +356,29 @@ impl Default for FontFingerprint {
                 family: "Edge Sandbox Sans".to_owned(),
                 style: "Regular".to_owned(),
             }],
-            metrics: Vec::new(),
+            // Edge 150 on Windows resolves the default serif family to Times
+            // New Roman. Calibrate the sandbox's deterministic glyph model to
+            // the corresponding Canvas TextMetrics scale; callers can replace
+            // this entry with captured per-profile metrics.
+            metrics: vec![
+                FontMetricFingerprint {
+                    family: "Times New Roman".to_owned(),
+                    width_scale: 1.0,
+                    monospace: false,
+                },
+                FontMetricFingerprint {
+                    family: "Arial".to_owned(),
+                    width_scale: 1.0,
+                    monospace: false,
+                },
+                FontMetricFingerprint {
+                    family: "Segoe UI".to_owned(),
+                    width_scale: 1.0,
+                    monospace: false,
+                },
+            ],
+            use_system_fonts: false,
+            binary_sources: Vec::new(),
         }
     }
 }
@@ -763,6 +802,46 @@ impl FontFingerprint {
             })
         {
             return Err("font metric fingerprint is invalid".to_owned());
+        }
+        if self.binary_sources.len() > 256
+            || self.binary_sources.iter().any(|source| {
+                source.family.trim().is_empty()
+                    || source.family.len() > 4096
+                    || source.family.contains('\0')
+                    || source.path.trim().is_empty()
+                    || source.path.len() > 32_768
+                    || source.path.contains('\0')
+            })
+        {
+            return Err("font binary source fingerprint is invalid".to_owned());
+        }
+        for source in &self.binary_sources {
+            let path = std::path::Path::new(&source.path);
+            let metadata = std::fs::metadata(path).map_err(|error| {
+                format!(
+                    "cannot read font binary source '{}': {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.is_file() || metadata.len() > 256 * 1024 * 1024 {
+                return Err(format!(
+                    "font binary source '{}' must be a file no larger than 256 MiB",
+                    path.display()
+                ));
+            }
+            let bytes = std::fs::read(path).map_err(|error| {
+                format!(
+                    "cannot read font binary source '{}': {error}",
+                    path.display()
+                )
+            })?;
+            if rustybuzz::Face::from_slice(&bytes, source.face_index).is_none() {
+                return Err(format!(
+                    "font binary source '{}' face {} is not a supported OpenType face",
+                    path.display(),
+                    source.face_index
+                ));
+            }
         }
         Ok(())
     }

@@ -260,9 +260,13 @@ fn static_abort(
     mut r: v8::ReturnValue<'_>,
 ) {
     let reason = if a.length() == 0 {
-        v8::String::new(scope, "This operation was aborted")
-            .map(Into::into)
-            .unwrap_or_else(|| v8::undefined(scope).into())
+        super::dom_exception::create(
+            scope,
+            "This operation was aborted".to_owned(),
+            "AbortError".to_owned(),
+        )
+        .map(Into::into)
+        .unwrap_or_else(|_| v8::undefined(scope).into())
     } else {
         a.get(0)
     };
@@ -321,10 +325,21 @@ fn static_timeout(
     let Some(milliseconds) = a.get(0).number_value(scope) else {
         return;
     };
-    if !milliseconds.is_finite()
-        || milliseconds < 0.0
-        || milliseconds.trunc() > 9_007_199_254_740_991.0
-    {
+    if milliseconds.is_nan() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'timeout' on 'AbortSignal': Value is not of type 'unsigned long long'.",
+        );
+        return;
+    }
+    if milliseconds.is_infinite() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'timeout' on 'AbortSignal': Value is infinite and not of type 'unsigned long long'.",
+        );
+        return;
+    }
+    if milliseconds < 0.0 || milliseconds.trunc() > 9_007_199_254_740_991.0 {
         crate::webidl::throw_type_error(
             scope,
             "Failed to execute 'timeout' on 'AbortSignal': Value is outside the 'unsigned long long' value range.",
@@ -376,14 +391,19 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     for timeout in ready {
         let context = v8::Local::new(scope, &timeout.context);
         let timeout_scope = &mut v8::ContextScope::new(scope, context);
+        super::animation_frame_state::sample_current_task_realm(timeout_scope);
+        let task_start = super::performance_observer::task_start(timeout_scope);
         let signal = v8::Local::new(timeout_scope, &timeout.signal);
-        let message = format!("The operation timed out after {} ms", timeout.milliseconds);
+        let message = "signal timed out".to_owned();
         let reason =
             super::dom_exception::create(timeout_scope, message, "TimeoutError".to_owned())
                 .map(Into::into)
                 .unwrap_or_else(|_| v8::undefined(timeout_scope).into());
         abort(timeout_scope, signal, reason);
         timeout_scope.perform_microtask_checkpoint();
+        if super::performance_observer::record_completed_task(timeout_scope, task_start, false) {
+            timeout_scope.perform_microtask_checkpoint();
+        }
     }
     ran
 }

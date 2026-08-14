@@ -63,6 +63,7 @@ fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "json", 0, json)?;
     crate::webidl::define_method(scope, prototype, "text", 0, text)?;
     crate::webidl::define_method(scope, prototype, "bytes", 0, bytes)?;
+    crate::webidl::define_method(scope, prototype, "textStream", 0, text_stream)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     crate::webidl::define_method(scope, constructor.into(), "error", 0, static_error)?;
     crate::webidl::define_method(scope, constructor.into(), "json", 1, static_json)?;
@@ -86,11 +87,12 @@ fn construct<'s>(
         crate::webidl::throw_type_error(scope, "Failed to construct 'Response': use new");
         return;
     }
-    let bytes = if arguments.length() == 0 || arguments.get(0).is_null_or_undefined() {
-        Vec::new()
-    } else {
-        body_bytes(scope, arguments.get(0))
-    };
+    let (bytes, body_content_type) =
+        if arguments.length() == 0 || arguments.get(0).is_null_or_undefined() {
+            (Vec::new(), None)
+        } else {
+            crate::network_capture::body_bytes(scope, arguments.get(0))
+        };
     let init = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
     let status = init
         .and_then(|value| property(scope, value, "status"))
@@ -111,6 +113,52 @@ fn construct<'s>(
             return;
         }
     };
+    if let Some(content_type) = body_content_type {
+        let existing = super::headers::snapshot(scope, headers).unwrap_or_default();
+        if !existing
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        {
+            let mut values = existing;
+            values.push(("content-type".to_owned(), content_type));
+            let Ok(replaced) =
+                super::headers::create_with_guard(scope, values, super::headers::Guard::Response)
+            else {
+                crate::webidl::throw_type_error(scope, "Cannot create response Headers");
+                return;
+            };
+            let headers = v8::Global::new(scope, replaced);
+            let body = if arguments.length() == 0 || arguments.get(0).is_null_or_undefined() {
+                None
+            } else {
+                match body_stream(scope, &bytes) {
+                    Ok(stream) => Some(stream),
+                    Err(message) => {
+                        crate::webidl::throw_type_error(scope, &message);
+                        return;
+                    }
+                }
+            };
+            let record = ResponseRecord {
+                response_type: "default".to_owned(),
+                url: String::new(),
+                redirected: false,
+                status: status as u16,
+                status_text,
+                headers,
+                body: body.map(|stream| v8::Global::new(scope, stream)),
+                bytes,
+                body_used: false,
+            };
+            scope
+                .get_slot_mut::<ResponseStore>()
+                .expect("Response state")
+                .records
+                .insert(arguments.this().get_identity_hash().get(), record);
+            result.set(arguments.this().into());
+            return;
+        }
+    }
     let body = if arguments.length() == 0 || arguments.get(0).is_null_or_undefined() {
         None
     } else {
@@ -141,18 +189,6 @@ fn construct<'s>(
     result.set(arguments.this().into());
 }
 
-fn body_bytes(scope: &v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
-    if let Ok(bytes) = super::text_decoder::bytes_from_value(scope, value) {
-        return bytes;
-    }
-    if let Ok(object) = v8::Local::<v8::Object>::try_from(value)
-        && let Some((bytes, _)) = super::blob::byte_snapshot(scope, object)
-    {
-        return bytes;
-    }
-    crate::webidl::value_to_string(scope, value).into_bytes()
-}
-
 fn property<'s>(
     scope: &v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
@@ -167,37 +203,21 @@ fn headers_from_init<'s>(
     init: Option<v8::Local<'s, v8::Object>>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let Some(value) = init.and_then(|init| property(scope, init, "headers")) else {
-        return super::headers::create(scope, Vec::new());
+        return super::headers::create_with_guard(
+            scope,
+            Vec::new(),
+            super::headers::Guard::Response,
+        );
     };
-    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
-        return super::headers::create(scope, Vec::new());
-    };
-    if let Some(values) = super::headers::snapshot(scope, object) {
-        return super::headers::create(scope, values);
+    if value.is_undefined() {
+        return super::headers::create_with_guard(
+            scope,
+            Vec::new(),
+            super::headers::Guard::Response,
+        );
     }
-    let mut values = Vec::new();
-    if let Some(names) = object.get_own_property_names(
-        scope,
-        v8::GetPropertyNamesArgs {
-            mode: v8::KeyCollectionMode::OwnOnly,
-            property_filter: v8::PropertyFilter::ONLY_ENUMERABLE,
-            index_filter: v8::IndexFilter::IncludeIndices,
-            key_conversion: v8::KeyConversionMode::ConvertToString,
-        },
-    ) {
-        for index in 0..names.length() {
-            let Some(key) = names.get_index(scope, index) else {
-                continue;
-            };
-            let name = crate::webidl::value_to_string(scope, key);
-            let value = object
-                .get(scope, key)
-                .map(|value| crate::webidl::value_to_string(scope, value))
-                .unwrap_or_default();
-            values.push((name, value));
-        }
-    }
-    super::headers::create(scope, values)
+    let values = super::headers::init_values(scope, value)?;
+    super::headers::create_with_guard(scope, values, super::headers::Guard::Response)
 }
 
 fn body_stream<'s>(
@@ -392,17 +412,53 @@ fn reject(scope: &mut v8::PinScope<'_, '_>, message: &str, mut result: v8::Retur
         result.set(promise.into())
     }
 }
+
+fn reject_type_error(
+    scope: &mut v8::PinScope<'_, '_>,
+    message: &str,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let Some(message) = v8::String::new(scope, message) else {
+        return;
+    };
+    let exception = v8::Exception::type_error(scope, message);
+    if let Ok(promise) = super::writable_stream::rejected_promise(scope, exception) {
+        result.set(promise.into());
+    }
+}
+
+fn reject_body_used(scope: &mut v8::PinScope<'_, '_>, method: &str, result: v8::ReturnValue<'_>) {
+    reject_type_error(
+        scope,
+        &format!("Failed to execute '{method}' on 'Response': body stream already read"),
+        result,
+    );
+}
+
+fn response_content_type(scope: &v8::PinScope<'_, '_>, record: &ResponseRecord) -> String {
+    super::headers::snapshot(scope, v8::Local::new(scope, &record.headers))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .map(|(_, value)| value)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 fn bytes(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Response", "bytes", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => match super::text_encoder::uint8_array(s, data) {
             Ok(value) => resolve(s, value.into(), r),
             Err(e) => reject(s, &e, r),
         },
-        Err(e) => reject(s, &e, r),
+        Err(_) => reject_body_used(s, "bytes", r),
     }
 }
 fn array_buffer(
@@ -410,13 +466,17 @@ fn array_buffer(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Response", "arrayBuffer", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => {
             let backing = v8::ArrayBuffer::new_backing_store_from_vec(data).make_shared();
             let value = v8::ArrayBuffer::with_backing_store(s, &backing);
             resolve(s, value.into(), r)
         }
-        Err(e) => reject(s, &e, r),
+        Err(_) => reject_body_used(s, "arrayBuffer", r),
     }
 }
 fn text(
@@ -424,6 +484,10 @@ fn text(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Response", "text", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => {
             let value = String::from_utf8_lossy(&data);
@@ -431,7 +495,21 @@ fn text(
                 resolve(s, value.into(), r)
             }
         }
-        Err(e) => reject(s, &e, r),
+        Err(_) => reject_body_used(s, "text", r),
+    }
+}
+fn text_stream(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
+    match super::readable_stream::create_empty(s) {
+        Ok(stream) => r.set(stream.into()),
+        Err(message) => crate::webidl::throw_type_error(s, &message),
     }
 }
 fn json(
@@ -439,6 +517,10 @@ fn json(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Response", "json", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => {
             let text = String::from_utf8_lossy(&data);
@@ -447,7 +529,7 @@ fn json(
                 Err(error) => reject(s, &error, r),
             }
         }
-        Err(e) => reject(s, &e, r),
+        Err(_) => reject_body_used(s, "json", r),
     }
 }
 fn blob(
@@ -455,20 +537,17 @@ fn blob(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::reject_illegal_invocation_promise(s, "Response", "blob", r);
+        return;
+    };
+    let content_type = response_content_type(s, &record);
     match consume(s, a.this()) {
-        Ok(data) => {
-            let object = v8::Object::new(s);
-            let size_key = v8::String::new(s, "size").unwrap();
-            let size = v8::Integer::new_from_unsigned(s, data.len() as u32);
-            let _ = object.define_own_property(
-                s,
-                size_key.into(),
-                size.into(),
-                v8::PropertyAttribute::READ_ONLY,
-            );
-            resolve(s, object.into(), r)
-        }
-        Err(e) => reject(s, &e, r),
+        Ok(data) => match super::blob::create(s, data, &content_type) {
+            Ok(object) => resolve(s, object.into(), r),
+            Err(error) => reject(s, &error, r),
+        },
+        Err(_) => reject_body_used(s, "blob", r),
     }
 }
 fn form_data(
@@ -476,22 +555,34 @@ fn form_data(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::reject_illegal_invocation_promise(s, "Response", "formData", r);
+        return;
+    };
+    let content_type = response_content_type(s, &record);
+    let essence = content_type
+        .split_once(';')
+        .map_or(content_type.as_str(), |(essence, _)| essence)
+        .trim();
     match consume(s, a.this()) {
         Ok(data) => {
-            let object = v8::Object::new(s);
-            let text = String::from_utf8_lossy(&data);
-            for pair in text.split('&') {
-                if let Some((name, value)) = pair.split_once('=') {
-                    if let Some(key) = v8::String::new(s, name) {
-                        if let Some(value) = v8::String::new(s, value) {
-                            let _ = object.set(s, key.into(), value.into());
-                        }
-                    }
+            if !essence.eq_ignore_ascii_case("application/x-www-form-urlencoded") {
+                reject_type_error(s, "Failed to fetch: FormData body could not be decoded.", r);
+                return;
+            }
+            let Ok(form) = super::form_data::create(s) else {
+                reject_type_error(s, "Failed to create FormData.", r);
+                return;
+            };
+            for (name, value) in ::url::form_urlencoded::parse(&data) {
+                if !super::form_data::append_string(s, form, &name, &value) {
+                    reject_type_error(s, "Failed to create FormData entry.", r);
+                    return;
                 }
             }
-            resolve(s, object.into(), r)
+            resolve(s, form.into(), r)
         }
-        Err(e) => reject(s, &e, r),
+        Err(_) => reject_body_used(s, "formData", r),
     }
 }
 
@@ -521,7 +612,8 @@ pub(crate) fn create_fetch_response<'s>(
     header_values: Vec<(String, String)>,
     bytes: Vec<u8>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
-    let headers = super::headers::create(scope, header_values)?;
+    let headers =
+        super::headers::create_with_guard(scope, header_values, super::headers::Guard::Immutable)?;
     let body = body_stream(scope, &bytes)
         .ok()
         .map(|stream| v8::Global::new(scope, stream));
@@ -556,7 +648,9 @@ fn clone_response(
     }
     let headers =
         super::headers::snapshot(s, v8::Local::new(s, &value.headers)).unwrap_or_default();
-    let Ok(headers) = super::headers::create(s, headers) else {
+    let guard = super::headers::guard(s, v8::Local::new(s, &value.headers))
+        .unwrap_or(super::headers::Guard::Response);
+    let Ok(headers) = super::headers::create_with_guard(s, headers, guard) else {
         return;
     };
     value.headers = v8::Global::new(s, headers);
@@ -576,7 +670,9 @@ fn static_error(
     _: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    let Ok(headers) = super::headers::create(s, Vec::new()) else {
+    let Ok(headers) =
+        super::headers::create_with_guard(s, Vec::new(), super::headers::Guard::Immutable)
+    else {
         return;
     };
     let value = ResponseRecord {
@@ -599,13 +695,28 @@ fn static_redirect(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if a.length() < 1 {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'redirect' on 'Response': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let url = crate::webidl::value_to_string(s, a.get(0));
-    let status = a.get(1).uint32_value(s).unwrap_or(302);
+    let status = if a.length() < 2 || a.get(1).is_undefined() {
+        302
+    } else {
+        a.get(1).uint32_value(s).unwrap_or(0)
+    };
     if !matches!(status, 301 | 302 | 303 | 307 | 308) {
         crate::webidl::throw_type_error(s, "Invalid redirect status");
         return;
     }
-    let Ok(headers) = super::headers::create(s, vec![("location".to_owned(), url)]) else {
+    let Ok(headers) = super::headers::create_with_guard(
+        s,
+        vec![("location".to_owned(), url)],
+        super::headers::Guard::Immutable,
+    ) else {
         return;
     };
     let value = ResponseRecord {

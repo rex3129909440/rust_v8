@@ -62,7 +62,7 @@ fn open(
         .get_slot::<EyeDropperStore>()
         .is_some_and(|x| x.instances.contains(&a.this().get_identity_hash().get()))
     {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "EyeDropper", "open", r);
         return;
     }
     let o = v8::Object::new(s);

@@ -73,6 +73,16 @@ pub(crate) fn create<'s>(
     Ok(object)
 }
 
+fn valid(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    scope
+        .get_slot::<CookieStoreManagerStore>()
+        .is_some_and(|store| {
+            store
+                .subscriptions
+                .contains_key(&object.get_identity_hash().get())
+        })
+}
+
 fn registration_key(scope: &v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> String {
     let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
         return String::new();
@@ -105,6 +115,15 @@ fn subscribe(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CookieStoreManager",
+            "subscribe",
+            result,
+        );
+        return;
+    }
     let Ok(sequence) = v8::Local::<v8::Array>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "CookieStoreManager.subscribe requires a sequence");
         return;
@@ -123,7 +142,12 @@ fn subscribe(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CookieStoreManager",
+            "subscribe",
+            result,
+        );
         return;
     };
     subscriptions.extend(values);
@@ -135,6 +159,15 @@ fn unsubscribe(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CookieStoreManager",
+            "unsubscribe",
+            result,
+        );
+        return;
+    }
     let Ok(sequence) = v8::Local::<v8::Array>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(
             scope,
@@ -156,7 +189,12 @@ fn unsubscribe(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CookieStoreManager",
+            "unsubscribe",
+            result,
+        );
         return;
     };
     for value in values {
@@ -179,7 +217,12 @@ fn get_subscriptions(
         })
         .cloned()
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CookieStoreManager",
+            "getSubscriptions",
+            result,
+        );
         return;
     };
     let array = v8::Array::new(scope, subscriptions.len() as i32);

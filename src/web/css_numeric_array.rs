@@ -146,21 +146,36 @@ fn entries(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_iterator(s, a.this(), "entries", r);
+    crate::webidl::return_array_like_iterator(
+        s,
+        a.this(),
+        crate::webidl::ArrayLikeIteratorKind::Entries,
+        r,
+    );
 }
 fn keys(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_iterator(s, a.this(), "keys", r);
+    crate::webidl::return_array_like_iterator(
+        s,
+        a.this(),
+        crate::webidl::ArrayLikeIteratorKind::Keys,
+        r,
+    );
 }
 fn values(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_iterator(s, a.this(), "values", r);
+    crate::webidl::return_array_like_iterator(
+        s,
+        a.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        r,
+    );
 }
 
 fn for_each(
@@ -168,31 +183,7 @@ fn for_each(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Some(length) = length(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "forEach requires a callback");
-        return;
-    };
-    let receiver = if arguments.get(1).is_undefined() {
-        v8::undefined(scope).into()
-    } else {
-        arguments.get(1)
-    };
-    for index in 0..length {
-        let value = arguments
-            .this()
-            .get_index(scope, index)
-            .unwrap_or_else(|| v8::undefined(scope).into());
-        let key = v8::Integer::new_from_unsigned(scope, index);
-        let _ = callback.call(
-            scope,
-            receiver,
-            &[value, key.into(), arguments.this().into()],
-        );
-    }
+    crate::webidl::array_like_for_each(scope, arguments)
 }
 
 fn get_length(

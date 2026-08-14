@@ -45,6 +45,7 @@ pub(crate) fn ensure_constructor<'s>(
     super::animation_event_animation_name_property::define(scope, prototype)?;
     super::animation_event_elapsed_time_property::define(scope, prototype)?;
     super::animation_event_pseudo_element_property::define(scope, prototype)?;
+    crate::webidl::define_readonly_accessor(scope, prototype, "animation", get_animation)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     let tag_key = v8::Symbol::get_to_string_tag(scope);
     let tag_value = prototype
@@ -73,6 +74,18 @@ pub(crate) fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(constructor)
+}
+
+fn get_animation(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    result.set(v8::null(scope).into());
 }
 
 pub(crate) fn property<'s>(

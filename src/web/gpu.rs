@@ -123,7 +123,7 @@ fn request_adapter(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "GPU", "requestAdapter", result);
         return;
     }
     if !crate::fingerprint::edge(scope).rendering.webgpu.available {

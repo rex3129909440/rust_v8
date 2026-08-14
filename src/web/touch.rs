@@ -7,19 +7,19 @@ pub(crate) struct TouchStore {
 }
 
 #[derive(Clone)]
-struct TouchRecord {
-    identifier: i32,
-    target: v8::Global<v8::Object>,
-    screen_x: f64,
-    screen_y: f64,
-    client_x: f64,
-    client_y: f64,
-    page_x: f64,
-    page_y: f64,
-    radius_x: f64,
-    radius_y: f64,
-    rotation_angle: f64,
-    force: f64,
+pub(crate) struct TouchRecord {
+    pub(crate) identifier: i32,
+    pub(crate) target: v8::Global<v8::Object>,
+    pub(crate) screen_x: f64,
+    pub(crate) screen_y: f64,
+    pub(crate) client_x: f64,
+    pub(crate) client_y: f64,
+    pub(crate) page_x: f64,
+    pub(crate) page_y: f64,
+    pub(crate) radius_x: f64,
+    pub(crate) radius_y: f64,
+    pub(crate) rotation_angle: f64,
+    pub(crate) force: f64,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -73,6 +73,24 @@ fn ensure_constructor<'s>(
     Ok(constructor)
 }
 
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    record: TouchRecord,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let touch = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, touch, prototype.into()) != Some(true) {
+        return Err("cannot create Touch".to_owned());
+    }
+    scope
+        .get_slot_mut::<TouchStore>()
+        .ok_or_else(|| "Touch state was not prepared".to_owned())?
+        .records
+        .insert(touch.get_identity_hash().get(), record);
+    Ok(touch)
+}
+
 fn construct(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
@@ -87,11 +105,28 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "TouchInit must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'Touch': The provided value is not of type 'TouchInit'.",
+        );
         return;
     };
+    let identifier_key = v8::String::new(scope, "identifier").expect("identifier key");
+    if init
+        .get(scope, identifier_key.into())
+        .is_none_or(|value| value.is_undefined())
+    {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'Touch': Failed to read the 'identifier' property from 'TouchInit': Required member is undefined.",
+        );
+        return;
+    }
     let Some(target) = object_property(scope, init, "target") else {
-        crate::webidl::throw_type_error(scope, "TouchInit.target is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'Touch': Failed to read the 'target' property from 'TouchInit': Required member is undefined.",
+        );
         return;
     };
     let record = TouchRecord {

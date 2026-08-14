@@ -70,6 +70,23 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSSkewY requires an angle");
         return;
     }
+    if arguments.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSSkewY': parameter 1 is not of type 'CSSNumericValue'.",
+        );
+        return;
+    }
+    let valid_angle = v8::Local::<v8::Object>::try_from(arguments.get(0))
+        .ok()
+        .is_some_and(|object| super::css_numeric_value::is_numeric(scope, object));
+    if !valid_angle {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSSkewY': parameter 1 is not of type 'CSSNumericValue'.",
+        );
+        return;
+    }
     let Some(angle) = angle(scope, arguments.get(0)) else {
         return;
     };
@@ -110,6 +127,10 @@ fn set_ay(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(angle) = angle(scope, arguments.get(0)) else {
         return;
     };

@@ -10,13 +10,15 @@ fn call(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if super::node::record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(other) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "Argument is not a Node");
         return;
     };
-    if super::node::record(scope, arguments.this()).is_none()
-        || super::node::record(scope, other).is_none()
-    {
+    if super::node::record(scope, other).is_none() {
         crate::webidl::throw_type_error(scope, "Argument is not a Node");
         return;
     }

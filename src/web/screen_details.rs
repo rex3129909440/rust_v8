@@ -115,22 +115,22 @@ fn get_screens(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.on_screens),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.on_screens, r)
 }
 fn get_current(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.on_current),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.on_current, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,

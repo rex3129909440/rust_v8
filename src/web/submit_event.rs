@@ -33,6 +33,10 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::reset_constructor_order(scope, p)?;
     super::submit_event_submitter_property::define(scope, p)?;
     crate::webidl::finish_constructor(scope, p, c)?;
+    // Chromium Android 149+ temporarily exposes these agentic form hooks
+    // after `constructor`; version reconciliation removes them elsewhere.
+    crate::webidl::define_readonly_accessor(scope, p, "agentInvoked", get_agent_invoked)?;
+    crate::webidl::define_method(scope, p, "respondWith", 1, respond_with)?;
     let event = super::event::ensure_constructor(scope)?;
     crate::webidl::inherit(scope, c, event)?;
     let realm_id = crate::webidl::realm_id(scope);
@@ -76,6 +80,36 @@ pub(crate) fn construct(
         .insert(a.this().get_identity_hash().get(), submitter);
     r.set(a.this().into())
 }
+
+pub(crate) fn create<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: &str,
+    submitter: Option<v8::Global<v8::Object>>,
+    bubbles: bool,
+    cancelable: bool,
+    composed: bool,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create SubmitEvent".to_owned());
+    }
+    super::event::attach(
+        scope,
+        event,
+        event_type.to_owned(),
+        bubbles,
+        cancelable,
+        composed,
+    );
+    scope
+        .get_slot_mut::<SubmitEventStore>()
+        .ok_or_else(|| "SubmitEvent state was not prepared".to_owned())?
+        .submitters
+        .insert(event.get_identity_hash().get(), submitter);
+    Ok(event)
+}
 pub(crate) fn get_submitter(
     scope: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
@@ -93,5 +127,35 @@ pub(crate) fn get_submitter(
         r.set(v8::Local::new(scope, &v).into())
     } else {
         r.set(v8::null(scope).into())
+    }
+}
+
+fn get_agent_invoked(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if !scope.get_slot::<SubmitEventStore>().is_some_and(|store| {
+        store
+            .submitters
+            .contains_key(&arguments.this().get_identity_hash().get())
+    }) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    result.set(v8::Boolean::new(scope, false).into());
+}
+
+fn respond_with(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    if !scope.get_slot::<SubmitEventStore>().is_some_and(|store| {
+        store
+            .submitters
+            .contains_key(&arguments.this().get_identity_hash().get())
+    }) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
 }

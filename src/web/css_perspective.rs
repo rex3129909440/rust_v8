@@ -75,6 +75,26 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSPerspective requires a length");
         return;
     }
+    if arguments.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSPerspective': Must pass length or none to CSSPerspective",
+        );
+        return;
+    }
+    let valid_length = v8::Local::<v8::Object>::try_from(arguments.get(0))
+        .ok()
+        .is_some_and(|object| super::css_numeric_value::is_numeric(scope, object));
+    if !valid_length {
+        if crate::webidl::dom_string(scope, arguments.get(0)).is_none() {
+            return;
+        }
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSPerspective': Must pass length or none to CSSPerspective",
+        );
+        return;
+    }
     let Some(length) = length_value(scope, arguments.get(0)) else {
         return;
     };
@@ -115,6 +135,10 @@ fn set_length(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(length) = length_value(scope, arguments.get(0)) else {
         return;
     };

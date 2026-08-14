@@ -23,4 +23,5 @@ fn disconnect(
     observer.observed_targets.clear();
     observer.pending.clear();
     observer.microtask_scheduled = false;
+    observer.transient_observed_targets.clear();
 }

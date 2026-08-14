@@ -146,7 +146,12 @@ fn get_committed(
     if let Some(v) = record(scope, a.this()) {
         r.set(v8::Local::new(scope, &v.committed).into())
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'committed' property from 'NavigationTransition': Illegal invocation",
+        ) {
+            r.set(promise.into())
+        }
     }
 }
 fn get_finished(
@@ -157,6 +162,11 @@ fn get_finished(
     if let Some(v) = record(scope, a.this()) {
         r.set(v8::Local::new(scope, &v.finished).into())
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'finished' property from 'NavigationTransition': Illegal invocation",
+        ) {
+            r.set(promise.into())
+        }
     }
 }

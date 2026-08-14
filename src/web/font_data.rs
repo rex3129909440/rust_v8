@@ -132,10 +132,21 @@ fn blob(
     mut r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "FontData", "blob", r);
         return;
     };
-    match super::blob::create(s, v.bytes, "font/ttf") {
+    if v.bytes.is_empty() {
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            s,
+            &format!("Font data for {} could not be accessed.", v.postscript),
+        ) {
+            r.set(promise.into());
+        }
+        return;
+    }
+    // Chromium returns the raw SFNT/TTC stream and deliberately does not
+    // infer a format-specific MIME type from the installed font extension.
+    match super::blob::create(s, v.bytes, "application/octet-stream") {
         Ok(x) => {
             if let Ok(p) = super::writable_stream::resolved_promise(s, x.into()) {
                 r.set(p.into())

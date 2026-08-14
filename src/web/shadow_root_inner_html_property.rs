@@ -35,7 +35,18 @@ fn set_inner_html(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let value = crate::webidl::value_to_string(scope, a.get(0));
+    let value = if a.get(0).is_null() {
+        String::new()
+    } else {
+        let Some(value) = crate::webidl::dom_string_with_context(
+            scope,
+            a.get(0),
+            "Failed to set the 'innerHTML' property on 'ShadowRoot'",
+        ) else {
+            return;
+        };
+        value
+    };
     if let Err(message) = super::dom_html::replace_children_with_html(scope, a.this(), &value) {
         crate::webidl::throw_type_error(scope, &message);
     }

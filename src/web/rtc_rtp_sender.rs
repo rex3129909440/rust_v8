@@ -271,7 +271,7 @@ fn get_stats(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "RTCRtpSender", "getStats", result);
         return;
     }
     if let Ok(report) = super::rtc_stats_report::create(scope, Vec::new()) {
@@ -286,16 +286,22 @@ fn replace_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "RTCRtpSender",
+            "replaceTrack",
+            result,
+        );
+        return;
+    }
     let value = arguments.get(0);
     let track = if value.is_null_or_undefined() {
         None
     } else {
         v8::Local::<v8::Object>::try_from(value).ok()
     };
-    if !set_track(scope, arguments.this(), track) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
+    let _ = set_track(scope, arguments.this(), track);
     let value = v8::undefined(scope);
     if let Ok(promise) = super::writable_stream::resolved_promise(scope, value.into()) {
         result.set(promise.into());
@@ -308,7 +314,12 @@ fn set_parameters(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "RTCRtpSender",
+            "setParameters",
+            result,
+        );
         return;
     }
     let value = v8::undefined(scope);

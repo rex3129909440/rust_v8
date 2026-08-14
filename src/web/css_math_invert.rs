@@ -59,10 +59,11 @@ fn construct(
     }
     let value = match super::css_numeric_value::numberish(scope, arguments.get(0)) {
         Ok(value) => value,
-        Err(message) => {
+        Err(super::css_numeric_value::NumberishError::Message(message)) => {
             crate::webidl::throw_type_error(scope, &message);
             return;
         }
+        Err(super::css_numeric_value::NumberishError::Exception) => return,
     };
     scope
         .get_slot_mut::<CssMathInvertStore>()

@@ -130,7 +130,12 @@ pub(crate) fn get_user_choice(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.user_choice).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'userChoice' property from 'BeforeInstallPromptEvent': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }
 
@@ -140,7 +145,12 @@ pub(crate) fn prompt(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BeforeInstallPromptEvent",
+            "prompt",
+            result,
+        );
         return;
     }
     let Some(resolver) = v8::PromiseResolver::new(scope) else {

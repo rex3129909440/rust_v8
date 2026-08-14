@@ -51,6 +51,24 @@ fn ensure_constructor<'s>(
     Ok(constructor)
 }
 
+pub(crate) fn create<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    fires_touch_events: bool,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let capabilities = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, capabilities, prototype.into()) != Some(true) {
+        return Err("cannot create InputDeviceCapabilities".to_owned());
+    }
+    scope
+        .get_slot_mut::<InputDeviceCapabilitiesStore>()
+        .ok_or_else(|| "InputDeviceCapabilities state was not prepared".to_owned())?
+        .records
+        .insert(capabilities.get_identity_hash().get(), fires_touch_events);
+    Ok(capabilities)
+}
+
 fn construct(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

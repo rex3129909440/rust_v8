@@ -147,7 +147,7 @@ fn estimate(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucket", "estimate", r);
         return;
     }
     let o = v8::Object::new(s);
@@ -172,7 +172,7 @@ fn expires(
         };
         promise(s, x, r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucket", "expires", r)
     }
 }
 fn get_directory(
@@ -184,7 +184,7 @@ fn get_directory(
         let x = v8::Local::new(s, &v.directory);
         promise(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucket", "getDirectory", r)
     }
 }
 fn persisted(
@@ -196,7 +196,7 @@ fn persisted(
         let x = v8::Boolean::new(s, true);
         promise(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucket", "persisted", r)
     }
 }
 fn persist(
@@ -204,13 +204,23 @@ fn persist(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    persisted(s, a, r)
+    if record(s, a.this()).is_some() {
+        let value = v8::Boolean::new(s, true);
+        promise(s, value.into(), r)
+    } else {
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucket", "persist", r)
+    }
 }
 fn set_expires(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    let identity = a.this().get_identity_hash().get();
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucket", "setExpires", r);
+        return;
+    }
     let expires = if a.get(0).is_null() {
         None
     } else {
@@ -218,13 +228,11 @@ fn set_expires(
     };
     if let Some(v) = s
         .get_slot_mut::<StorageBucketStore>()
-        .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
+        .and_then(|x| x.records.get_mut(&identity))
     {
         v.expires = expires;
         let x = v8::undefined(s);
         promise(s, x.into(), r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 

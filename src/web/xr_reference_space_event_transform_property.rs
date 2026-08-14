@@ -9,9 +9,12 @@ pub(crate) fn define(
 
 fn transform(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     if let Ok(v) = super::xr_rigid_transform::create(s) {
         r.set(v.into())
     }

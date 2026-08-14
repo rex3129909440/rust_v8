@@ -28,6 +28,18 @@ pub struct NetworkFingerprint {
     pub rtt: u32,
     pub downlink: f64,
     pub save_data: bool,
+    #[serde(default = "default_connection_type")]
+    pub connection_type: String,
+    #[serde(default = "default_downlink_max")]
+    pub downlink_max: f64,
+}
+
+fn default_connection_type() -> String {
+    "wifi".to_owned()
+}
+
+fn default_downlink_max() -> f64 {
+    f64::INFINITY
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -155,6 +167,8 @@ impl Default for NetworkFingerprint {
             rtt: 100,
             downlink: 1.75,
             save_data: false,
+            connection_type: default_connection_type(),
+            downlink_max: default_downlink_max(),
         }
     }
 }
@@ -280,6 +294,96 @@ impl Default for EdgeFingerprint {
 }
 
 impl EdgeFingerprint {
+    pub(crate) fn synchronize_default_browser_version(&mut self) {
+        let user_agent = self.navigator.user_agent.clone();
+        self.synchronize_default_android_platform(&user_agent);
+        self.navigator
+            .user_agent_data
+            .synchronize_default_browser_version(&user_agent);
+    }
+
+    /// Convert only untouched desktop defaults when an Android UA selects the
+    /// mobile Chromium surface. Explicit caller values always win.
+    fn synchronize_default_android_platform(&mut self, user_agent: &str) {
+        let Ok(browser) = crate::browser_version::BrowserVersion::from_user_agent(user_agent)
+        else {
+            return;
+        };
+        if !browser.is_android() {
+            return;
+        }
+
+        let navigator_defaults = NavigatorFingerprint::default();
+        let navigator_is_untouched_desktop = self.navigator.platform == navigator_defaults.platform
+            && self.navigator.hardware_concurrency == navigator_defaults.hardware_concurrency
+            && self.navigator.device_memory_gb == navigator_defaults.device_memory_gb
+            && self.navigator.max_touch_points == navigator_defaults.max_touch_points
+            && self.navigator.pdf_viewer_enabled == navigator_defaults.pdf_viewer_enabled;
+        if navigator_is_untouched_desktop {
+            self.navigator.platform = "Linux armv81".to_owned();
+            self.navigator.hardware_concurrency = 8;
+            self.navigator.device_memory_gb = 4.0;
+            self.navigator.max_touch_points = 5;
+            self.navigator.pdf_viewer_enabled = false;
+        }
+
+        let data_defaults = UserAgentDataFingerprint::default();
+        let data = &mut self.navigator.user_agent_data;
+        let data_is_untouched_desktop = data == &data_defaults;
+        if data_is_untouched_desktop {
+            data.mobile = true;
+            data.platform = "Android".to_owned();
+            data.architecture.clear();
+            data.bitness.clear();
+            data.model = android_model_from_user_agent(user_agent).unwrap_or_default();
+            data.platform_version = android_version_from_user_agent(user_agent)
+                .map(normalize_three_component_version)
+                .unwrap_or_default();
+            data.form_factors = vec!["Mobile".to_owned()];
+            let major = browser.major().to_string();
+            let full_version =
+                crate::browser_version::BrowserVersion::full_version_from_user_agent(user_agent)
+                    .unwrap_or_else(|| format!("{major}.0.0.0"));
+            data.brands = vec![
+                UserAgentBrandFingerprint {
+                    brand: "Chromium".to_owned(),
+                    version: major,
+                    full_version,
+                },
+                UserAgentBrandFingerprint {
+                    brand: "Not=A?Brand".to_owned(),
+                    version: "99".to_owned(),
+                    full_version: "99.0.0.0".to_owned(),
+                },
+            ];
+        }
+
+        let preference_defaults =
+            crate::fingerprint_environment::MediaPreferencesFingerprint::default();
+        if self.media_preferences.pointer == preference_defaults.pointer {
+            self.media_preferences.pointer = "coarse".to_owned();
+        }
+        if self.media_preferences.any_pointer == preference_defaults.any_pointer {
+            self.media_preferences.any_pointer = "coarse".to_owned();
+        }
+        if self.media_preferences.hover == preference_defaults.hover {
+            self.media_preferences.hover = "none".to_owned();
+        }
+        if self.media_preferences.any_hover == preference_defaults.any_hover {
+            self.media_preferences.any_hover = "none".to_owned();
+        }
+
+        let plugin_defaults = crate::fingerprint_environment::PluginListFingerprint::default();
+        if self.plugins == plugin_defaults {
+            self.plugins.plugins.clear();
+        }
+
+        let audio_defaults = crate::fingerprint_surface::AudioFingerprint::default();
+        if self.rendering.audio.base_latency == audio_defaults.base_latency {
+            self.rendering.audio.base_latency = 0.002_666_666_666_666_666_6;
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.id.is_empty()
             || self.id.len() > 128
@@ -292,6 +396,7 @@ impl EdgeFingerprint {
                 "fingerprint id must contain at most 128 ASCII identifier characters".to_owned(),
             );
         }
+        crate::browser_version::BrowserVersion::from_user_agent(&self.navigator.user_agent)?;
         self.locale.validate()?;
         self.navigator.validate()?;
         self.screen.validate()?;
@@ -314,6 +419,26 @@ impl EdgeFingerprint {
         self.memory.validate()?;
         self.performance.validate()
     }
+}
+
+fn android_version_from_user_agent(user_agent: &str) -> Option<&str> {
+    let value = user_agent.split_once("Android ")?.1;
+    value.split([';', ')']).next().map(str::trim)
+}
+
+fn android_model_from_user_agent(user_agent: &str) -> Option<String> {
+    let value = user_agent.split_once("Android ")?.1;
+    let model = value.split_once(';')?.1.split(')').next()?.trim();
+    let model = model.split(" Build/").next().unwrap_or(model).trim();
+    (!model.is_empty() && model != "K").then(|| model.to_owned())
+}
+
+fn normalize_three_component_version(value: &str) -> String {
+    let mut parts = value.split('.').take(3).collect::<Vec<_>>();
+    while parts.len() < 3 {
+        parts.push("0");
+    }
+    parts.join(".")
 }
 
 impl NavigatorFingerprint {
@@ -379,6 +504,34 @@ impl NavigatorFingerprint {
 }
 
 impl UserAgentDataFingerprint {
+    pub(crate) fn synchronize_default_browser_version(&mut self, user_agent: &str) {
+        let defaults = Self::default();
+        let Ok(version) = crate::browser_version::BrowserVersion::from_user_agent(user_agent)
+        else {
+            return;
+        };
+        let major = version.major().to_string();
+        let full_version =
+            crate::browser_version::BrowserVersion::full_version_from_user_agent(user_agent)
+                .unwrap_or_else(|| format!("{major}.0.0.0"));
+        for brand in &mut self.brands {
+            if matches!(
+                brand.brand.as_str(),
+                "Chromium" | "Google Chrome" | "Microsoft Edge"
+            ) && defaults.brands.iter().any(|default| {
+                default.brand == brand.brand
+                    && default.version == brand.version
+                    && default.full_version == brand.full_version
+            }) {
+                brand.version.clone_from(&major);
+                brand.full_version.clone_from(&full_version);
+            }
+        }
+        if self.ua_full_version == defaults.ua_full_version {
+            self.ua_full_version = full_version;
+        }
+    }
+
     fn validate(&self) -> Result<(), String> {
         if self.brands.is_empty() || self.brands.len() > 16 {
             return Err("userAgentData.brands must contain 1 to 16 entries".to_owned());
@@ -420,6 +573,19 @@ impl NetworkFingerprint {
             || !self.downlink.is_finite()
             || self.downlink < 0.0
             || self.downlink > 10_000.0
+            || !matches!(
+                self.connection_type.as_str(),
+                "bluetooth"
+                    | "cellular"
+                    | "ethernet"
+                    | "none"
+                    | "wifi"
+                    | "wimax"
+                    | "other"
+                    | "unknown"
+            )
+            || self.downlink_max.is_nan()
+            || self.downlink_max < 0.0
         {
             return Err("network fingerprint is outside Chromium bounds".to_owned());
         }
@@ -457,6 +623,13 @@ pub(crate) fn navigator<'a>(scope: &'a v8::PinScope<'_, '_>) -> &'a NavigatorFin
         .get_slot::<FingerprintState>()
         .map(|state| &state.0.navigator)
         .expect("Edge fingerprint state was not prepared")
+}
+
+pub(crate) fn browser_version(
+    scope: &v8::PinScope<'_, '_>,
+) -> crate::browser_version::BrowserVersion {
+    crate::browser_version::BrowserVersion::from_user_agent(&navigator(scope).user_agent)
+        .expect("validated browser version was not available")
 }
 
 pub(crate) fn edge<'a>(scope: &'a v8::PinScope<'_, '_>) -> &'a EdgeFingerprint {

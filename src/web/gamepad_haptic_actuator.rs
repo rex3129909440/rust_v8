@@ -137,7 +137,12 @@ fn play_effect(
             r.set(p.into())
         }
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "GamepadHapticActuator",
+            "playEffect",
+            r,
+        )
     }
 }
 fn reset(
@@ -154,6 +159,6 @@ fn reset(
             r.set(p.into())
         }
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "GamepadHapticActuator", "reset", r)
     }
 }

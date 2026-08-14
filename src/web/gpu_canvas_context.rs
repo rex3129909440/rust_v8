@@ -120,6 +120,10 @@ fn configure(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(configuration) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "GPUCanvasContext.configure requires a descriptor");
         return;

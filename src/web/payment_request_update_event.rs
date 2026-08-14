@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub(crate) struct PaymentRequestUpdateEventStore {
     pub(crate) constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
     pub(crate) updates: HashMap<i32, v8::Global<v8::Value>>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
@@ -60,6 +61,10 @@ pub(crate) fn construct(
         cancelable,
         composed,
     );
+    s.get_slot_mut::<PaymentRequestUpdateEventStore>()
+        .expect("PaymentRequestUpdateEvent state")
+        .instances
+        .insert(a.this().get_identity_hash().get());
     r.set(a.this().into())
 }
 pub(crate) fn attach(
@@ -71,12 +76,31 @@ pub(crate) fn attach(
     composed: bool,
 ) {
     super::event::attach(s, o, event_type, bubbles, cancelable, composed);
+    s.get_slot_mut::<PaymentRequestUpdateEventStore>()
+        .expect("PaymentRequestUpdateEvent state")
+        .instances
+        .insert(o.get_identity_hash().get());
+}
+pub(crate) fn is_instance(s: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    s.get_slot::<PaymentRequestUpdateEventStore>()
+        .is_some_and(|store| store.instances.contains(&object.get_identity_hash().get()))
 }
 pub(crate) fn update_with(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let valid = s
+        .get_slot::<PaymentRequestUpdateEventStore>()
+        .is_some_and(|store| {
+            store
+                .instances
+                .contains(&a.this().get_identity_hash().get())
+        });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let v = v8::Global::new(s, a.get(0));
     s.get_slot_mut::<PaymentRequestUpdateEventStore>()
         .expect("PaymentRequestUpdateEvent state")

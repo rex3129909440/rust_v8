@@ -24,5 +24,19 @@ fn get_cross_origin_isolated(
     _: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    result.set(v8::Boolean::new(scope, false).into());
+    result.set(v8::Boolean::new(scope, value(scope)).into());
+}
+#[derive(Clone, Copy)]
+pub(crate) struct CrossOriginIsolationState {
+    isolated: bool,
+}
+
+pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate, isolated: bool) {
+    isolate.set_slot(CrossOriginIsolationState { isolated });
+}
+
+pub(crate) fn value(scope: &v8::PinScope<'_, '_>) -> bool {
+    scope
+        .get_slot::<CrossOriginIsolationState>()
+        .is_some_and(|state| state.isolated)
 }

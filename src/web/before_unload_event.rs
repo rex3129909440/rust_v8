@@ -53,7 +53,10 @@ pub(crate) fn illegal_constructor(
     _: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    crate::webidl::throw_type_error(scope, "Illegal constructor");
+    crate::webidl::throw_type_error(
+        scope,
+        "Failed to construct 'BeforeUnloadEvent': Illegal constructor",
+    );
 }
 
 pub(crate) fn create<'s>(

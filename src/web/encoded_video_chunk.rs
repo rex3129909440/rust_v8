@@ -72,7 +72,17 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The chunk init dictionary is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'EncodedVideoChunk': The provided value is not of type 'EncodedVideoChunkInit'.",
+        );
+        return;
+    };
+    let Some(data_value) = member(scope, init, "data").filter(|value| !value.is_undefined()) else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'EncodedVideoChunk': Failed to read the 'data' property from 'EncodedVideoChunkInit': Required member is undefined.",
+        );
         return;
     };
     let Some(chunk_type) = string_member(scope, init, "type") else {
@@ -88,7 +98,7 @@ fn construct(
         return;
     };
     let duration = number_member(scope, init, "duration").map(|v| v.max(0.0) as u64);
-    let Some(data) = member(scope, init, "data").and_then(|v| bytes(scope, v)) else {
+    let Some(data) = bytes(scope, data_value) else {
         crate::webidl::throw_type_error(scope, "Required member data is not a BufferSource");
         return;
     };

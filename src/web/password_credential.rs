@@ -69,10 +69,34 @@ fn construct(
         crate::webidl::throw_type_error(s, "PasswordCredential requires data");
         return;
     }
+    if a.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PasswordCredential': The provided value is not of type 'PasswordCredentialData'.",
+        );
+        return;
+    }
+    if !a.get(0).is_object() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PasswordCredential': Overload resolution failed.",
+        );
+        return;
+    }
     let Ok(data) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "PasswordCredential data must be an object");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PasswordCredential': The provided value is not of type 'PasswordCredentialData'.",
+        );
         return;
     };
+    if member(s, data, "id").is_undefined() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PasswordCredential': Failed to read the 'id' property from 'CredentialData': Required member is undefined.",
+        );
+        return;
+    }
     let id = crate::webidl::value_to_string(s, member(s, data, "id"));
     let password = crate::webidl::value_to_string(s, member(s, data, "password"));
     let name = crate::webidl::value_to_string(s, member(s, data, "name"));

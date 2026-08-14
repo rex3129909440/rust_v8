@@ -66,9 +66,19 @@ fn construct(
         return;
     }
     let Ok(track) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "track must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ImageCapture': parameter 1 is not of type 'MediaStreamTrack'.",
+        );
         return;
     };
+    if !super::media_stream_track::is_track(scope, track) {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ImageCapture': parameter 1 is not of type 'MediaStreamTrack'.",
+        );
+        return;
+    }
     let track = v8::Global::new(scope, track);
     scope
         .get_slot_mut::<ImageCaptureStore>()
@@ -116,7 +126,12 @@ fn get_photo_capabilities(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ImageCapture",
+            "getPhotoCapabilities",
+            result,
+        );
         return;
     }
     let object = v8::Object::new(scope);
@@ -131,7 +146,12 @@ fn get_photo_settings(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ImageCapture",
+            "getPhotoSettings",
+            result,
+        );
         return;
     }
     resolve(scope, v8::Object::new(scope).into(), result)
@@ -142,7 +162,12 @@ fn grab_frame(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ImageCapture",
+            "grabFrame",
+            result,
+        );
         return;
     }
     if let Ok(bitmap) = super::image_bitmap::create(scope, 1, 1, vec![0, 0, 0, 0]) {
@@ -154,15 +179,21 @@ fn take_photo(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ImageCapture",
+            "takePhoto",
+            result,
+        );
+        return;
+    }
     if let Some(record) = scope.get_slot_mut::<ImageCaptureStore>().and_then(|store| {
         store
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) {
         record.photos += 1
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
     }
     if let Ok(blob) = super::blob::create(scope, Vec::new(), "image/png") {
         resolve(scope, blob.into(), result)

@@ -86,7 +86,7 @@ fn get_layout_map(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "Keyboard", "getLayoutMap", r);
         return;
     }
     if let Ok(map) = super::keyboard_layout_map::create(s) {
@@ -98,6 +98,10 @@ fn lock(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !valid(s, a.this()) {
+        crate::webidl::reject_illegal_invocation_promise(s, "Keyboard", "lock", r);
+        return;
+    }
     let mut names = HashSet::new();
     if let Ok(array) = v8::Local::<v8::Array>::try_from(a.get(0)) {
         for index in 0..array.length() {
@@ -112,8 +116,6 @@ fn lock(
     {
         *locks = names;
         resolve(s, v8::undefined(s).into(), r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn unlock(

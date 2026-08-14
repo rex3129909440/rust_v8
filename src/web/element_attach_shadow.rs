@@ -14,27 +14,69 @@ fn attach_shadow(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'attachShadow' on 'Element': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to execute 'attachShadow': parameter 1 is not an object",
+            "Failed to execute 'attachShadow' on 'Element': The provided value is not of type 'ShadowRootInit'.",
         );
         return;
     };
-    let Some(mode_value) = member(scope, options, "mode") else {
-        crate::webidl::throw_type_error(scope, "The required member 'mode' is undefined");
+
+    // Web IDL converts dictionary members in lexicographic order, not in the
+    // order in which the implementation happens to consume them.
+    let Some(clonable_value) = raw_member(scope, options, "clonable") else {
         return;
     };
-    let mode = crate::webidl::value_to_string(scope, mode_value);
+    let Some(registry_value) = raw_member(scope, options, "customElementRegistry") else {
+        return;
+    };
+    let Some(delegates_focus_value) = raw_member(scope, options, "delegatesFocus") else {
+        return;
+    };
+    let Some(mode_value) = raw_member(scope, options, "mode") else {
+        return;
+    };
+    if mode_value.is_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': Required member is undefined.",
+        );
+        return;
+    }
+    let Some(mode) = crate::webidl::dom_string_with_context(
+        scope,
+        mode_value,
+        "Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit'",
+    ) else {
+        return;
+    };
+    let Some(serializable_value) = raw_member(scope, options, "serializable") else {
+        return;
+    };
+    let Some(slot_assignment_value) = raw_member(scope, options, "slotAssignment") else {
+        return;
+    };
     if !matches!(mode.as_str(), "open" | "closed") {
-        crate::webidl::throw_type_error(scope, "'mode' must be either 'open' or 'closed'");
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': The provided value '{mode}' is not a valid enum value of type ShadowRootMode."
+            ),
+        );
         return;
     }
     if element.shadow_root.is_some() {
         super::node::throw_dom_exception(
             scope,
             "NotSupportedError",
-            "This element already hosts a shadow root",
+            "Failed to execute 'attachShadow' on 'Element': Shadow root cannot be created on a host which already hosts a shadow tree.",
         );
         return;
     }
@@ -46,24 +88,52 @@ fn attach_shadow(
         );
         return;
     }
-    let slot_assignment = member(scope, options, "slotAssignment")
-        .map(|value| crate::webidl::value_to_string(scope, value))
-        .unwrap_or_else(|| "named".to_owned());
+    let slot_assignment = if slot_assignment_value.is_undefined() {
+        "named".to_owned()
+    } else {
+        let Some(value) = crate::webidl::dom_string_with_context(
+            scope,
+            slot_assignment_value,
+            "Failed to execute 'attachShadow' on 'Element': Failed to read the 'slotAssignment' property from 'ShadowRootInit'",
+        ) else {
+            return;
+        };
+        value
+    };
     if !matches!(slot_assignment.as_str(), "named" | "manual") {
         crate::webidl::throw_type_error(
             scope,
             &format!(
-                "'slotAssignment' must be either 'named' or 'manual', received '{slot_assignment}'"
+                "Failed to execute 'attachShadow' on 'Element': Failed to read the 'slotAssignment' property from 'ShadowRootInit': The provided value '{slot_assignment}' is not a valid enum value of type SlotAssignmentMode."
             ),
         );
         return;
     }
-    let delegates_focus = bool_member(scope, options, "delegatesFocus");
-    let serializable = bool_member(scope, options, "serializable");
-    let clonable = bool_member(scope, options, "clonable");
-    let registry = member(scope, options, "customElementRegistry")
-        .filter(|value| !value.is_null_or_undefined())
-        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok());
+    let delegates_focus =
+        !delegates_focus_value.is_undefined() && delegates_focus_value.boolean_value(scope);
+    let serializable =
+        !serializable_value.is_undefined() && serializable_value.boolean_value(scope);
+    let clonable = !clonable_value.is_undefined() && clonable_value.boolean_value(scope);
+    let registry_is_null = registry_value.is_null();
+    let registry = if registry_value.is_null_or_undefined() {
+        None
+    } else {
+        let Ok(registry) = v8::Local::<v8::Object>::try_from(registry_value) else {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'attachShadow' on 'Element': Failed to read the 'customElementRegistry' property from 'ShadowRootInit': Failed to convert value to 'CustomElementRegistry'.",
+            );
+            return;
+        };
+        if !super::custom_element_registry::is_registry(scope, registry) {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'attachShadow' on 'Element': Failed to read the 'customElementRegistry' property from 'ShadowRootInit': Failed to convert value to 'CustomElementRegistry'.",
+            );
+            return;
+        }
+        Some(registry)
+    };
     match super::shadow_root::create(
         scope,
         arguments.this(),
@@ -73,6 +143,7 @@ fn attach_shadow(
         serializable,
         clonable,
         registry,
+        registry_is_null,
     ) {
         Ok(shadow) => {
             super::element::set_shadow_root(scope, arguments.this(), shadow);
@@ -82,22 +153,12 @@ fn attach_shadow(
     }
 }
 
-fn member<'s>(
+fn raw_member<'s>(
     scope: &v8::PinScope<'s, '_>,
     object: v8::Local<'_, v8::Object>,
     name: &str,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    object
-        .get(scope, v8::String::new(scope, name)?.into())
-        .filter(|value| !value.is_undefined())
-}
-
-fn bool_member(
-    scope: &v8::PinScope<'_, '_>,
-    object: v8::Local<'_, v8::Object>,
-    name: &str,
-) -> bool {
-    member(scope, object, name).is_some_and(|value| value.boolean_value(scope))
+    object.get(scope, v8::String::new(scope, name)?.into())
 }
 
 fn valid_shadow_host(record: &super::element::ElementRecord) -> bool {

@@ -96,6 +96,81 @@ fn owner<'s>(
         .get(&collection.get_identity_hash().get())
         .map(|v| v8::Local::new(scope, v))
 }
+
+pub(crate) fn is_options_collection(
+    scope: &v8::PinScope<'_, '_>,
+    collection: v8::Local<'_, v8::Object>,
+) -> bool {
+    scope
+        .get_slot::<HtmlOptionsCollectionStore>()
+        .is_some_and(|store| {
+            store
+                .owners
+                .contains_key(&collection.get_identity_hash().get())
+        })
+}
+
+pub(crate) fn set_indexed_value(
+    scope: &mut v8::PinScope<'_, '_>,
+    collection: v8::Local<'_, v8::Object>,
+    index: usize,
+    value: v8::Local<'_, v8::Value>,
+) -> bool {
+    let Some(owner) = owner(scope, collection) else {
+        return false;
+    };
+    let current = super::html_select_element::options_snapshot(scope, owner);
+    if value.is_null_or_undefined() {
+        if let Some(option) = current.get(index) {
+            let _ = super::node::detach(scope, *option);
+            super::html_select_element::refresh(scope, owner);
+        }
+        return true;
+    }
+    let Ok(option) = v8::Local::<v8::Object>::try_from(value) else {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to set an indexed property [{index}] on 'HTMLOptionsCollection': parameter 2 is not of type 'HTMLOptionElement'."
+            ),
+        );
+        return true;
+    };
+    if !super::html_option_element::is_option(scope, option) {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to set an indexed property [{index}] on 'HTMLOptionsCollection': parameter 2 is not of type 'HTMLOptionElement'."
+            ),
+        );
+        return true;
+    }
+    if index < current.len() {
+        let _ = super::node::detach(scope, current[index]);
+    } else {
+        for _ in current.len()..index {
+            let Ok(blank) = super::html_option_element::create(
+                scope,
+                String::new(),
+                String::new(),
+                false,
+                false,
+            ) else {
+                return true;
+            };
+            let insertion = super::node::children(scope, owner).len();
+            let _ = super::node::insert_child(scope, owner, blank, insertion);
+        }
+    }
+    let insertion = if index >= current.len() {
+        super::node::children(scope, owner).len()
+    } else {
+        index.min(super::node::children(scope, owner).len())
+    };
+    let _ = super::node::insert_child(scope, owner, option, insertion);
+    super::html_select_element::refresh(scope, owner);
+    true
+}
 fn get_length(
     scope: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,

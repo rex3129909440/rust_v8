@@ -12,44 +12,83 @@ fn observe(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    if arguments.length() < 2 {
-        crate::webidl::throw_type_error(scope, "Failed to execute 'observe': 2 arguments required");
+    if scope
+        .get_slot::<MutationObserverStore>()
+        .and_then(|store| {
+            store
+                .observers
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'observe' on 'MutationObserver': 1 argument required, but only 0 present.",
+        );
         return;
     }
     let Ok(target) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "MutationObserver target is not a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'observe' on 'MutationObserver': parameter 1 is not of type 'Node'.",
+        );
         return;
     };
     if super::node::record(scope, target).is_none() {
-        crate::webidl::throw_type_error(scope, "MutationObserver target is not a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'observe' on 'MutationObserver': parameter 1 is not of type 'Node'.",
+        );
         return;
     }
-    let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "MutationObserver options must be an object");
-        return;
+    let options_value = arguments.get(1);
+    let options = if options_value.is_null_or_undefined() {
+        v8::Object::new(scope)
+    } else if let Ok(options) = v8::Local::<v8::Object>::try_from(options_value) {
+        options
+    } else {
+        v8::Object::new(scope)
     };
     let attribute_old_value = boolean_property(scope, options, "attributeOldValue");
     let character_data_old_value = boolean_property(scope, options, "characterDataOldValue");
     let attribute_filter = string_sequence_property(scope, options, "attributeFilter");
-    let attributes = optional_boolean_property(scope, options, "attributes")
-        .unwrap_or(attribute_old_value || attribute_filter.is_some());
-    let character_data = optional_boolean_property(scope, options, "characterData")
-        .unwrap_or(character_data_old_value);
+    let explicit_attributes = optional_boolean_property(scope, options, "attributes");
+    let explicit_character_data = optional_boolean_property(scope, options, "characterData");
+    let attributes =
+        explicit_attributes.unwrap_or(attribute_old_value || attribute_filter.is_some());
+    let character_data = explicit_character_data.unwrap_or(character_data_old_value);
     let child_list = boolean_property(scope, options, "childList");
     let subtree = boolean_property(scope, options, "subtree");
-    if !attributes && !character_data && !child_list {
+    if explicit_attributes == Some(false) && attribute_old_value {
         crate::webidl::throw_type_error(
             scope,
-            "The options must enable attributes, characterData, or childList",
+            "Failed to execute 'observe' on 'MutationObserver': The options object may only set 'attributeOldValue' to true when 'attributes' is true or not present.",
         );
         return;
     }
-    if !attributes && (attribute_old_value || attribute_filter.is_some()) {
-        crate::webidl::throw_type_error(scope, "attributes is false");
+    if explicit_attributes == Some(false) && attribute_filter.is_some() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'observe' on 'MutationObserver': The options object may only set 'attributeFilter' when 'attributes' is true or not present.",
+        );
         return;
     }
-    if !character_data && character_data_old_value {
-        crate::webidl::throw_type_error(scope, "characterData is false");
+    if explicit_character_data == Some(false) && character_data_old_value {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'observe' on 'MutationObserver': The options object may only set 'characterDataOldValue' to true when 'characterData' is true or not present.",
+        );
+        return;
+    }
+    if !attributes && !character_data && !child_list {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'observe' on 'MutationObserver': The options object must set at least one of 'attributes', 'characterData', or 'childList' to true.",
+        );
         return;
     }
     let observed = ObservedTarget {

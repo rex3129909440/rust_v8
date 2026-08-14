@@ -3,9 +3,24 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(crate) struct HeadersStore {
     constructors: HashMap<i32, v8::Global<v8::Function>>,
-    records: HashMap<i32, Vec<(String, String)>>,
+    records: HashMap<i32, HeadersRecord>,
     iterator_prototypes: HashMap<i32, v8::Global<v8::Object>>,
     iterators: HashMap<i32, HeadersIteratorRecord>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Guard {
+    None,
+    Request,
+    RequestNoCors,
+    Response,
+    Immutable,
+}
+
+#[derive(Clone)]
+struct HeadersRecord {
+    values: Vec<(String, String)>,
+    guard: Guard,
 }
 
 #[derive(Clone, Copy)]
@@ -77,6 +92,14 @@ pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     initial: Vec<(String, String)>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
+    create_with_guard(scope, initial, Guard::None)
+}
+
+pub(crate) fn create_with_guard<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    initial: Vec<(String, String)>,
+    guard: Guard,
+) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
     let object = v8::Object::new(scope);
@@ -86,13 +109,22 @@ pub(crate) fn create<'s>(
     let mut normalized = Vec::new();
     for (name, value) in initial {
         let name = normalize_name(&name)?;
-        normalized.push((name, normalize_value(&value)?));
+        let value = normalize_value(&value)?;
+        if permitted(&normalized, guard, Mutation::Append, &name, Some(&value)) {
+            normalized.push((name, value));
+        }
     }
     scope
         .get_slot_mut::<HeadersStore>()
         .ok_or_else(|| "Headers state was not prepared".to_owned())?
         .records
-        .insert(object.get_identity_hash().get(), normalized);
+        .insert(
+            object.get_identity_hash().get(),
+            HeadersRecord {
+                values: normalized,
+                guard,
+            },
+        );
     Ok(object)
 }
 
@@ -104,7 +136,27 @@ pub(crate) fn snapshot(
         .get_slot::<HeadersStore>()?
         .records
         .get(&object.get_identity_hash().get())
-        .cloned()
+        .map(|record| record.values.clone())
+}
+
+pub(crate) fn guard(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<Guard> {
+    scope
+        .get_slot::<HeadersStore>()?
+        .records
+        .get(&object.get_identity_hash().get())
+        .map(|record| record.guard)
+}
+
+pub(crate) fn clone_with_guard<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let values = snapshot(scope, object).ok_or_else(|| "Illegal invocation".to_owned())?;
+    let guard = guard(scope, object).ok_or_else(|| "Illegal invocation".to_owned())?;
+    create_with_guard(scope, values, guard)
 }
 
 fn construct(
@@ -116,7 +168,7 @@ fn construct(
         crate::webidl::throw_type_error(scope, "Failed to construct 'Headers': use new");
         return;
     }
-    let initial = match headers_init(scope, arguments.get(0)) {
+    let initial = match init_values(scope, arguments.get(0)) {
         Ok(initial) => initial,
         Err(message) => {
             crate::webidl::throw_type_error(scope, &message);
@@ -127,11 +179,17 @@ fn construct(
         .get_slot_mut::<HeadersStore>()
         .expect("Headers state")
         .records
-        .insert(arguments.this().get_identity_hash().get(), initial);
+        .insert(
+            arguments.this().get_identity_hash().get(),
+            HeadersRecord {
+                values: initial,
+                guard: Guard::None,
+            },
+        );
     result.set(arguments.this().into());
 }
 
-fn headers_init(
+pub(crate) fn init_values(
     scope: &mut v8::PinScope<'_, '_>,
     init: v8::Local<'_, v8::Value>,
 ) -> Result<Vec<(String, String)>, String> {
@@ -244,34 +302,226 @@ fn values_for(
 fn update(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
-    change: impl FnOnce(&mut Vec<(String, String)>),
-) -> bool {
-    if let Some(values) = scope
+    operation: Mutation,
+    name: &str,
+    value: Option<&str>,
+) -> Result<(), UpdateError> {
+    let Some(record) = scope
         .get_slot_mut::<HeadersStore>()
         .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
-    {
-        change(values);
-        true
-    } else {
-        false
+    else {
+        return Err(UpdateError::IllegalInvocation);
+    };
+    if record.guard == Guard::Immutable {
+        return Err(UpdateError::Immutable);
+    }
+    if !permitted(&record.values, record.guard, operation, name, value) {
+        return Ok(());
+    }
+    match operation {
+        Mutation::Append => record
+            .values
+            .push((name.to_owned(), value.unwrap_or_default().to_owned())),
+        Mutation::Delete => record.values.retain(|(current, _)| current != name),
+        Mutation::Set => {
+            record.values.retain(|(current, _)| current != name);
+            record
+                .values
+                .push((name.to_owned(), value.unwrap_or_default().to_owned()));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum Mutation {
+    Append,
+    Delete,
+    Set,
+}
+
+enum UpdateError {
+    IllegalInvocation,
+    Immutable,
+}
+
+fn forbidden_request_name(name: &str) -> bool {
+    matches!(
+        name,
+        "accept-charset"
+            | "accept-encoding"
+            | "access-control-request-headers"
+            | "access-control-request-method"
+            | "connection"
+            | "content-length"
+            | "cookie"
+            | "cookie2"
+            | "date"
+            | "dnt"
+            | "expect"
+            | "host"
+            | "keep-alive"
+            | "origin"
+            | "referer"
+            | "set-cookie"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+            | "via"
+    ) || name.starts_with("proxy-")
+        || name.starts_with("sec-")
+}
+
+fn forbidden_response_name(name: &str) -> bool {
+    matches!(name, "set-cookie" | "set-cookie2")
+}
+
+fn no_cors_safelisted(name: &str, value: &str) -> bool {
+    if value.as_bytes().len() > 128 {
+        return false;
+    }
+    let unsafe_value_byte = |byte: u8| {
+        byte < 0x20 && byte != b'\t'
+            || matches!(
+                byte,
+                b'"' | b'('
+                    | b')'
+                    | b':'
+                    | b'<'
+                    | b'>'
+                    | b'?'
+                    | b'@'
+                    | b'['
+                    | b'\\'
+                    | b']'
+                    | b'{'
+                    | b'}'
+            )
+            || byte == 0x7f
+    };
+    match name {
+        "accept" => !value.bytes().any(unsafe_value_byte),
+        "accept-language" | "content-language" => value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b' ' | b'*' | b',' | b'-' | b'.' | b';' | b'=')
+        }),
+        "content-type" => {
+            if value.bytes().any(unsafe_value_byte) {
+                return false;
+            }
+            let essence = value
+                .split_once(';')
+                .map_or(value, |(essence, _)| essence)
+                .trim();
+            matches!(
+                essence.to_ascii_lowercase().as_str(),
+                "application/x-www-form-urlencoded" | "multipart/form-data" | "text/plain"
+            )
+        }
+        "range" => {
+            let Some(value) = value.strip_prefix("bytes=") else {
+                return false;
+            };
+            let Some((start, end)) = value.split_once('-') else {
+                return false;
+            };
+            !start.is_empty()
+                && start.bytes().all(|byte| byte.is_ascii_digit())
+                && end.bytes().all(|byte| byte.is_ascii_digit())
+                && (end.is_empty()
+                    || start
+                        .parse::<u64>()
+                        .ok()
+                        .zip(end.parse::<u64>().ok())
+                        .is_some_and(|(start, end)| start <= end))
+        }
+        _ => false,
+    }
+}
+
+fn existing_combined(values: &[(String, String)], name: &str) -> String {
+    values
+        .iter()
+        .filter(|(current, _)| current == name)
+        .map(|(_, value)| value.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn permitted(
+    values: &[(String, String)],
+    guard: Guard,
+    operation: Mutation,
+    name: &str,
+    value: Option<&str>,
+) -> bool {
+    match guard {
+        Guard::None | Guard::Immutable => true,
+        Guard::Request => !forbidden_request_name(name),
+        Guard::Response => !forbidden_response_name(name),
+        Guard::RequestNoCors => {
+            if forbidden_request_name(name) {
+                return false;
+            }
+            if name == "range" {
+                return false;
+            }
+            if matches!(operation, Mutation::Delete) {
+                return no_cors_safelisted(name, &existing_combined(values, name));
+            }
+            let next = match operation {
+                Mutation::Append => {
+                    let existing = existing_combined(values, name);
+                    if existing.is_empty() {
+                        value.unwrap_or_default().to_owned()
+                    } else {
+                        format!("{existing}, {}", value.unwrap_or_default())
+                    }
+                }
+                Mutation::Set => value.unwrap_or_default().to_owned(),
+                Mutation::Delete => unreachable!(),
+            };
+            no_cors_safelisted(name, &next)
+        }
+    }
+}
+
+fn finish_update(scope: &mut v8::PinScope<'_, '_>, method: &str, outcome: Result<(), UpdateError>) {
+    match outcome {
+        Ok(()) => {}
+        Err(UpdateError::IllegalInvocation) => {
+            crate::webidl::throw_type_error(scope, "Illegal invocation")
+        }
+        Err(UpdateError::Immutable) => crate::webidl::throw_type_error(
+            scope,
+            &format!("Failed to execute '{method}' on 'Headers': Headers are immutable"),
+        ),
     }
 }
 
 fn header_name(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
+    method: &str,
 ) -> Option<String> {
     let value = match byte_string(scope, value) {
         Ok(value) => value,
         Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
+            crate::webidl::throw_type_error(
+                scope,
+                &format!("Failed to execute '{method}' on 'Headers': {message}"),
+            );
             return None;
         }
     };
     match normalize_name(&value) {
         Ok(value) => Some(value),
         Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
+            crate::webidl::throw_type_error(
+                scope,
+                &format!("Failed to execute '{method}' on 'Headers': {message}"),
+            );
             None
         }
     }
@@ -280,11 +530,15 @@ fn header_name(
 fn header_value(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
+    method: &str,
 ) -> Option<String> {
     let value = match byte_string(scope, value).and_then(|value| normalize_value(&value)) {
         Ok(value) => value,
         Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
+            crate::webidl::throw_type_error(
+                scope,
+                &format!("Failed to execute '{method}' on 'Headers': {message}"),
+            );
             return None;
         }
     };
@@ -323,15 +577,20 @@ fn append(
     if !required(scope, &arguments, 2, "append") {
         return;
     }
-    let Some(name) = header_name(scope, arguments.get(0)) else {
+    let Some(name) = header_name(scope, arguments.get(0), "append") else {
         return;
     };
-    let Some(value) = header_value(scope, arguments.get(1)) else {
+    let Some(value) = header_value(scope, arguments.get(1), "append") else {
         return;
     };
-    if !update(scope, arguments.this(), |values| values.push((name, value))) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    let outcome = update(
+        scope,
+        arguments.this(),
+        Mutation::Append,
+        &name,
+        Some(&value),
+    );
+    finish_update(scope, "append", outcome);
 }
 fn delete(
     scope: &mut v8::PinScope<'_, '_>,
@@ -341,14 +600,11 @@ fn delete(
     if !required(scope, &arguments, 1, "delete") {
         return;
     }
-    let Some(name) = header_name(scope, arguments.get(0)) else {
+    let Some(name) = header_name(scope, arguments.get(0), "delete") else {
         return;
     };
-    if !update(scope, arguments.this(), |values| {
-        values.retain(|(current, _)| current != &name)
-    }) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    let outcome = update(scope, arguments.this(), Mutation::Delete, &name, None);
+    finish_update(scope, "delete", outcome);
 }
 fn get(
     scope: &mut v8::PinScope<'_, '_>,
@@ -358,7 +614,7 @@ fn get(
     if !required(scope, &arguments, 1, "get") {
         return;
     }
-    let Some(name) = header_name(scope, arguments.get(0)) else {
+    let Some(name) = header_name(scope, arguments.get(0), "get") else {
         return;
     };
     let Some(values) = values_for(scope, arguments.this()) else {
@@ -406,7 +662,7 @@ fn has(
     if !required(scope, &arguments, 1, "has") {
         return;
     }
-    let Some(name) = header_name(scope, arguments.get(0)) else {
+    let Some(name) = header_name(scope, arguments.get(0), "has") else {
         return;
     };
     if let Some(values) = values_for(scope, arguments.this()) {
@@ -424,18 +680,14 @@ fn set(
     if !required(scope, &arguments, 2, "set") {
         return;
     }
-    let Some(name) = header_name(scope, arguments.get(0)) else {
+    let Some(name) = header_name(scope, arguments.get(0), "set") else {
         return;
     };
-    let Some(value) = header_value(scope, arguments.get(1)) else {
+    let Some(value) = header_value(scope, arguments.get(1), "set") else {
         return;
     };
-    if !update(scope, arguments.this(), |values| {
-        values.retain(|(current, _)| current != &name);
-        values.push((name, value))
-    }) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    let outcome = update(scope, arguments.this(), Mutation::Set, &name, Some(&value));
+    finish_update(scope, "set", outcome);
 }
 
 fn combined(values: &[(String, String)]) -> Vec<(String, String)> {
@@ -567,7 +819,7 @@ fn iterator_next(
     let item = scope
         .get_slot::<HeadersStore>()
         .and_then(|store| store.records.get(&iterator.headers_id))
-        .map(|values| combined(values))
+        .map(|record| combined(&record.values))
         .and_then(|values| values.get(iterator.index).cloned());
     let Some((name, value)) = item else {
         let undefined = v8::undefined(scope);
@@ -642,13 +894,6 @@ fn for_each(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    if !required(scope, &arguments, 1, "forEach") {
-        return;
-    }
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "callback must be a function");
-        return;
-    };
     let headers_id = arguments.this().get_identity_hash().get();
     if !scope
         .get_slot::<HeadersStore>()
@@ -657,13 +902,20 @@ fn for_each(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
+    if !required(scope, &arguments, 1, "forEach") {
+        return;
+    }
+    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
+        crate::webidl::throw_type_error(scope, "callback must be a function");
+        return;
+    };
     let receiver = arguments.get(1);
     let mut index = 0;
     loop {
         let item = scope
             .get_slot::<HeadersStore>()
             .and_then(|store| store.records.get(&headers_id))
-            .map(|values| combined(values))
+            .map(|record| combined(&record.values))
             .and_then(|values| values.get(index).cloned());
         let Some((name, value)) = item else {
             break;

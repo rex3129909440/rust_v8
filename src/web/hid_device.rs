@@ -108,11 +108,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.handler),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.handler, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -190,6 +190,7 @@ fn set_opened(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
+    method: &str,
     value: bool,
 ) {
     if let Some(v) = s
@@ -200,7 +201,7 @@ fn set_opened(
         let x = v8::undefined(s);
         resolve(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "HIDDevice", method, r)
     }
 }
 fn open(
@@ -208,21 +209,21 @@ fn open(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_opened(s, a, r, true)
+    set_opened(s, a, r, "open", true)
 }
 fn close(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_opened(s, a, r, false)
+    set_opened(s, a, r, "close", false)
 }
 fn forget(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_opened(s, a, r, false)
+    set_opened(s, a, r, "forget", false)
 }
 fn data_view<'s>(s: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::DataView> {
     let len = bytes.len();
@@ -235,19 +236,28 @@ fn receive_feature_report(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "HIDDevice", "receiveFeatureReport", r);
+        return;
+    }
     let id = a.get(0).uint32_value(s).unwrap_or(0) as u8;
     if let Some(v) = record(s, a.this()) {
         let view = data_view(s, v.reports.get(&id).cloned().unwrap_or_default());
         resolve(s, view.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "HIDDevice", "receiveFeatureReport", r)
     }
 }
 fn send(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
+    method: &str,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "HIDDevice", method, r);
+        return;
+    }
     let id = a.get(0).uint32_value(s).unwrap_or(0) as u8;
     let bytes = crate::webidl::value_to_string(s, a.get(1)).into_bytes();
     if let Some(v) = s
@@ -258,7 +268,7 @@ fn send(
         let x = v8::undefined(s);
         resolve(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "HIDDevice", method, r)
     }
 }
 fn send_feature_report(
@@ -266,14 +276,14 @@ fn send_feature_report(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    send(s, a, r)
+    send(s, a, r, "sendFeatureReport")
 }
 fn send_report(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    send(s, a, r)
+    send(s, a, r, "sendReport")
 }
 
 pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {

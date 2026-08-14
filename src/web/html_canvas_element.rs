@@ -118,6 +118,17 @@ pub(crate) fn record(
         .cloned()
 }
 
+pub(crate) fn copy_clone_state(
+    scope: &mut v8::PinScope<'_, '_>,
+    source: v8::Local<'_, v8::Object>,
+    clone: v8::Local<'_, v8::Object>,
+) {
+    let Some(source) = record(scope, source) else {
+        return;
+    };
+    resize(scope, clone, Some(source.width), Some(source.height));
+}
+
 pub(crate) fn throw_dom_exception(scope: &mut v8::PinScope<'_, '_>, name: &str, message: &str) {
     match super::dom_exception::create(scope, message.to_owned(), name.to_owned()) {
         Ok(exception) => {

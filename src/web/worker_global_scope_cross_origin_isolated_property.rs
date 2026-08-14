@@ -9,5 +9,10 @@ fn get(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    super::worker_global_scope::get_worker_boolean(scope, arguments, false, result)
+    super::worker_global_scope::get_worker_boolean(
+        scope,
+        arguments,
+        super::cross_origin_isolated::value(scope),
+        result,
+    )
 }

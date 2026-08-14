@@ -202,7 +202,10 @@ fn decode(
     let decoded = match decode_bytes(&record.encoding, &combined, record.fatal, record.ignore_bom) {
         Ok(value) => value,
         Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
+            crate::webidl::throw_type_error(
+                scope,
+                &format!("Failed to execute 'decode' on 'TextDecoder': {message}"),
+            );
             return;
         }
     };
@@ -231,7 +234,7 @@ pub(crate) fn decode_bytes(
         "utf-8" => {
             if fatal {
                 std::str::from_utf8(bytes)
-                    .map_err(|_| "The encoded data is not valid UTF-8".to_owned())?
+                    .map_err(|_| "The encoded data was not valid.".to_owned())?
                     .to_owned()
             } else {
                 String::from_utf8_lossy(bytes).into_owned()
@@ -262,7 +265,7 @@ fn decode_utf16(bytes: &[u8], little_endian: bool, fatal: bool) -> Result<String
     }
     if fatal {
         char::decode_utf16(units)
-            .map(|value| value.map_err(|_| "The encoded data is not valid UTF-16".to_owned()))
+            .map(|value| value.map_err(|_| "The encoded data was not valid.".to_owned()))
             .collect()
     } else {
         Ok(char::decode_utf16(units)

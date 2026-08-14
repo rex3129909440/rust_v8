@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 #[derive(Clone)]
 pub(crate) struct DeviceMotionEventRecord {
-    pub(crate) acceleration: v8::Global<v8::Object>,
-    pub(crate) acceleration_including_gravity: v8::Global<v8::Object>,
-    pub(crate) rotation_rate: v8::Global<v8::Object>,
+    pub(crate) acceleration: Option<v8::Global<v8::Object>>,
+    pub(crate) acceleration_including_gravity: Option<v8::Global<v8::Object>>,
+    pub(crate) rotation_rate: Option<v8::Global<v8::Object>>,
     pub(crate) interval: f64,
 }
 #[derive(Default)]
@@ -112,25 +112,25 @@ pub(crate) fn construct(
         cancelable,
         composed,
     );
-    let (x, y, z) = acceleration_values(scope, object_member(scope, init, "acceleration"));
-    let acceleration = super::device_motion_event_acceleration::create(scope, x, y, z).unwrap();
-    let (x, y, z) = acceleration_values(
-        scope,
-        object_member(scope, init, "accelerationIncludingGravity"),
-    );
-    let gravity = super::device_motion_event_acceleration::create(scope, x, y, z).unwrap();
-    let rotation = object_member(scope, init, "rotationRate");
-    let rotation = super::device_motion_event_rotation_rate::create(
-        scope,
-        numeric(scope, rotation, "alpha"),
-        numeric(scope, rotation, "beta"),
-        numeric(scope, rotation, "gamma"),
-    )
-    .unwrap();
+    let acceleration = object_member(scope, init, "acceleration").map(|value| {
+        let (x, y, z) = acceleration_values(scope, Some(value));
+        let object = super::device_motion_event_acceleration::create(scope, x, y, z).unwrap();
+        v8::Global::new(scope, object)
+    });
+    let gravity = object_member(scope, init, "accelerationIncludingGravity").map(|value| {
+        let (x, y, z) = acceleration_values(scope, Some(value));
+        let object = super::device_motion_event_acceleration::create(scope, x, y, z).unwrap();
+        v8::Global::new(scope, object)
+    });
+    let rotation = object_member(scope, init, "rotationRate").map(|value| {
+        let alpha = numeric(scope, Some(value), "alpha");
+        let beta = numeric(scope, Some(value), "beta");
+        let gamma = numeric(scope, Some(value), "gamma");
+        let object =
+            super::device_motion_event_rotation_rate::create(scope, alpha, beta, gamma).unwrap();
+        v8::Global::new(scope, object)
+    });
     let interval = numeric(scope, init, "interval").unwrap_or(0.0);
-    let acceleration = v8::Global::new(scope, acceleration);
-    let gravity = v8::Global::new(scope, gravity);
-    let rotation = v8::Global::new(scope, rotation);
     scope
         .get_slot_mut::<DeviceMotionEventStore>()
         .expect("DeviceMotionEvent state")
@@ -162,7 +162,10 @@ pub(crate) fn get_acceleration(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(x) = record(s, a.this()) {
-        r.set(v8::Local::new(s, &x.acceleration).into())
+        match x.acceleration {
+            Some(value) => r.set(v8::Local::new(s, &value).into()),
+            None => r.set(v8::null(s).into()),
+        }
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }
@@ -173,7 +176,10 @@ pub(crate) fn get_acceleration_including_gravity(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(x) = record(s, a.this()) {
-        r.set(v8::Local::new(s, &x.acceleration_including_gravity).into())
+        match x.acceleration_including_gravity {
+            Some(value) => r.set(v8::Local::new(s, &value).into()),
+            None => r.set(v8::null(s).into()),
+        }
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }
@@ -184,7 +190,10 @@ pub(crate) fn get_rotation_rate(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(x) = record(s, a.this()) {
-        r.set(v8::Local::new(s, &x.rotation_rate).into())
+        match x.rotation_rate {
+            Some(value) => r.set(v8::Local::new(s, &value).into()),
+            None => r.set(v8::null(s).into()),
+        }
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }

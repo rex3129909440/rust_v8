@@ -1376,6 +1376,79 @@ fn headers_validate_bytestrings_and_expose_live_sorted_pair_iterators() {
 }
 
 #[test]
+fn edge150_headers_guards_filter_contextual_names_and_preserve_clone_state() {
+    let source = r#"
+      (async () => {
+        const outcome = callback => {
+          try { callback(); return ['return', null]; }
+          catch (error) { return [error.name, error.message]; }
+        };
+        const mutate = (headers, operation, name, value) => {
+          const result = outcome(() => operation === 'delete'
+            ? headers.delete(name) : headers[operation](name, value));
+          return [result, Array.from(headers)];
+        };
+
+        const request = new Request('https://audit.example/request', {
+          headers: [['x-start','one'],['cookie','drop'],['sec-start','drop']]
+        });
+        const requestInitial = Array.from(request.headers);
+        const requestMutations = [
+          mutate(request.headers,'set','x-ok','two'),
+          mutate(request.headers,'set','cookie','drop'),
+          mutate(request.headers,'append','host','drop'),
+          mutate(request.headers,'set','content-length','3')
+        ];
+        const requestCopy = mutate(new Headers(request.headers),'set','cookie','copy');
+        const requestClone = mutate(request.clone().headers,'set','cookie','clone');
+
+        const noCors = new Request('https://audit.example/no-cors', {
+          mode:'no-cors', headers:[['accept','text/plain'],['x-drop','one'],
+            ['content-type','text/plain;charset=UTF-8']]
+        });
+        const noCorsInitial = Array.from(noCors.headers);
+        const noCorsMutations = [
+          mutate(noCors.headers,'set','accept-language','en-US'),
+          mutate(noCors.headers,'set','x-test','drop'),
+          mutate(noCors.headers,'set','content-type','application/json'),
+          mutate(noCors.headers,'set','content-type','multipart/form-data; boundary=x'),
+          mutate(noCors.headers,'set','range','bytes=0-10')
+        ];
+
+        const response = new Response('ok', {headers:[['x-start','one'],['set-cookie','a=1']]});
+        const responseInitial = [Array.from(response.headers), response.headers.getSetCookie()];
+        const responseMutations = [
+          mutate(response.headers,'set','x-ok','two'),
+          mutate(response.headers,'set','set-cookie','drop')
+        ];
+
+        const fetched = await fetch('data:text/plain;charset=utf-8,hello');
+        const immutable = [
+          mutate(fetched.headers,'set','x-test','one'),
+          outcome(() => fetched.headers.set('bad name','x')),
+          outcome(() => fetched.headers.set('x-test','a\nb')),
+          mutate(new Headers(fetched.headers),'set','x-test','copy')
+        ];
+        const staticGuards = [
+          mutate(Response.error().headers,'set','x-test','error'),
+          mutate(Response.redirect('https://audit.example/next').headers,'set','x-test','redirect'),
+          mutate(Response.json({ok:true}).headers,'set','x-test','json')
+        ];
+        return JSON.stringify({requestInitial,requestMutations,requestCopy,requestClone,
+          noCorsInitial,noCorsMutations,responseInitial,responseMutations,immutable,staticGuards});
+      })()
+    "#;
+    let expected = r####"{"requestInitial":[["x-start","one"]],"requestMutations":[[["return",null],[["x-ok","two"],["x-start","one"]]],[["return",null],[["x-ok","two"],["x-start","one"]]],[["return",null],[["x-ok","two"],["x-start","one"]]],[["return",null],[["x-ok","two"],["x-start","one"]]]],"requestCopy":[["return",null],[["cookie","copy"],["x-ok","two"],["x-start","one"]]],"requestClone":[["return",null],[["x-ok","two"],["x-start","one"]]],"noCorsInitial":[["accept","text/plain"],["content-type","text/plain;charset=UTF-8"]],"noCorsMutations":[[["return",null],[["accept","text/plain"],["accept-language","en-US"],["content-type","text/plain;charset=UTF-8"]]],[["return",null],[["accept","text/plain"],["accept-language","en-US"],["content-type","text/plain;charset=UTF-8"]]],[["return",null],[["accept","text/plain"],["accept-language","en-US"],["content-type","text/plain;charset=UTF-8"]]],[["return",null],[["accept","text/plain"],["accept-language","en-US"],["content-type","multipart/form-data; boundary=x"]]],[["return",null],[["accept","text/plain"],["accept-language","en-US"],["content-type","multipart/form-data; boundary=x"]]]],"responseInitial":[[["content-type","text/plain;charset=UTF-8"],["x-start","one"]],[]],"responseMutations":[[["return",null],[["content-type","text/plain;charset=UTF-8"],["x-ok","two"],["x-start","one"]]],[["return",null],[["content-type","text/plain;charset=UTF-8"],["x-ok","two"],["x-start","one"]]]],"immutable":[[["TypeError","Failed to execute 'set' on 'Headers': Headers are immutable"],[["content-type","text/plain;charset=utf-8"]]],["TypeError","Failed to execute 'set' on 'Headers': Invalid name"],["TypeError","Failed to execute 'set' on 'Headers': Invalid value"],[["return",null],[["content-type","text/plain;charset=utf-8"],["x-test","copy"]]]],"staticGuards":[[["TypeError","Failed to execute 'set' on 'Headers': Headers are immutable"],[]],[["TypeError","Failed to execute 'set' on 'Headers': Headers are immutable"],[["location","https://audit.example/next"]]],[["return",null],[["content-type","application/json"],["x-test","json"]]]]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct Headers guard runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced Headers guard runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
 fn network_replay_drives_fetch_xhr_and_module_loading() {
     let mut options = EdgeRuntimeOptions::default();
     let mut fetch_entry =
@@ -2055,7 +2128,8 @@ fn edge_clock_semantics_link_performance_date_events_timers_and_animation_frames
           requestAnimationFrame(timestamp => {
             edgeRafAnswer = [
               timestamp - start,
-              Math.abs(timestamp - performance.now())
+              performance.now() - timestamp,
+              document.timeline.currentTime === timestamp
             ].join(",");
           });
           setTimeout(() => {
@@ -2113,13 +2187,21 @@ fn edge_clock_semantics_link_performance_date_events_timers_and_animation_frames
         ]
     );
 
-    let raf = text(&mut runtime, "edgeRafAnswer")
-        .split(',')
-        .map(|value| value.parse::<f64>().expect("RAF value"))
-        .collect::<Vec<_>>();
-    assert_eq!(raf.len(), 2);
-    assert!(raf[0] >= 15.0, "RAF timestamp delta was {}", raf[0]);
-    assert!(raf[1] <= 0.3, "RAF/performance skew was {}", raf[1]);
+    let raf_text = text(&mut runtime, "edgeRafAnswer");
+    let raf = raf_text.split(',').collect::<Vec<_>>();
+    assert_eq!(raf.len(), 3);
+    let raf_delta = raf[0].parse::<f64>().expect("RAF timestamp delta");
+    let raf_skew = raf[1].parse::<f64>().expect("RAF/performance skew");
+    assert!(raf_delta >= 15.0, "RAF timestamp delta was {raf_delta}");
+    assert!(
+        raf_skew >= -0.000001,
+        "RAF timestamp was unexpectedly in the future by {}ms",
+        -raf_skew
+    );
+    assert_eq!(
+        raf[2], "true",
+        "document timeline did not use the RAF timestamp"
+    );
 }
 
 #[test]
@@ -2135,7 +2217,10 @@ fn performance_now_uses_a_realm_relative_monotonic_100_microsecond_grid() {
           for (let index = 0; index < 100000; index++) {
             const current = performance.now();
             nonMonotonic ||= current < previous;
-            offGrid ||= Math.abs(current * 10 - Math.round(current * 10)) > 1e-7;
+            // Edge exposes the 100us grid after subtracting an absolute
+            // platform monotonic origin, so normal IEEE-754 cancellation can
+            // leave a sub-microsecond residue around the logical grid.
+            offGrid ||= Math.abs(current * 10 - Math.round(current * 10)) > 1e-4;
             previous = current;
           }
           const parentNowAtChildCreation = performance.now();
@@ -3285,6 +3370,33 @@ fn idle_deadlines_and_timeout_flags_use_the_unified_monotonic_clock() {
 }
 
 #[test]
+fn nested_idle_callback_runs_in_the_next_idle_period() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let values = text(
+        &mut runtime,
+        r#"
+        new Promise(resolve => {
+          requestIdleCallback(first => {
+            const firstBudget = first.timeRemaining();
+            const requestedAt = performance.now();
+            requestIdleCallback(second => {
+              const secondBudget = second.timeRemaining();
+              resolve([
+                first.didTimeout,
+                firstBudget > 0 && firstBudget <= 17,
+                second.didTimeout,
+                performance.now() - requestedAt >= 15,
+                secondBudget > 0 && secondBudget <= 17
+              ].join("|"));
+            });
+          });
+        })
+        "#,
+    );
+    assert_eq!(values, "false|true|false|true|true");
+}
+
+#[test]
 fn abort_signal_timeout_and_scheduler_delays_are_asynchronous_clock_tasks() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     text(
@@ -3306,6 +3418,815 @@ fn abort_signal_timeout_and_scheduler_delays_are_asynchronous_clock_tasks() {
     assert_eq!(
         text(&mut runtime, "clockTaskOrder.join('|')"),
         "initial:false|abort:TimeoutError|postTask|yield"
+    );
+}
+
+#[test]
+fn scheduler_honors_priority_and_aborted_signals() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.schedulerSemantics = [];
+        const controller = new TaskController({ priority: "background" });
+        scheduler.postTask(
+          () => schedulerSemantics.push("cancelled-callback"),
+          { delay: 20, signal: controller.signal }
+        ).then(
+          () => schedulerSemantics.push("cancelled-fulfilled"),
+          error => schedulerSemantics.push(`cancelled-${error.name}`)
+        );
+        controller.abort();
+        scheduler.postTask(
+          () => schedulerSemantics.push("background"),
+          { priority: "background" }
+        );
+        scheduler.postTask(
+          () => schedulerSemantics.push("user-blocking"),
+          { priority: "user-blocking" }
+        );
+        "#,
+    );
+    assert_eq!(
+        text(&mut runtime, "schedulerSemantics.join('|')"),
+        "user-blocking|background|cancelled-AbortError"
+    );
+}
+
+#[test]
+fn timer_task_microtasks_inherit_the_current_timer_nesting_level() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.deterministic.clock_epoch_ms = Some(1_700_000_000_000);
+    options.deterministic.clock_step_ms = 0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("deterministic Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.timerNestingValues = [];
+        new Promise(resolve => setTimeout(resolve, 0)).then(() => {
+          const started = performance.now();
+          const next = () => {
+            timerNestingValues.push(performance.now() - started);
+            if (timerNestingValues.length < 9) setTimeout(next, 0);
+          };
+          setTimeout(next, 0);
+        });
+        "#,
+    );
+    assert_eq!(
+        text(&mut runtime, "timerNestingValues.join(',')"),
+        "0,0,0,0,0,4,8,12,16"
+    );
+}
+
+#[test]
+fn animation_svg_and_performance_observer_clocks_advance_and_produce_entries() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.advancingClockResults = { animation: [], svg: [], svgAnimation: [], entries: [] };
+        const animated = document.createElement("div").animate(
+          [{ opacity: 0 }, { opacity: 1 }],
+          { duration: 1000 }
+        );
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        const svgAnimation = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+        svg.appendChild(svgAnimation);
+        document.body.appendChild(svg);
+        const svgStart = svg.getCurrentTime();
+        const svgAnimationStart = svgAnimation.getCurrentTime();
+        new PerformanceObserver(list => {
+          advancingClockResults.entries.push(...list.getEntries().map(entry => [
+            entry.entryType,
+            entry.duration,
+            Object.prototype.toString.call(entry)
+          ]));
+        }).observe({ entryTypes: ["longtask", "long-animation-frame"] });
+        const topLevelStart = performance.now();
+        while (performance.now() - topLevelStart < 55) {}
+        requestAnimationFrame(() => {
+          advancingClockResults.animation.push(animated.currentTime);
+          requestAnimationFrame(() => {
+            const frameStart = performance.now();
+            while (performance.now() - frameStart < 55) {}
+            advancingClockResults.animation.push(animated.currentTime);
+            advancingClockResults.svg = [svgStart, svg.getCurrentTime()];
+            advancingClockResults.svgAnimation = [svgAnimationStart, svgAnimation.getCurrentTime()];
+          });
+        });
+        "#,
+    );
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const types = advancingClockResults.entries.map(entry => entry[0]);
+              return [
+                advancingClockResults.animation.length === 2,
+                advancingClockResults.animation[0] === 0,
+                advancingClockResults.animation[1] > advancingClockResults.animation[0],
+                advancingClockResults.svg[1] > advancingClockResults.svg[0],
+                advancingClockResults.svgAnimation[1] > advancingClockResults.svgAnimation[0],
+                types.includes("longtask"),
+                types.includes("long-animation-frame"),
+                advancingClockResults.entries.every(entry => entry[1] >= 50),
+                advancingClockResults.entries.some(entry => entry[2] === "[object PerformanceLongTaskTiming]"),
+                advancingClockResults.entries.some(entry => entry[2] === "[object PerformanceLongAnimationFrameTiming]")
+              ].join("|");
+            })()
+            "#,
+        ),
+        "true|true|true|true|true|true|true|true|true|true"
+    );
+}
+
+#[test]
+fn performance_observer_buffered_delivers_historical_long_tasks_and_loaf_entries() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        const historicalLongTaskStart = performance.now();
+        while (performance.now() - historicalLongTaskStart < 55) {}
+        requestAnimationFrame(() => {
+          const historicalFrameStart = performance.now();
+          while (performance.now() - historicalFrameStart < 55) {}
+        });
+        "#,
+    );
+    text(
+        &mut runtime,
+        r#"
+        globalThis.historicalPerformanceEntries = [];
+        for (const type of ["longtask", "long-animation-frame"]) {
+          new PerformanceObserver(list => {
+            historicalPerformanceEntries.push(...list.getEntries().map(entry => entry.entryType));
+          }).observe({ type, buffered: true });
+        }
+        "#,
+    );
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"[
+              historicalPerformanceEntries.filter(type => type === "longtask").length >= 2,
+              historicalPerformanceEntries.includes("long-animation-frame"),
+              performance.getEntriesByType("longtask").length,
+              performance.getEntriesByType("long-animation-frame").length >= 1
+            ].join("|")"#,
+        ),
+        "true|true|0|true"
+    );
+}
+
+#[test]
+fn rendering_updates_produce_element_lcp_and_layout_shift_entries() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.renderingEntryTypes = [];
+        for (const type of ["element", "largest-contentful-paint", "layout-shift"]) {
+          new PerformanceObserver(list => {
+            renderingEntryTypes.push(...list.getEntries().map(entry => entry.entryType));
+          }).observe({ type, buffered: true });
+        }
+        const timed = document.createElement("div");
+        timed.id = "timed-content";
+        timed.setAttribute("elementtiming", "timed-identifier");
+        timed.style.cssText = "width:400px;height:80px";
+        timed.textContent = "contentful text";
+        document.body.appendChild(timed);
+        globalThis.renderingEntryRects = [];
+        requestAnimationFrame(() => {
+          renderingEntryRects.push(timed.getBoundingClientRect().y);
+          requestAnimationFrame(() => {
+            timed.setAttribute("style", "width:400px;height:80px;margin-top:40px");
+            renderingEntryRects.push(timed.getBoundingClientRect().y);
+          });
+        });
+        "#,
+    );
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"[
+              renderingEntryTypes.includes("element"),
+              renderingEntryTypes.includes("largest-contentful-paint"),
+              renderingEntryTypes.includes("layout-shift"),
+              renderingEntryRects.join(",")
+            ].join("|")"#,
+        ),
+        "true|true|true|8,48"
+    );
+}
+
+#[test]
+fn image_element_timing_waits_for_load_and_truncates_the_exposed_url() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    text(
+        &mut runtime,
+        r#"
+        globalThis.imageTimingEntries = [];
+        new PerformanceObserver(list => {
+          imageTimingEntries.push(...list.getEntries());
+        }).observe({type: "element", buffered: true});
+        globalThis.timedImage = document.createElement("img");
+        timedImage.setAttribute("elementtiming", "loaded-image");
+        timedImage.width = 320;
+        timedImage.height = 180;
+        timedImage.src = "data:image/svg+xml," + encodeURIComponent(
+          "<svg xmlns='http://www.w3.org/2000/svg' width='320' height='180'>" +
+          "<rect width='320' height='180' fill='navy'/></svg>"
+        );
+        document.body.appendChild(timedImage);
+        requestAnimationFrame(() => requestAnimationFrame(() => {}));
+        "#,
+    );
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const entry = imageTimingEntries.find(value => value.identifier === "loaded-image");
+              return [
+                timedImage.complete,
+                timedImage.currentSrc.length > 100,
+                entry && entry.url.length,
+                entry && entry.url === timedImage.currentSrc.slice(0, 100),
+                entry && entry.loadTime <= entry.renderTime
+              ].join("|");
+            })()
+            "#,
+        ),
+        "true|true|100|true|true"
+    );
+}
+
+#[test]
+fn host_click_is_trusted_and_produces_event_timing_without_trusting_script_dispatch() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let setup = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const button = document.createElement("button");
+          button.id = "host-click-target";
+          button.style.cssText =
+            "position:fixed;left:100px;top:100px;width:80px;height:30px";
+          document.body.appendChild(button);
+          globalThis.hostClickEvents = [];
+          globalThis.hostClickRetained = null;
+          globalThis.hostInteractionId = 0;
+          globalThis.hostInteractionIds = [];
+          const normalizedInteractionId = entry => {
+            if (entry.interactionId === 0) return 0;
+            hostInteractionId ||= entry.interactionId;
+            hostInteractionIds.push(entry.interactionId);
+            return entry.interactionId === hostInteractionId
+              ? "interaction"
+              : "mismatch";
+          };
+          for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+            button.addEventListener(type, event => {
+              hostClickEvents.push([
+                type,
+                event.isTrusted,
+                event.clientX,
+                event.clientY,
+                event instanceof PointerEvent,
+                event instanceof MouseEvent
+              ].join(":"));
+              if (type === "click" && event.isTrusted) hostClickRetained = event;
+            });
+          }
+          globalThis.hostEventEntries = [];
+          globalThis.hostFirstEntries = [];
+          const durationBucket = duration =>
+            duration > 0 && Number.isInteger(duration / 8) ? "8ms-bucket" : duration;
+          new PerformanceObserver(list => {
+            hostEventEntries.push(...list.getEntries().map(entry =>
+              [entry.name, entry.entryType, durationBucket(entry.duration),
+               normalizedInteractionId(entry),
+               entry.target === button].join(":")));
+          }).observe({type: "event"});
+          new PerformanceObserver(list => {
+            hostFirstEntries.push(...list.getEntries().map(entry =>
+              [entry.name, entry.entryType, durationBucket(entry.duration),
+               normalizedInteractionId(entry),
+               entry.target === button].join(":")));
+          }).observe({type: "first-input", buffered: true});
+          return "ready";
+        })()
+        "#,
+    );
+    assert_eq!(setup, "ready");
+    assert!(
+        runtime
+            .dispatch_host_click(&crate::HostClickInput::primary(120.0, 115.0))
+            .expect("host click")
+    );
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const beforeSynthetic = hostClickEvents.join("|");
+          document.getElementById("host-click-target").dispatchEvent(hostClickRetained);
+          return [
+            beforeSynthetic,
+            hostClickEvents.at(-1),
+            document.activeElement.id,
+            performance.eventCounts.get("pointerdown"),
+            performance.eventCounts.get("click"),
+            performance.interactionCount,
+            hostInteractionId >= 107 && hostInteractionId <= 10007,
+            hostEventEntries.join("|"),
+            hostFirstEntries.join("|")
+          ].join("||");
+        })()
+        "#,
+    );
+    assert_eq!(
+        result,
+        concat!(
+            "pointerdown:true:120:115:true:true|",
+            "mousedown:true:120:115:false:true|",
+            "pointerup:true:120:115:true:true|",
+            "mouseup:true:120:115:false:true|",
+            "click:true:120:115:true:true||",
+            "click:false:120:115:true:true||",
+            "host-click-target||1||1||1||true||",
+            "pointerover:event:8ms-bucket:0:true|",
+            "pointerenter:event:8ms-bucket:0:false|pointerenter:event:8ms-bucket:0:false|",
+            "pointerenter:event:8ms-bucket:0:false|pointerenter:event:8ms-bucket:0:false|",
+            "mouseover:event:8ms-bucket:0:true|",
+            "pointerdown:event:8ms-bucket:interaction:true|mousedown:event:8ms-bucket:0:true|",
+            "pointerup:event:8ms-bucket:interaction:true|mouseup:event:8ms-bucket:0:true|click:event:8ms-bucket:interaction:true||",
+            "pointerdown:first-input:8ms-bucket:interaction:true"
+        )
+    );
+    assert!(
+        runtime
+            .dispatch_host_click(&crate::HostClickInput::primary(120.0, 115.0))
+            .expect("second host click")
+    );
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const ids = [...new Set(hostInteractionIds)];
+              return [
+                ids.length,
+                ids[0] === hostInteractionId,
+                ids[1] - ids[0]
+              ].join("|");
+            })()
+            "#,
+        ),
+        "2|true|7"
+    );
+}
+
+#[test]
+fn normal_flow_block_rects_stack_and_collapse_adjacent_vertical_margins() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const first = document.createElement("div");
+              first.style.cssText = "width:100px;height:20px;margin-bottom:10px";
+              const second = document.createElement("div");
+              second.style.cssText = "width:100px;height:30px;margin-top:15px";
+              document.body.append(first, second);
+              const firstRect = first.getBoundingClientRect();
+              const secondRect = second.getBoundingClientRect();
+              return [
+                firstRect.x, firstRect.y, firstRect.width, firstRect.height,
+                secondRect.x, secondRect.y, secondRect.width, secondRect.height
+              ].join("|");
+            })()
+            "#,
+        ),
+        "8|8|100|20|8|43|100|30"
+    );
+}
+
+#[test]
+fn windows_button_intrinsics_and_mixed_inline_block_flow_match_edge_https_evidence() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.screen.viewport_width = 1280.0;
+    options.fingerprint.screen.viewport_height = 720.0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              document.body.replaceChildren();
+              const button = document.createElement("button");
+              button.textContent = "Performance event target";
+              const block = document.createElement("div");
+              block.style.cssText = "font-size:48px;width:700px;height:100px";
+              const image = document.createElement("img");
+              image.width = 320;
+              image.height = 180;
+              document.body.append(button, block, image);
+              const rect = element => {
+                const value = element.getBoundingClientRect();
+                return [value.x, value.y, value.width, value.height].join(",");
+              };
+              const style = getComputedStyle(button);
+              return [
+                rect(button), rect(block), rect(image),
+                style.display, style.font, style.padding, style.border
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "8,10,166.421875,21|8,31,700,100|8,131,320,180|",
+            "inline-block|13.3333px Arial|1px 6px|2px outset rgb(0, 0, 0)"
+        )
+    );
+}
+
+#[test]
+fn inline_flex_grid_and_positioned_layout_match_edge_https_evidence() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.screen.viewport_width = 1280.0;
+    options.fingerprint.screen.viewport_height = 720.0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const rect = element => {
+                const value = element.getBoundingClientRect();
+                return [value.x, value.y, value.width, value.height].join(",");
+              };
+              const make = (tag, style) => {
+                const value = document.createElement(tag);
+                value.style.cssText = style;
+                return value;
+              };
+              document.body.replaceChildren();
+              document.body.style.cssText = "margin:8px";
+
+              const inline = make("div", "width:140px;height:50px");
+              const inlineA = make("span", "display:inline-block;width:40px;height:20px;margin-right:5px");
+              const inlineB = make("span", "display:inline-block;width:50px;height:20px;margin-left:3px");
+              inline.append(inlineA, inlineB);
+              document.body.appendChild(inline);
+
+              const flex = make("div", "display:flex;width:240px;height:80px;gap:10px;justify-content:center;align-items:center;margin-top:10px");
+              const flexA = make("div", "width:40px;height:20px");
+              const flexB = make("div", "width:60px;height:30px");
+              flex.append(flexA, flexB);
+              document.body.appendChild(flex);
+
+              const grid = make("div", "display:grid;grid-template-columns:70px 90px;column-gap:8px;row-gap:6px;width:220px;margin-top:10px");
+              const gridA = make("div", "height:20px");
+              const gridB = make("div", "height:30px");
+              const gridC = make("div", "height:15px");
+              grid.append(gridA, gridB, gridC);
+              document.body.appendChild(grid);
+
+              const relative = make("div", "position:relative;width:200px;height:100px;margin-top:10px;padding:5px;border:2px solid black");
+              const absolute = make("div", "position:absolute;left:25%;top:10px;width:50%;height:20px");
+              relative.appendChild(absolute);
+              document.body.appendChild(relative);
+
+              return [
+                rect(document.body),
+                rect(inline), rect(inlineA), rect(inlineB),
+                rect(flex), rect(flexA), rect(flexB),
+                rect(grid), rect(gridA), rect(gridB), rect(gridC),
+                rect(relative), rect(absolute)
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "8,8,1264,325|8,8,140,50|8,8,40,20|56,8,50,20|",
+            "8,68,240,80|73,98,40,20|123,93,60,30|",
+            "8,158,220,51|8,158,70,20|86,158,90,30|8,194,70,15|",
+            "8,219,214,114|62.5,231,105,20"
+        )
+    );
+}
+
+#[test]
+fn computed_style_includes_edge_user_agent_display_defaults_and_hidden_rule() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const names = ["div", "span", "table", "tbody", "tr", "td", "li", "img", "script"];
+              const elements = names.map(name => document.createElement(name));
+              elements.forEach(element => document.body.appendChild(element));
+              const displays = elements.map(element => getComputedStyle(element).display);
+              const detached = document.createElement("div");
+              detached.style.display = "block";
+              const hidden = document.createElement("div");
+              hidden.hidden = true;
+              document.body.appendChild(hidden);
+              const untilFound = document.createElement("div");
+              untilFound.setAttribute("hidden", "until-found");
+              document.body.appendChild(untilFound);
+              return [
+                ...displays,
+                getComputedStyle(detached).display,
+                getComputedStyle(hidden).display,
+                getComputedStyle(untilFound).display,
+                getComputedStyle(elements[0]).length,
+                getComputedStyle(elements[0]).item(0),
+                getComputedStyle(elements[0]).item(473),
+                getComputedStyle(elements[0]).cssText
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "block|inline|table|table-row-group|table-row|table-cell|list-item|inline|none|",
+            "|none|block|474|accent-color|-webkit-writing-mode|"
+        )
+    );
+}
+
+#[test]
+fn connected_div_exposes_all_474_edge_computed_values_without_empty_slots() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.screen.viewport_width = 1280.0;
+    options.fingerprint.screen.viewport_height = 720.0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const element = document.createElement("div");
+              document.body.appendChild(element);
+              const style = getComputedStyle(element);
+              const empty = Array.from(style).filter(name => style.getPropertyValue(name) === "");
+              const keys = Reflect.ownKeys(style);
+              const zero = Object.getOwnPropertyDescriptor(style, "0");
+              return [
+                style.length,
+                empty.length,
+                style.accentColor,
+                style.scrollbarColor,
+                style.stroke,
+                style.width,
+                style.height,
+                style.inlineSize,
+                style.blockSize,
+                style.transformOrigin,
+                style.perspectiveOrigin,
+                keys.length,
+                keys.slice(0, 5).join(","),
+                keys.slice(-5).join(","),
+                zero.value,
+                zero.writable,
+                zero.enumerable,
+                zero.configurable
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "474|0|auto|auto|none|1264px|0px|1264px|0px|632px 0px|632px 0px|",
+            "1218|0,1,2,3,4|writingMode,x,y,zIndex,zoom|",
+            "accent-color|false|true|true"
+        )
+    );
+}
+
+#[test]
+fn computed_style_inherits_edge_text_list_svg_and_interaction_properties() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const parent = document.createElement("div");
+              parent.style.cssText = [
+                "color:rgb(4,5,6)", "direction:rtl", "font-family:Arial",
+                "font-size:20px", "font-weight:700", "line-height:30px",
+                "text-align:right", "visibility:hidden", "cursor:pointer",
+                "white-space:pre", "letter-spacing:2px", "word-spacing:3px",
+                "text-transform:uppercase", "fill:rgb(7,8,9)",
+                "stroke:rgb(10,11,12)", "list-style-position:inside",
+                "list-style-type:square", "tab-size:7"
+              ].join(";");
+              const child = document.createElement("div");
+              parent.appendChild(child);
+              document.body.appendChild(parent);
+              const style = getComputedStyle(child);
+              return [
+                style.color, style.direction, style.fontFamily, style.fontSize,
+                style.fontWeight, style.lineHeight, style.textAlign,
+                style.visibility, style.cursor, style.whiteSpace,
+                style.letterSpacing, style.wordSpacing, style.textTransform,
+                style.fill, style.stroke, style.listStylePosition,
+                style.listStyleType, style.tabSize
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "rgb(4, 5, 6)|rtl|Arial|20px|700|30px|right|hidden|pointer|pre|",
+            "2px|3px|uppercase|rgb(7, 8, 9)|rgb(10, 11, 12)|inside|square|7"
+        )
+    );
+}
+
+#[test]
+fn computed_currentcolor_dependents_follow_the_inherited_edge_color() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const parent = document.createElement("div");
+              parent.style.color = "rgb(31,32,33)";
+              const child = document.createElement("div");
+              parent.appendChild(child);
+              document.body.appendChild(parent);
+              const style = getComputedStyle(child);
+              return [
+                style.borderTopColor, style.borderRightColor,
+                style.borderBottomColor, style.borderLeftColor,
+                style.borderBlockStartColor, style.borderBlockEndColor,
+                style.borderInlineStartColor, style.borderInlineEndColor,
+                style.caretColor, style.columnRuleColor, style.outlineColor,
+                style.textDecorationColor, style.textEmphasisColor,
+                style.webkitTextFillColor, style.webkitTextStrokeColor
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "rgb(31, 32, 33)|rgb(31, 32, 33)|rgb(31, 32, 33)|",
+            "rgb(31, 32, 33)|rgb(31, 32, 33)|rgb(31, 32, 33)|",
+            "rgb(31, 32, 33)|rgb(31, 32, 33)|rgb(31, 32, 33)|",
+            "rgb(31, 32, 33)|rgb(31, 32, 33)|rgb(31, 32, 33)|",
+            "rgb(31, 32, 33)|rgb(31, 32, 33)|rgb(31, 32, 33)"
+        )
+    );
+}
+
+#[test]
+fn computed_style_inherits_extended_edge_table_typography_and_webkit_properties() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const parent = document.createElement("div");
+              parent.style.cssText = [
+                "border-collapse:collapse", "border-spacing:5px 6px",
+                "caption-side:bottom", "color-scheme:dark", "empty-cells:hide",
+                'font-feature-settings:"kern" 0', "font-kerning:none",
+                "font-optical-sizing:none", "font-variant-caps:small-caps",
+                'font-variation-settings:"wght" 500', "hyphens:none",
+                "image-rendering:pixelated", "line-break:strict", "orphans:3",
+                "overflow-wrap:anywhere", "pointer-events:none",
+                'quotes:"<" ">"', "ruby-position:under",
+                "text-decoration-skip-ink:none",
+                "text-emphasis-color:rgb(13,14,15)",
+                "text-emphasis-position:under", "text-indent:9px",
+                "text-rendering:optimizelegibility",
+                "text-shadow:rgb(16,17,18) 1px 2px 3px",
+                "text-size-adjust:80%", "widows:4", "word-break:break-all",
+                "writing-mode:vertical-rl",
+                "-webkit-text-fill-color:rgb(19,20,21)",
+                "-webkit-text-stroke-color:rgb(22,23,24)",
+                "-webkit-text-stroke-width:2px"
+              ].join(";");
+              const child = document.createElement("div");
+              parent.appendChild(child);
+              document.body.appendChild(parent);
+              const style = getComputedStyle(child);
+              const names = [
+                "border-collapse", "border-spacing", "caption-side", "color-scheme",
+                "empty-cells", "font-feature-settings", "font-kerning",
+                "font-optical-sizing", "font-variant-caps", "font-variation-settings",
+                "hyphens", "image-rendering", "line-break", "orphans",
+                "overflow-wrap", "pointer-events", "quotes", "ruby-position",
+                "text-decoration-skip-ink", "text-emphasis-color",
+                "text-emphasis-position", "text-indent", "text-rendering",
+                "text-shadow", "text-size-adjust", "widows", "word-break",
+                "writing-mode", "-webkit-text-fill-color",
+                "-webkit-text-stroke-color", "-webkit-text-stroke-width"
+              ];
+              return names.map(name => style.getPropertyValue(name)).join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "collapse|5px 6px|bottom|dark|hide|\"kern\" 0|none|none|small-caps|",
+            "\"wght\" 500|none|pixelated|strict|3|anywhere|none|\"<\" \">\"|",
+            "under|none|rgb(13, 14, 15)|under|9px|optimizelegibility|",
+            "rgb(16, 17, 18) 1px 2px 3px|80%|4|break-all|vertical-rl|",
+            "rgb(19, 20, 21)|rgb(22, 23, 24)|2px"
+        )
+    );
+}
+
+#[test]
+fn computed_style_resolves_edge_core_initial_values_and_shorthands() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const element = document.createElement("div");
+              element.style.cssText = "width:140px;height:50px";
+              document.body.appendChild(element);
+              const value = getComputedStyle(element);
+              return [
+                value.font, value.fontFamily, value.fontSize, value.fontStyle,
+                value.fontWeight, value.lineHeight, value.color, value.visibility,
+                value.position, value.boxSizing, value.width, value.height,
+                value.padding, value.borderTopWidth,
+                value.getPropertyValue("font"), value.getPropertyValue("padding")
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "16px \"Times New Roman\"|\"Times New Roman\"|16px|normal|400|normal|",
+            "rgb(0, 0, 0)|visible|static|content-box|140px|50px|0px|0px|",
+            "16px \"Times New Roman\"|0px"
+        )
+    );
+}
+
+#[test]
+fn default_times_new_roman_canvas_width_matches_edge_150_evidence() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let value = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const context = document.createElement("canvas").getContext("2d");
+          context.font = '48px "Times New Roman"';
+          return context.measureText(
+            "A large contentful text element used by the browser API audit"
+          ).width;
+        })()
+        "#,
+    )
+    .parse::<f64>()
+    .expect("Canvas width");
+    assert!((value - 1190.7890625).abs() < 0.000_001, "width={value}");
+}
+
+#[test]
+fn cross_origin_isolation_selects_edge_high_resolution_clock_precision() {
+    let options = EdgeRuntimeOptions {
+        cross_origin_isolated: true,
+        ..Default::default()
+    };
+    let mut runtime = EdgeRuntime::with_options(options).expect("isolated Edge runtime");
+    let values = text(
+        &mut runtime,
+        r#"
+        (() => {
+          let previous = performance.now();
+          let minimum = Infinity;
+          for (let index = 0; index < 500000; index++) {
+            const current = performance.now();
+            const delta = current - previous;
+            if (delta > 0 && delta < minimum) minimum = delta;
+            previous = current;
+          }
+          return [crossOriginIsolated, minimum].join("|");
+        })()
+        "#,
+    );
+    let mut values = values.split('|');
+    assert_eq!(values.next(), Some("true"));
+    let minimum = values
+        .next()
+        .expect("isolated clock minimum")
+        .parse::<f64>()
+        .expect("numeric isolated clock minimum");
+    assert!(
+        (0.004..0.1).contains(&minimum),
+        "isolated clock resolution was {minimum}ms"
     );
 }
 
@@ -3360,5 +4281,484 @@ fn deterministic_same_deadline_timers_keep_cross_realm_registration_order() {
     assert_eq!(
         text(&mut runtime, "sameDeadlineOrder.join(',')"),
         "child,parent"
+    );
+}
+
+#[test]
+fn computed_overflow_shorthand_and_inherited_writing_mode_drive_used_axes() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const parent = document.createElement("div");
+              parent.style.cssText =
+                "width:120px;height:80px;overflow:auto;writing-mode:vertical-rl";
+              const child = document.createElement("div");
+              child.style.cssText = "width:20px;height:10px";
+              parent.appendChild(child);
+              document.body.appendChild(parent);
+              const parentStyle = getComputedStyle(parent);
+              const childStyle = getComputedStyle(child);
+              const probe = document.createElement("div");
+              probe.style.cssText =
+                "font:italic small-caps 700 16px/20px Arial;overflow-x:hidden;overflow:auto;text-size-adjust:80%";
+              document.body.appendChild(probe);
+              const probeStyle = getComputedStyle(probe);
+              const firstOverflow = `${probeStyle.overflowX},${probeStyle.overflowY}`;
+              const fontValues = [
+                probe.style.fontFamily,
+                probeStyle.fontFamily,
+                probeStyle.fontSize,
+                probeStyle.lineHeight,
+                probeStyle.webkitTextSizeAdjust
+              ].join(",");
+              probe.style.cssText = "overflow:auto;overflow-x:hidden";
+              const secondProbeStyle = getComputedStyle(probe);
+              return [
+                parentStyle.overflowX,
+                parentStyle.overflowY,
+                childStyle.writingMode,
+                childStyle.inlineSize,
+                childStyle.blockSize,
+                firstOverflow,
+                fontValues,
+                `${secondProbeStyle.overflowX},${secondProbeStyle.overflowY}`
+              ].join("|");
+            })()
+            "#,
+        ),
+        "auto|auto|vertical-rl|10px|20px|auto,auto|Arial,Arial,16px,20px,80%|hidden,auto"
+    );
+}
+
+#[test]
+fn edge_static_webidl_factories_and_descriptors_match_their_platform_shapes() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const point = DOMPoint.fromPoint({x: 2, y: 3, z: 4, w: 5});
+              const rect = DOMRect.fromRect({x: 1, y: 2, width: -3, height: -4});
+              const quad = DOMQuad.fromRect({x: 1, y: 2, width: 3, height: 4});
+              const matrix = DOMMatrixReadOnly.fromFloat32Array(
+                new Float32Array([1, 2, 3, 4, 5, 6])
+              );
+              const safe = Document.parseHTML(
+                '<script>bad()</script><p onclick="x()">t</p>'
+              );
+              const unsafe = Document.parseHTMLUnsafe(
+                '<script>bad()</script><p onclick="x()">t</p>'
+              );
+              const sources = PressureObserver.knownSources;
+              const fullscreen = Object.getOwnPropertyDescriptor(
+                Document.prototype,
+                "fullscreen"
+              );
+              const before = document.fullscreen;
+              document.fullscreen = true;
+              return [
+                point.constructor.name,
+                [point.x, point.y, point.z, point.w].join(","),
+                [rect.top, rect.right, rect.bottom, rect.left].join(","),
+                [quad.p1.x, quad.p2.x, quad.p3.y, quad.p4.y].join(","),
+                Array.from(matrix.toFloat64Array()).join(","),
+                [safe.URL, safe.body.innerHTML, safe.scripts.length].join(","),
+                [unsafe.URL, unsafe.body.innerHTML, unsafe.scripts.length].join(","),
+                [
+                  HTMLScriptElement.supports("classic"),
+                  HTMLScriptElement.supports("module"),
+                  HTMLScriptElement.supports("text/javascript")
+                ].join(","),
+                [
+                  sources.join(","),
+                  sources === PressureObserver.knownSources,
+                  Object.isFrozen(sources)
+                ].join(","),
+                [
+                  fullscreen.set.name,
+                  fullscreen.set.length,
+                  Function.prototype.toString.call(fullscreen.set),
+                  before === document.fullscreen,
+                  !Object.hasOwn(document, "fullscreen")
+                ].join(",")
+              ].join("|");
+            })()
+            "#,
+        ),
+        "DOMPoint|2,3,4,5|-2,1,2,-2|1,4,6,6|1,2,0,0,3,4,0,0,0,0,1,0,5,6,0,1|about:blank,<p>t</p>,0|about:blank,<p onclick=\"x()\">t</p>,1|true,true,false|cpu,true,true|set fullscreen,1,function set fullscreen() { [native code] },true,true"
+    );
+}
+
+#[test]
+fn dom_matrix_typed_array_factories_match_edge_type_and_length_conversion() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const capture = callback => {
+                try { callback(); return "no error"; }
+                catch (error) { return `${error.name}: ${error.message}`; }
+              };
+              const mutable = DOMMatrix.fromFloat32Array(
+                new Float32Array([1, 2, 3, 4, 5, 6])
+              );
+              return [
+                Array.from(mutable.toFloat64Array()).join(","),
+                mutable.constructor.name,
+                capture(() => DOMMatrix.fromFloat32Array([1, 2, 3, 4, 5, 6])),
+                capture(() => DOMMatrix.fromFloat64Array()),
+                capture(() => DOMMatrix.fromFloat64Array(new Float64Array(5))),
+                capture(() => DOMMatrixReadOnly.fromFloat32Array()),
+                capture(() => DOMMatrixReadOnly.fromFloat32Array(new Float32Array(5))),
+                capture(() => DOMMatrixReadOnly.fromFloat64Array(new Float64Array(5)))
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "1,2,0,0,3,4,0,0,0,0,1,0,5,6,0,1|DOMMatrix|",
+            "TypeError: Failed to execute 'fromFloat32Array' on 'DOMMatrix': parameter 1 is not of type 'Float32Array'.|",
+            "TypeError: Failed to execute 'fromFloat64Array' on 'DOMMatrix': 1 argument required, but only 0 present.|",
+            "TypeError: Failed to execute 'fromFloat64Array' on 'DOMMatrix': The sequence must contain 6 elements for a 2D matrix or 16 elements for a 3D matrix.|",
+            "TypeError: Failed to execute 'fromFloat32Array' on 'DOMMatrixReadOnly': 1 argument required, but only 0 present.|",
+            "TypeError: Failed to execute 'fromFloat32Array' on 'DOMMatrixReadOnly': The sequence must contain 6 elements for a 2D matrix or 16 elements a for 3D matrix.|",
+            "TypeError: Failed to execute 'fromFloat64Array' on 'DOMMatrixReadOnly': The sequence must contain 6 elements for a 2D matrix or 16 elements for a 3D matrix."
+        )
+    );
+}
+
+#[test]
+fn navigator_legacy_arrays_and_private_font_set_prototype_match_edge_exotics() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const descriptor = (object, key) => {
+                const value = Object.getOwnPropertyDescriptor(object, key);
+                return [value.writable, value.enumerable, value.configurable].join(",");
+              };
+              const plugins = navigator.plugins;
+              const mimeTypes = navigator.mimeTypes;
+              const pluginName = plugins[0].name;
+              const mimeName = mimeTypes[0].type;
+              const beforePlugin = plugins[0];
+              const beforeMime = mimeTypes[0];
+              let pluginWrite;
+              let mimeWrite;
+              try { Function("p", '"use strict"; p[0] = 1')(plugins); }
+              catch (error) { pluginWrite = error.name; }
+              try { Function("m", '"use strict"; m[0] = 1')(mimeTypes); }
+              catch (error) { mimeWrite = error.name; }
+              const fontPrototype = Object.getPrototypeOf(document.fonts);
+              return [
+                descriptor(plugins, "0"),
+                descriptor(plugins, pluginName),
+                descriptor(mimeTypes, "0"),
+                descriptor(mimeTypes, mimeName),
+                Object.keys(plugins).join(","),
+                Object.keys(mimeTypes).join(","),
+                delete plugins[0],
+                delete plugins[pluginName],
+                delete mimeTypes[0],
+                delete mimeTypes[mimeName],
+                plugins[0] === beforePlugin,
+                mimeTypes[0] === beforeMime,
+                pluginWrite,
+                mimeWrite,
+                Reflect.ownKeys(fontPrototype).map(String).join(","),
+                document.fonts.constructor.name,
+                !Object.hasOwn(fontPrototype, "constructor")
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "false,true,true|false,false,true|false,true,true|false,false,true|",
+            "0,1,2,3,4|0,1|false|false|false|false|true|true|TypeError|TypeError|",
+            "onloading,onloadingdone,onloadingerror,ready,status,size,check,load,add,clear,delete,entries,forEach,has,keys,values,Symbol(Symbol.toStringTag),Symbol(Symbol.iterator)|",
+            "EventTarget|true"
+        )
+    );
+}
+
+#[test]
+fn dom_collection_exotics_and_css_named_properties_match_edge_instances() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.page = Some(PageInit {
+        html: concat!(
+            "<!doctype html><html><head><style>.x{color:red}</style></head><body>",
+            "<form id=f><input id=i name=n class=\"a b\"><select id=s>",
+            "<option id=o>A</option></select></form>",
+            "<div id=d style=\"width:10px\"></div></body></html>"
+        )
+        .to_owned(),
+        ..PageInit::default()
+    });
+    let mut runtime = EdgeRuntime::with_options(options).expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const descriptor = (object, key) => {
+                const value = Object.getOwnPropertyDescriptor(object, key);
+                return value
+                  ? [value.writable, value.enumerable, value.configurable].join(",")
+                  : "missing";
+              };
+              const input = document.getElementById("i");
+              const select = document.getElementById("s");
+              const style = document.getElementById("d").style;
+              const rules = document.styleSheets[0].cssRules;
+              const types = new DataTransfer().types;
+              const option = new Option("X", "x");
+              select.options[3] = option;
+              return [
+                descriptor(input.attributes, "id"),
+                descriptor(input.attributes, "0"),
+                delete input.attributes.id,
+                Reflect.ownKeys(input.classList).join(","),
+                descriptor(input.classList, "0"),
+                delete input.classList[0],
+                descriptor(rules, "0"),
+                delete rules[0],
+                descriptor(document.body.children, "f"),
+                descriptor(document.getElementById("f").elements, "i"),
+                descriptor(select.options, "0"),
+                select.options[3] === option,
+                select.options.length,
+                select.textContent,
+                Object.isFrozen(types),
+                Object.getOwnPropertyDescriptor(types, "length").writable,
+                Reflect.ownKeys(style)
+                  .filter(key => !Object.getOwnPropertyDescriptor(style, key))
+                  .join(","),
+                "epubCaptionSide" in style
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "false,false,true|false,true,true|false|0,1|false,true,true|false|",
+            "false,true,true|false|false,false,true|false,true,true|true,true,true|",
+            "true|4|AX|true|false|",
+            "epubCaptionSide,epubTextCombine,epubTextEmphasis,epubTextEmphasisColor,",
+            "epubTextEmphasisStyle,epubTextOrientation,epubTextTransform,epubWordBreak,",
+            "epubWritingMode|false"
+        )
+    );
+}
+
+#[test]
+fn webidl_array_like_iterators_remain_generic_like_edge() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const receiver = {0: "x", 1: "y", length: 2};
+              const entries = [[0, "x"], [1, "y"]];
+              const values = ["x", "y"];
+              const keys = [0, 1];
+              const targets = [
+                [NodeList.prototype.entries, entries],
+                [NodeList.prototype.keys, keys],
+                [NodeList.prototype.values, values],
+                [NodeList.prototype[Symbol.iterator], values],
+                [DOMTokenList.prototype.entries, entries],
+                [DOMTokenList.prototype.keys, keys],
+                [DOMTokenList.prototype.values, values],
+                [DOMTokenList.prototype[Symbol.iterator], values],
+                [HTMLCollection.prototype[Symbol.iterator], values],
+                [NamedNodeMap.prototype[Symbol.iterator], values],
+                [FileList.prototype[Symbol.iterator], values],
+                [MimeTypeArray.prototype[Symbol.iterator], values],
+                [PluginArray.prototype[Symbol.iterator], values],
+                [CSSRuleList.prototype[Symbol.iterator], values],
+                [StyleSheetList.prototype[Symbol.iterator], values]
+              ];
+              return targets.every(([method, expected]) =>
+                JSON.stringify(Array.from(method.call(receiver))) ===
+                  JSON.stringify(expected)
+              );
+            })()
+            "#,
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn core_dom_methods_reject_invalid_receivers_like_edge() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const illegal = callback => {
+                try { callback(); return false; }
+                catch (error) {
+                  return error.name === "TypeError" &&
+                    error.message === "Illegal invocation";
+                }
+              };
+              return [
+                () => EventTarget.prototype.addEventListener.call({}, "x", null),
+                () => Node.prototype.isEqualNode.call({}, null),
+                () => HTMLElement.prototype.focus.call({}),
+                () => HTMLElement.prototype.blur.call({}),
+                () => HTMLSelectElement.prototype.remove.call({}, 0),
+                () => DOMTokenList.prototype.supports.call({}, "x"),
+                () => DataTransferItemList.prototype.clear.call({}),
+                () => DataTransferItemList.prototype.remove.call({}, 0)
+              ].every(illegal);
+            })()
+            "#,
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn rendering_context_methods_reject_invalid_receivers_like_edge() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (async () => {
+              const illegal = callback => {
+                try { callback(); return false; }
+                catch (error) {
+                  return error.name === "TypeError" &&
+                    error.message === "Illegal invocation";
+                }
+              };
+              const synchronous = [
+                () => CanvasRenderingContext2D.prototype.createLinearGradient
+                  .call({}, 0, 0, 1, 1),
+                () => OffscreenCanvasRenderingContext2D.prototype.setLineDash
+                  .call({}, []),
+                () => WebGLRenderingContext.prototype.deleteBuffer.call({}, null),
+                () => WebGLRenderingContext.prototype.getProgramParameter
+                  .call({}, null, 0),
+                () => WebGL2RenderingContext.prototype.deleteQuery.call({}, null),
+                () => WebGL2RenderingContext.prototype.getSyncParameter
+                  .call({}, null, 0)
+              ].every(illegal);
+              const webgl1 = WebGLRenderingContext.prototype.makeXRCompatible.call({});
+              const webgl2 = WebGL2RenderingContext.prototype.makeXRCompatible.call({});
+              const rejection = async (promise, interfaceName) => {
+                try { await promise; return false; }
+                catch (error) {
+                  return error.name === "TypeError" && error.message ===
+                    `Failed to execute 'makeXRCompatible' on '${interfaceName}': Illegal invocation`;
+                }
+              };
+              return synchronous &&
+                webgl1 instanceof Promise &&
+                webgl2 instanceof Promise &&
+                await rejection(webgl1, "WebGLRenderingContext") &&
+                await rejection(webgl2, "WebGL2RenderingContext");
+            })()
+            "#,
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn webidl_receiver_order_and_promise_rejections_match_edge() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (async () => {
+              const illegal = callback => {
+                try { callback(); return false; }
+                catch (error) {
+                  return error.name === "TypeError" &&
+                    error.message === "Illegal invocation";
+                }
+              };
+              const synchronous = [
+                () => Object.getOwnPropertyDescriptor(
+                  DataTransfer.prototype, "dropEffect").set.call({}, null),
+                () => MediaQueryList.prototype.addListener.call({}, null),
+                () => Selection.prototype.removeRange.call({}, null),
+                () => Sanitizer.prototype.allowElement.call({}, null),
+                () => DOMMatrix.prototype.rotateAxisAngleSelf
+                  .call({}, null, null, null, null),
+                () => MediaStream.prototype.addTrack.call({}, null),
+                () => SVGSVGElement.prototype.checkEnclosure.call({}, null, null),
+                () => WebSocket.prototype.close.call({}, null)
+              ].every(illegal);
+              const rejected = async (promise, message) => {
+                if (!(promise instanceof Promise)) return false;
+                try { await promise; return false; }
+                catch (error) {
+                  return error.name === "TypeError" && error.message === message;
+                }
+              };
+              const element = document.createElement("div");
+              document.body.appendChild(element);
+              const validScrollPromises = [
+                element.scroll(),
+                element.scrollBy(),
+                element.scrollIntoView(),
+                element.scrollTo()
+              ].every(value => value instanceof Promise);
+              const ready = Object.getOwnPropertyDescriptor(
+                ServiceWorkerContainer.prototype, "ready").get.call({});
+              return synchronous &&
+                validScrollPromises &&
+                await rejected(
+                  Blob.prototype.text.call({}),
+                  "Failed to execute 'text' on 'Blob': Illegal invocation") &&
+                await rejected(
+                  Request.prototype.text.call({}),
+                  "Failed to execute 'text' on 'Request': Illegal invocation") &&
+                await rejected(
+                  Response.prototype.json.call({}),
+                  "Failed to execute 'json' on 'Response': Illegal invocation") &&
+                await rejected(
+                  Navigator.prototype.getBattery.call({}),
+                  "Failed to execute 'getBattery' on 'Navigator': Illegal invocation") &&
+                await rejected(
+                  SubtleCrypto.prototype.digest.call({}),
+                  "Failed to execute 'digest' on 'SubtleCrypto': Illegal invocation") &&
+                await rejected(
+                  USBDevice.prototype.open.call({}),
+                  "Failed to execute 'open' on 'USBDevice': Illegal invocation") &&
+                await rejected(
+                  CredentialsContainer.prototype.get.call({}),
+                  "Failed to execute 'get' on 'CredentialsContainer': Illegal invocation") &&
+                await rejected(
+                  Element.prototype.scroll.call({}),
+                  "Failed to execute 'scroll' on 'Element': Illegal invocation") &&
+                await rejected(
+                  ready,
+                  "Failed to read the 'ready' property from 'ServiceWorkerContainer': Illegal invocation") &&
+                await rejected(
+                  RTCPeerConnection.prototype.getStats.call({}),
+                  "Failed to execute 'getStats' on 'RTCPeerConnection': Illegal invocation") &&
+                await rejected(
+                  SerialPort.prototype.forget.call({}),
+                  "Failed to execute 'forget' on 'SerialPort': Illegal invocation");
+            })()
+            "#,
+        ),
+        "true"
     );
 }

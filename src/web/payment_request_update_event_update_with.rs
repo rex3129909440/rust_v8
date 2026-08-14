@@ -12,6 +12,10 @@ fn update_with(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !is_instance(s, a.this()) {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let v = v8::Global::new(s, a.get(0));
     s.get_slot_mut::<PaymentRequestUpdateEventStore>()
         .expect("PaymentRequestUpdateEvent state")

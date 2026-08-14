@@ -92,6 +92,98 @@ fn audio_data_url_loads_metadata_asynchronously_without_decoding() {
 }
 
 #[test]
+fn complete_local_audio_advances_ready_state_and_buffered_after_metadata_dispatch() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let data_url = pcm_wav_data_url(8_000, 4_000);
+    let source = format!(
+        r#"
+        (() => {{
+          globalThis.completeAudio = new Audio();
+          globalThis.completeAudioEvents = [];
+          for (const type of [
+            "durationchange", "loadedmetadata", "loadeddata", "canplay", "canplaythrough"
+          ]) globalThis.completeAudio.addEventListener(
+            type,
+            () => globalThis.completeAudioEvents.push(type)
+          );
+          globalThis.completeAudio.src = {data_url:?};
+        }})()
+        "#,
+    );
+    text(&mut runtime, &source);
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"(() => {
+              const audio = globalThis.completeAudio;
+              const buffered = audio.buffered;
+              return [
+                audio.readyState,
+                audio.networkState,
+                audio.duration,
+                buffered.length,
+                buffered.length ? buffered.start(0) : "empty",
+                buffered.length ? buffered.end(0) : "empty",
+                globalThis.completeAudioEvents.join(",")
+              ].join("|");
+            })()"#,
+        ),
+        "4|1|0.5|1|0|0.5|durationchange,loadedmetadata,loadeddata,canplay,canplaythrough"
+    );
+}
+
+#[test]
+fn playing_media_current_time_advances_and_pause_freezes_the_clock() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let data_url = pcm_wav_data_url(8_000, 80_000);
+    let source = format!(
+        r#"
+        new Promise(resolve => {{
+          const audio = new Audio();
+          audio.onloadedmetadata = async () => {{
+            await audio.play();
+            const started = audio.currentTime;
+            setTimeout(() => {{
+              const advanced = audio.currentTime;
+              audio.pause();
+              const paused = audio.currentTime;
+              setTimeout(() => resolve([
+                started,
+                advanced,
+                paused,
+                audio.currentTime
+              ].join("|")), 20);
+            }}, 25);
+          }};
+          audio.onerror = () => resolve("error");
+          audio.src = {data_url:?};
+        }})
+        "#,
+    );
+    let values = text(&mut runtime, &source)
+        .split('|')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(values.len(), 4, "unexpected media result: {values:?}");
+    let started = values[0].parse::<f64>().expect("started currentTime");
+    let advanced = values[1].parse::<f64>().expect("advanced currentTime");
+    let paused = values[2].parse::<f64>().expect("paused currentTime");
+    let frozen = values[3].parse::<f64>().expect("frozen currentTime");
+    assert!(
+        advanced >= started + 0.02,
+        "media clock did not advance: {started} -> {advanced}; {values:?}"
+    );
+    assert!(
+        (paused - advanced).abs() < 0.01,
+        "pause changed currentTime"
+    );
+    assert!(
+        (frozen - paused).abs() < 0.001,
+        "paused media clock advanced"
+    );
+}
+
+#[test]
 fn invalid_audio_data_url_exposes_media_error_and_error_event() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     let answer = text(

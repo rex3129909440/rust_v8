@@ -108,6 +108,15 @@ fn add_module(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "SharedStorageWorklet",
+            "addModule",
+            result,
+        );
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(
             scope,
@@ -124,7 +133,6 @@ fn add_module(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
     if !record.modules.contains(&url) {
@@ -139,7 +147,12 @@ fn run(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "SharedStorageWorklet",
+            "run",
+            result,
+        );
         return;
     }
     if arguments.length() < 1 {
@@ -168,7 +181,12 @@ fn select_url(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "SharedStorageWorklet",
+            "selectURL",
+            result,
+        );
         return;
     }
     if arguments.length() < 2 {

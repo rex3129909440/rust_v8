@@ -123,11 +123,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.handler),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.handler, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -150,6 +150,7 @@ fn change_zoom(
     r: v8::ReturnValue<'_>,
     delta: f64,
     reset: bool,
+    method_name: &str,
 ) {
     if let Some(v) = s
         .get_slot_mut::<CaptureControllerStore>()
@@ -162,7 +163,7 @@ fn change_zoom(
         };
         resolve_void(s, r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "CaptureController", method_name, r)
     }
 }
 fn decrease_zoom(
@@ -170,21 +171,21 @@ fn decrease_zoom(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    change_zoom(s, a, r, -0.5, false)
+    change_zoom(s, a, r, -0.5, false, "decreaseZoomLevel")
 }
 fn increase_zoom(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    change_zoom(s, a, r, 0.5, false)
+    change_zoom(s, a, r, 0.5, false, "increaseZoomLevel")
 }
 fn reset_zoom(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    change_zoom(s, a, r, 0.0, true)
+    change_zoom(s, a, r, 0.0, true, "resetZoomLevel")
 }
 fn forward_wheel(
     s: &mut v8::PinScope<'_, '_>,
@@ -194,7 +195,7 @@ fn forward_wheel(
     if record(s, a.this()).is_some() {
         resolve_void(s, r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "CaptureController", "forwardWheel", r)
     }
 }
 fn get_supported_zoom_levels(

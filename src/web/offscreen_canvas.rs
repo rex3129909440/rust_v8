@@ -133,11 +133,29 @@ pub(crate) fn resize_external(
 }
 
 fn dimension(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
-    let number = value.number_value(scope).unwrap_or(f64::NAN);
-    if !number.is_finite() || number < 0.0 || number > u32::MAX as f64 {
+    if let Some(message) = crate::webidl::number_conversion_error(value) {
+        crate::webidl::throw_type_error(scope, &message);
+        return None;
+    }
+    let Some(number) = value.number_value(scope) else {
+        return None;
+    };
+    if number.is_infinite() {
         crate::webidl::throw_type_error(
             scope,
-            "The canvas dimension is outside the unsigned long range",
+            "Failed to construct 'OffscreenCanvas': Value is infinite and not of type 'unsigned long'.",
+        );
+        None
+    } else if number < 0.0 || number > u32::MAX as f64 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'OffscreenCanvas': Value is outside the 'unsigned long' value range.",
+        );
+        None
+    } else if number.is_nan() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'OffscreenCanvas': Value is not of type 'unsigned long'.",
         );
         None
     } else {
@@ -518,7 +536,12 @@ fn convert_to_blob(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some((width, height, pixels)) = pixel_snapshot(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "OffscreenCanvas",
+            "convertToBlob",
+            result,
+        );
         return;
     };
     let options = v8::Local::<v8::Object>::try_from(arguments.get(0)).ok();

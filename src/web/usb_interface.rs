@@ -57,6 +57,25 @@ fn construct(
         crate::webidl::throw_type_error(s, "2 arguments required");
         return;
     }
+    if a.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'USBInterface': parameter 1 is not of type 'USBConfiguration'.",
+        );
+        return;
+    }
+    let valid_configuration = v8::Local::<v8::Object>::try_from(a.get(0))
+        .ok()
+        .is_some_and(|object| {
+            super::structured_clone::inherits_platform_interface(s, object, "USBConfiguration")
+        });
+    if !valid_configuration {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'USBInterface': parameter 1 is not of type 'USBConfiguration'.",
+        );
+        return;
+    }
     match create_data(s, a.get(1).uint32_value(s).unwrap_or(0), false) {
         Ok(v) => {
             s.get_slot_mut::<UsbInterfaceStore>()

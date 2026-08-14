@@ -220,6 +220,21 @@ pub(crate) fn create<'s>(
     Ok(event)
 }
 
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: String,
+    data: MouseEventData,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create MouseEvent".to_owned());
+    }
+    attach(scope, event, event_type, data);
+    Ok(event)
+}
+
 pub(crate) fn record(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,

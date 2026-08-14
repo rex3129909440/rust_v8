@@ -138,6 +138,56 @@ pub(crate) fn construct(
     result.set(object.into());
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: &str,
+    touches: v8::Local<'_, v8::Object>,
+    target_touches: v8::Local<'_, v8::Object>,
+    changed_touches: v8::Local<'_, v8::Object>,
+    alt_key: bool,
+    meta_key: bool,
+    ctrl_key: bool,
+    shift_key: bool,
+    cancelable: bool,
+    source_capabilities: v8::Local<'_, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create TouchEvent".to_owned());
+    }
+    let view: v8::Local<v8::Value> = scope.get_current_context().global(scope).into();
+    let source_capabilities: v8::Local<v8::Value> = source_capabilities.into();
+    super::ui_event::attach(
+        scope,
+        event,
+        event_type.to_owned(),
+        true,
+        cancelable,
+        true,
+        Some(v8::Global::new(scope, view)),
+        0,
+        Some(v8::Global::new(scope, source_capabilities)),
+    );
+    let record = TouchEventRecord {
+        touches: v8::Global::new(scope, touches),
+        target_touches: v8::Global::new(scope, target_touches),
+        changed_touches: v8::Global::new(scope, changed_touches),
+        alt_key,
+        meta_key,
+        ctrl_key,
+        shift_key,
+    };
+    scope
+        .get_slot_mut::<TouchEventStore>()
+        .ok_or_else(|| "TouchEvent state was not prepared".to_owned())?
+        .records
+        .insert(event.get_identity_hash().get(), record);
+    Ok(event)
+}
+
 pub(crate) fn touch_list_property<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     init: Option<v8::Local<'_, v8::Object>>,

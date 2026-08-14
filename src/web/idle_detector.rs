@@ -129,11 +129,11 @@ fn get_onchange(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        scope,
-        record(scope, arguments.this()).and_then(|v| v.onchange),
-        result,
-    )
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(scope, record.onchange, result)
 }
 fn set_onchange(
     scope: &mut v8::PinScope<'_, '_>,
@@ -167,7 +167,7 @@ fn start(
             result.set(promise.into())
         }
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(scope, "IdleDetector", "start", result)
     }
 }
 fn request_permission(

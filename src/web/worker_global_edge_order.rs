@@ -17,6 +17,7 @@ pub(crate) fn install_dedicated(
     super::worker_global_scope::mirror_global_to_target(scope, target, "Origin")?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "Notification")?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "CropTarget")?;
+    super::worker_global_scope::mirror_global_to_target(scope, target, "ContentIndex")?;
     super::worker_global_scope::mirror_global_to_target(
         scope,
         target,
@@ -190,6 +191,7 @@ pub(crate) fn install_dedicated(
     super::worker_global_scope::mirror_global_to_target(scope, target, "Headers")?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "FormData")?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "FontFace")?;
+    super::worker_global_scope::mirror_global_to_target(scope, target, "FontFaceSet")?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "FileReaderSync")?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "FileReader")?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "FileList")?;
@@ -319,6 +321,7 @@ pub(crate) fn install_dedicated(
         "WebTransportDatagramDuplexStream",
     )?;
     super::worker_global_scope::mirror_global_to_target(scope, target, "WebTransportError")?;
+    super::worker_global_scope::mirror_global_to_target(scope, target, "BarcodeDetector")?;
     super::worker_global_scope::mirror_global_to_target(
         scope,
         target,

@@ -215,9 +215,11 @@ fn get_multi_entry(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let value = record(scope, arguments.this())
-        .and_then(|record| metadata(scope, &record))
-        .is_some_and(|(_, index)| index.multi_entry);
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let value = metadata(scope, &record).is_some_and(|(_, index)| index.multi_entry);
     result.set(v8::Boolean::new(scope, value).into());
 }
 fn get_unique(
@@ -225,9 +227,11 @@ fn get_unique(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let value = record(scope, arguments.this())
-        .and_then(|record| metadata(scope, &record))
-        .is_some_and(|(_, index)| index.unique);
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let value = metadata(scope, &record).is_some_and(|(_, index)| index.unique);
     result.set(v8::Boolean::new(scope, value).into());
 }
 

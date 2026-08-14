@@ -67,6 +67,31 @@ pub(crate) fn nonserializable_platform_interface(
         .and_then(|(interface, serializable)| (!serializable).then_some(interface))
 }
 
+pub(crate) fn inherits_platform_interface(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    interface: &str,
+) -> bool {
+    if platform_record(scope, object, false).is_some_and(|(current, _)| current == interface) {
+        return true;
+    }
+    let mut current = object.get_prototype(scope);
+    for _ in 0..32 {
+        let Some(value) = current else {
+            break;
+        };
+        let Ok(prototype) = v8::Local::<v8::Object>::try_from(value) else {
+            break;
+        };
+        if platform_record(scope, prototype, true).is_some_and(|(current, _)| current == interface)
+        {
+            return true;
+        }
+        current = prototype.get_prototype(scope);
+    }
+    false
+}
+
 fn insert_platform_record(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Object>,

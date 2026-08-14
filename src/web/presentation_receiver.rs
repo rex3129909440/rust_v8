@@ -77,6 +77,11 @@ fn connection_list(
             r.set(p.into())
         }
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            s,
+            "Failed to read the 'connectionList' property from 'PresentationReceiver': Illegal invocation",
+        ) {
+            r.set(promise.into())
+        }
     }
 }

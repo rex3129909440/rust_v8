@@ -12,13 +12,17 @@ fn get_string(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let name = "scope".to_owned();
-    let Some(record) = record(scope, arguments.this()) else {
+    if record(scope, arguments.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
+    }
+    let raw = super::element::attribute_value(scope, arguments.this(), "scope").unwrap_or_default();
+    let lower = raw.to_ascii_lowercase();
+    let value = match lower.as_str() {
+        "row" | "col" | "rowgroup" | "colgroup" => lower,
+        _ => String::new(),
     };
-    let value = record.strings.get(&name).map_or("", String::as_str);
-    if let Some(value) = v8::String::new(scope, value) {
+    if let Some(value) = v8::String::new(scope, &value) {
         result.set(value.into());
     }
 }
@@ -28,18 +32,5 @@ fn set_string(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let name = "scope".to_owned();
-    let value = crate::webidl::value_to_string(scope, arguments.get(0));
-    if let Some(record) = scope
-        .get_slot_mut::<HtmlTableCellElementStore>()
-        .and_then(|store| {
-            store
-                .records
-                .get_mut(&arguments.this().get_identity_hash().get())
-        })
-    {
-        record.strings.insert(name, value);
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-    }
+    set_reflected_string(scope, arguments, "scope");
 }

@@ -1,4 +1,8 @@
-"""AOSP system-font inventory for Android Edge profiles."""
+"""Version- and OEM-linked system-font inventories for Android profiles.
+
+The common rows come from AOSP.  OEM faces are added only to matching device
+families; they are never mixed into every Android profile.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +10,11 @@ from __future__ import annotations
 AOSP_FONT_SOURCE = (
     "https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/data/fonts/fonts.xml"
 )
+SAMSUNG_ONE_SOURCE = "https://design.samsung.com/global/contents/samsung-one/"
 
 ANDROID_CORE_FONT_FAMILIES: tuple[str, ...] = (
     "Roboto",
     "Roboto Condensed",
-    "Roboto Flex",
     "Roboto Mono",
     "Noto Sans",
     "Noto Serif",
@@ -60,17 +64,42 @@ def _locale_key(locale: str) -> str:
     return normalized if normalized in _LANGUAGE_FAMILIES else normalized.split("-", 1)[0]
 
 
-def build_android_font_profile(locale: str) -> dict[str, object]:
+def build_android_font_profile(
+    locale: str,
+    android_version: int = 14,
+    oem: str = "google",
+) -> dict[str, object]:
     key = _locale_key(locale)
     additions = _LANGUAGE_FAMILIES.get(key, ())
-    families = tuple(dict.fromkeys((*ANDROID_CORE_FONT_FAMILIES, *additions)))
-    local_fonts = list(ANDROID_CORE_LOCAL_FONTS)
+    version = int(android_version)
+    oem_key = str(oem).strip().lower() or "aosp"
+    core_families = list(ANDROID_CORE_FONT_FAMILIES)
+    local_fonts = [
+        row for row in ANDROID_CORE_LOCAL_FONTS
+        if row[2] != "Roboto Flex"
+    ]
+    # Roboto Flex became an AOSP system family on recent Android releases. It
+    # must not leak into retained Android 10/11 device profiles.
+    if version >= 14:
+        core_families.append("Roboto Flex")
+        local_fonts.append(
+            ("RobotoFlex-Regular", "Roboto Flex", "Roboto Flex", "Regular")
+        )
+    sources = [AOSP_FONT_SOURCE]
+    if oem_key == "samsung":
+        core_families.extend(("SamsungOne", "Samsung Sans"))
+        local_fonts.extend((
+            ("SamsungOne-400", "SamsungOne", "SamsungOne", "Regular"),
+            ("SamsungSans-Regular", "Samsung Sans", "Samsung Sans", "Regular"),
+        ))
+        sources.append(SAMSUNG_ONE_SOURCE)
+    families = tuple(dict.fromkeys((*core_families, *additions)))
     for family in additions:
         postscript = family.replace(" ", "") + "-Regular"
         local_fonts.append((postscript, family, family, "Regular"))
     return {
-        "id": f"android-aosp-{key or 'default'}",
-        "source": AOSP_FONT_SOURCE,
+        "id": f"android-{oem_key}-{version}-{key or 'default'}",
+        "source": " | ".join(sources),
         "families": families,
         "allowUnknownFamilies": False,
         "localFonts": tuple(dict.fromkeys(local_fonts)),
@@ -80,4 +109,8 @@ def build_android_font_profile(locale: str) -> dict[str, object]:
     }
 
 
-__all__ = ["AOSP_FONT_SOURCE", "build_android_font_profile"]
+__all__ = [
+    "AOSP_FONT_SOURCE",
+    "SAMSUNG_ONE_SOURCE",
+    "build_android_font_profile",
+]

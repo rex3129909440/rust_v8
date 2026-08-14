@@ -13,6 +13,19 @@ fn set_media_keys(
     mut result: v8::ReturnValue<'_>,
 ) {
     let identity = arguments.this().get_identity_hash().get();
+    if scope
+        .get_slot::<HtmlMediaElementStore>()
+        .and_then(|store| store.records.get(&identity))
+        .is_none()
+    {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "HTMLMediaElement",
+            "setMediaKeys",
+            result,
+        );
+        return;
+    }
     let value = arguments.get(0);
     let media_keys =
         (!value.is_null() && !value.is_undefined()).then(|| v8::Global::new(scope, value));
@@ -25,7 +38,5 @@ fn set_media_keys(
         if let Ok(promise) = super::writable_stream::resolved_promise(scope, undefined.into()) {
             result.set(promise.into());
         }
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
 }

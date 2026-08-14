@@ -69,11 +69,17 @@ fn construct(
         return;
     }
     let Ok(source) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'RTCEncodedAudioFrame'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCEncodedAudioFrame': parameter 1 is not of type 'RTCEncodedAudioFrame'.",
+        );
         return;
     };
     let Some(record) = record(scope, source) else {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'RTCEncodedAudioFrame'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCEncodedAudioFrame': parameter 1 is not of type 'RTCEncodedAudioFrame'.",
+        );
         return;
     };
     scope

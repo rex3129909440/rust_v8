@@ -87,7 +87,7 @@ fn query(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !is_instance(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Permissions", "query", result);
         return;
     }
     let Ok(descriptor) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {

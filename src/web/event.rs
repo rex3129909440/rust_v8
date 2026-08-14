@@ -37,6 +37,7 @@ pub(crate) struct EventRecord {
     pub(crate) in_passive_listener: bool,
     pub(crate) initialized: bool,
     pub(crate) time_stamp: f64,
+    pub(crate) is_trusted: bool,
     pub(crate) path: Vec<v8::Global<v8::Object>>,
 }
 
@@ -203,6 +204,7 @@ pub(crate) fn attach(
                 in_passive_listener: false,
                 initialized: true,
                 time_stamp,
+                is_trusted: false,
                 path: Vec::new(),
             },
         );
@@ -587,7 +589,20 @@ pub(crate) fn get_is_trusted(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_bool(s, a, r, |_| false);
+    return_bool(s, a, r, |record| record.is_trusted);
+}
+
+pub(crate) fn set_trusted(
+    scope: &mut v8::PinScope<'_, '_>,
+    event: v8::Local<'_, v8::Object>,
+    trusted: bool,
+) {
+    if let Some(record) = scope
+        .get_slot_mut::<EventStore>()
+        .and_then(|store| store.records.get_mut(&event.get_identity_hash().get()))
+    {
+        record.is_trusted = trusted;
+    }
 }
 pub(crate) fn get_cancel_bubble(
     s: &mut v8::PinScope<'_, '_>,

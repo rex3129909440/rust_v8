@@ -19,22 +19,12 @@ fn get_custom_element_registry(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    if let Some(value) =
-        super::element::cached_reflected_value(scope, arguments.this(), "customElementRegistry")
+    if let Some(document) = super::node::owner_document(scope, arguments.this())
+        && let Some(registry) =
+            super::custom_element_registry::registry_for_document(scope, document)
     {
-        result.set(v8::Local::new(scope, &value));
-        return;
-    }
-    match super::custom_element_registry::create(scope) {
-        Ok(registry) => {
-            super::element::set_reflected_value(
-                scope,
-                arguments.this(),
-                "customElementRegistry",
-                Some(registry.into()),
-            );
-            result.set(registry.into());
-        }
-        Err(message) => crate::webidl::throw_type_error(scope, &message),
+        result.set(registry.into());
+    } else {
+        result.set(v8::null(scope).into());
     }
 }

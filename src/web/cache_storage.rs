@@ -92,11 +92,23 @@ fn name(scope: &v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> String
     crate::webidl::value_to_string(scope, value)
 }
 
+fn valid(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    scope.get_slot::<CacheStorageStore>().is_some_and(|store| {
+        store
+            .instances
+            .contains_key(&object.get_identity_hash().get())
+    })
+}
+
 fn open(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(scope, "CacheStorage", "open", result);
+        return;
+    }
     let identity = arguments.this().get_identity_hash().get();
     let name = name(scope, arguments.get(0));
     let existing = scope
@@ -131,6 +143,10 @@ fn has(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(scope, "CacheStorage", "has", result);
+        return;
+    }
     let name = name(scope, arguments.get(0));
     let present = scope
         .get_slot::<CacheStorageStore>()
@@ -148,6 +164,10 @@ fn delete(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(scope, "CacheStorage", "delete", result);
+        return;
+    }
     let name = name(scope, arguments.get(0));
     let removed = scope
         .get_slot_mut::<CacheStorageStore>()
@@ -166,6 +186,10 @@ fn keys(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(scope, "CacheStorage", "keys", result);
+        return;
+    }
     let names = scope
         .get_slot::<CacheStorageStore>()
         .and_then(|store| {
@@ -189,6 +213,10 @@ fn match_one(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(scope, "CacheStorage", "match", result);
+        return;
+    }
     let request = super::cache::request_text_for_storage(scope, arguments.get(0));
     let caches = scope
         .get_slot::<CacheStorageStore>()

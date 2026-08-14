@@ -47,6 +47,7 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "stream", 0, stream)?;
     crate::webidl::define_method(scope, prototype, "text", 0, text)?;
     crate::webidl::define_method(scope, prototype, "bytes", 0, bytes)?;
+    crate::webidl::define_method(scope, prototype, "textStream", 0, text_stream)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     let realm_id = crate::webidl::realm_id(scope);
     let stored = v8::Global::new(scope, constructor);
@@ -197,13 +198,23 @@ fn resolve(
         result.set(promise.into())
     }
 }
+fn reject_illegal_invocation(
+    scope: &mut v8::PinScope<'_, '_>,
+    method: &str,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let message = format!("Failed to execute '{method}' on 'Blob': Illegal invocation");
+    if let Some(promise) = crate::webidl::rejected_type_error_promise(scope, &message) {
+        result.set(promise.into());
+    }
+}
 fn array_buffer(
     scope: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(scope, a.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        reject_illegal_invocation(scope, "arrayBuffer", r);
         return;
     };
     let backing = v8::ArrayBuffer::new_backing_store_from_vec(v.bytes).make_shared();
@@ -216,7 +227,7 @@ fn bytes(
     r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(scope, a.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        reject_illegal_invocation(scope, "bytes", r);
         return;
     };
     let length = v.bytes.len();
@@ -232,7 +243,7 @@ fn text(
     r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(scope, a.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        reject_illegal_invocation(scope, "text", r);
         return;
     };
     let string = String::from_utf8_lossy(&v.bytes);
@@ -289,6 +300,26 @@ fn stream(
     }
     let _ = super::readable_stream::close(scope, stream);
     r.set(stream.into())
+}
+
+fn text_stream(
+    scope: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+) {
+    let Some(v) = record(scope, a.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Ok(stream) = super::readable_stream::create_empty(scope) else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&v.bytes);
+    if let Some(value) = v8::String::new(scope, &text) {
+        let _ = super::readable_stream::enqueue(scope, stream, value.into());
+    }
+    let _ = super::readable_stream::close(scope, stream);
+    r.set(stream.into());
 }
 
 pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {

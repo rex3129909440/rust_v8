@@ -108,7 +108,6 @@ fn illegal_constructor(
     );
 }
 
-#[allow(dead_code)]
 pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     name: String,

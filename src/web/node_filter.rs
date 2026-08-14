@@ -83,3 +83,64 @@ fn illegal_invocation(
 ) {
     crate::webidl::throw_type_error(scope, "Illegal constructor");
 }
+
+pub(crate) fn convert_filter_result(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    operation: &str,
+    interface: &str,
+) -> Result<i32, ()> {
+    if value.is_symbol() || value.is_big_int() {
+        let kind = if value.is_symbol() {
+            "Symbol"
+        } else {
+            "BigInt"
+        };
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'acceptNode' on 'NodeFilter': Failed to execute '{operation}' on '{interface}': Cannot convert a {kind} value to a number"
+            ),
+        );
+        return Err(());
+    }
+
+    v8::tc_scope!(let try_catch, scope);
+    if let Some(converted) = value.uint32_value(try_catch) {
+        return Ok((converted as u16) as i32);
+    }
+    let Some(exception) = try_catch.exception() else {
+        return Err(());
+    };
+    let text = exception
+        .to_string(try_catch)
+        .map(|value| value.to_rust_string_lossy(try_catch))
+        .unwrap_or_else(|| "Error".to_owned());
+    let Some((name, message)) = text.split_once(": ") else {
+        let _ = try_catch.rethrow();
+        return Err(());
+    };
+    let contextual = if message == "Cannot convert a Symbol value to a number"
+        || message == "Cannot convert a BigInt value to a number"
+    {
+        format!(
+            "Failed to execute 'acceptNode' on 'NodeFilter': Failed to execute '{operation}' on '{interface}': {message}"
+        )
+    } else {
+        format!("Failed to execute 'acceptNode' on 'NodeFilter': {message}")
+    };
+    try_catch.reset();
+    let Some(message) = v8::String::new(try_catch, &contextual) else {
+        return Err(());
+    };
+    let exception = match name {
+        "TypeError" => v8::Exception::type_error(try_catch, message),
+        "RangeError" => v8::Exception::range_error(try_catch, message),
+        "ReferenceError" => v8::Exception::reference_error(try_catch, message),
+        "SyntaxError" => v8::Exception::syntax_error(try_catch, message),
+        _ => v8::Exception::error(try_catch, message),
+    };
+    try_catch.throw_exception(exception);
+    let _ = try_catch.rethrow();
+    Err(())
+}

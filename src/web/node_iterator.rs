@@ -124,6 +124,57 @@ pub(crate) fn collect_nodes<'s>(
     }
 }
 
+pub(crate) fn following_node<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+    root: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    if let Some(child) = super::node::children(scope, node).into_iter().next() {
+        return Some(child);
+    }
+    let mut current = node;
+    loop {
+        if current.strict_equals(root.into()) {
+            return None;
+        }
+        let parent = super::node::parent(scope, current)?;
+        let children = super::node::children(scope, parent);
+        let index = children
+            .iter()
+            .position(|child| child.strict_equals(current.into()))?;
+        if let Some(sibling) = children.get(index + 1) {
+            return Some(*sibling);
+        }
+        current = parent;
+    }
+}
+
+pub(crate) fn preceding_node<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+    root: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    if node.strict_equals(root.into()) {
+        return None;
+    }
+    let parent = super::node::parent(scope, node)?;
+    let children = super::node::children(scope, parent);
+    let index = children
+        .iter()
+        .position(|child| child.strict_equals(node.into()))?;
+    if let Some(previous) = index.checked_sub(1).and_then(|index| children.get(index)) {
+        let mut candidate = *previous;
+        loop {
+            let descendants = super::node::children(scope, candidate);
+            let Some(last) = descendants.last() else {
+                return Some(candidate);
+            };
+            candidate = *last;
+        }
+    }
+    Some(parent)
+}
+
 pub(crate) fn record(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -139,6 +190,7 @@ pub(crate) fn accepts(
     scope: &mut v8::PinScope<'_, '_>,
     record: &NodeIteratorRecord,
     node: v8::Local<'_, v8::Object>,
+    operation: &str,
 ) -> Result<bool, ()> {
     let node_type = super::node::record(scope, node)
         .map(|record| record.node_type)
@@ -155,17 +207,25 @@ pub(crate) fn accepts(
         return Ok(true);
     };
     let filter = v8::Local::new(scope, filter);
-    let callable = v8::Local::<v8::Function>::try_from(filter)
-        .ok()
-        .map(|function| (function, filter.into()))
-        .or_else(|| {
-            let key = v8::String::new(scope, "acceptNode")?;
-            let value = filter.get(scope, key.into())?;
-            let function = v8::Local::<v8::Function>::try_from(value).ok()?;
-            Some((function, filter.into()))
-        });
-    let Some((function, receiver)) = callable else {
-        return Ok(false);
+    let (function, receiver) = if let Ok(function) = v8::Local::<v8::Function>::try_from(filter) {
+        (function, v8::undefined(scope).into())
+    } else {
+        let Some(key) = v8::String::new(scope, "acceptNode") else {
+            return Err(());
+        };
+        let Some(value) = filter.get(scope, key.into()) else {
+            return Err(());
+        };
+        let Ok(function) = v8::Local::<v8::Function>::try_from(value) else {
+            crate::webidl::throw_type_error(
+                scope,
+                &format!(
+                    "Failed to execute '{operation}' on 'NodeIterator': Failed to execute 'acceptNode' on 'NodeFilter': The provided callback is not callable."
+                ),
+            );
+            return Err(());
+        };
+        (function, filter.into())
     };
     let already_active = scope
         .get_slot::<NodeIteratorStore>()
@@ -175,7 +235,9 @@ pub(crate) fn accepts(
         super::node::throw_dom_exception(
             scope,
             "InvalidStateError",
-            "The NodeIterator filter is already active.",
+            &format!(
+                "Failed to execute '{operation}' on 'NodeIterator': Filter function can't be recursive"
+            ),
         );
         return Err(());
     }
@@ -187,7 +249,9 @@ pub(crate) fn accepts(
     }
     let outcome = function
         .call(scope, receiver, &[node.into()])
-        .and_then(|value| value.int32_value(scope));
+        .and_then(|value| {
+            super::node_filter::convert_filter_result(scope, value, operation, "NodeIterator").ok()
+        });
     if let Some(iterator) = scope
         .get_slot_mut::<NodeIteratorStore>()
         .and_then(|store| store.records.get_mut(&record.id))

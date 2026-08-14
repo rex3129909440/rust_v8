@@ -75,23 +75,26 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSUnparsedValue requires a sequence");
         return;
     }
-    let Ok(sequence) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "CSSUnparsedValue sequence must be an object");
-        return;
-    };
-    let length = sequence
-        .get(
+    if !arguments.get(0).is_object() {
+        crate::webidl::throw_type_error(
             scope,
-            v8::String::new(scope, "length")
-                .expect("short string")
-                .into(),
-        )
-        .and_then(|value| value.uint32_value(scope))
-        .unwrap_or(0);
-    for index in 0..length {
-        let value = sequence
-            .get_index(scope, index)
-            .unwrap_or_else(|| v8::undefined(scope).into());
+            "Failed to construct 'CSSUnparsedValue': The provided value cannot be converted to a sequence.",
+        );
+        return;
+    }
+    let values = match crate::webidl::sequence_values(scope, arguments.get(0)) {
+        Ok(values) => values,
+        Err(_) => {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'CSSUnparsedValue': The object must have a callable @@iterator property.",
+            );
+            return;
+        }
+    };
+    let length = values.len() as u32;
+    for (index, value) in values.into_iter().enumerate() {
+        let value = v8::Local::new(scope, &value);
         if !value.is_string()
             && v8::Local::<v8::Object>::try_from(value)
                 .ok()
@@ -104,7 +107,7 @@ fn construct(
             );
             return;
         }
-        let _ = arguments.this().set_index(scope, index, value);
+        let _ = arguments.this().set_index(scope, index as u32, value);
     }
     scope
         .get_slot_mut::<CssUnparsedValueStore>()
@@ -163,14 +166,12 @@ fn values(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(length) = length(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = value_array(scope, arguments.this(), length);
-    if let Some(iterator) = iterator(scope, array) {
-        result.set(iterator);
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        result,
+    );
 }
 
 fn keys(
@@ -178,21 +179,12 @@ fn keys(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(length) = length(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, length as i32);
-    for index in 0..length {
-        let _ = array.set_index(
-            scope,
-            index,
-            v8::Integer::new_from_unsigned(scope, index).into(),
-        );
-    }
-    if let Some(iterator) = iterator(scope, array) {
-        result.set(iterator);
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Keys,
+        result,
+    );
 }
 
 fn entries(
@@ -200,26 +192,12 @@ fn entries(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(length) = length(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, length as i32);
-    for index in 0..length {
-        let pair = v8::Array::new(scope, 2);
-        let _ = pair.set_index(
-            scope,
-            0,
-            v8::Integer::new_from_unsigned(scope, index).into(),
-        );
-        if let Some(value) = arguments.this().get_index(scope, index) {
-            let _ = pair.set_index(scope, 1, value);
-        }
-        let _ = array.set_index(scope, index, pair.into());
-    }
-    if let Some(iterator) = iterator(scope, array) {
-        result.set(iterator);
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Entries,
+        result,
+    );
 }
 
 fn for_each(
@@ -227,34 +205,7 @@ fn for_each(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Some(length) = length(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "forEach requires a callback");
-        return;
-    };
-    let receiver = if arguments.get(1).is_undefined() {
-        v8::undefined(scope).into()
-    } else {
-        arguments.get(1)
-    };
-    for index in 0..length {
-        let value = arguments
-            .this()
-            .get_index(scope, index)
-            .unwrap_or_else(|| v8::undefined(scope).into());
-        let _ = callback.call(
-            scope,
-            receiver,
-            &[
-                value,
-                v8::Integer::new_from_unsigned(scope, index).into(),
-                arguments.this().into(),
-            ],
-        );
-    }
+    crate::webidl::array_like_for_each(scope, arguments)
 }
 
 pub(crate) fn serialize(

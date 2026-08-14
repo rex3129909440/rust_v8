@@ -73,7 +73,7 @@ fn construct(
     let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(
             scope,
-            "ByteLengthQueuingStrategy options must be an object",
+            "Failed to construct 'ByteLengthQueuingStrategy': The provided value is not of type 'QueuingStrategyInit'.",
         );
         return;
     };
@@ -85,7 +85,10 @@ fn construct(
         .and_then(|value| value.number_value(scope))
         .unwrap_or(f64::NAN);
     if value.is_nan() {
-        crate::webidl::throw_type_error(scope, "highWaterMark must be a number");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ByteLengthQueuingStrategy': Failed to read the 'highWaterMark' property from 'QueuingStrategyInit': Required member is undefined.",
+        );
         return;
     }
     let size = match crate::webidl::create_function(

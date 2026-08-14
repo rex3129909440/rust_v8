@@ -43,6 +43,8 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
     crate::webidl::define_readonly_accessor(s, p, "maxDatagramSize", max_size)?;
     crate::webidl::define_accessor(s, p, "incomingMaxAge", incoming_age, set_incoming_age)?;
     crate::webidl::define_accessor(s, p, "outgoingMaxAge", outgoing_age, set_outgoing_age)?;
+    crate::webidl::define_readonly_accessor(s, p, "incomingMaxBufferedDatagrams", max_buffered)?;
+    crate::webidl::define_readonly_accessor(s, p, "outgoingMaxBufferedDatagrams", max_buffered)?;
     crate::webidl::define_accessor(
         s,
         p,
@@ -134,6 +136,17 @@ fn max_size(
         r.set(v8::Integer::new(s, 1200).into())
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
+    }
+}
+fn max_buffered(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+) {
+    if record(s, a.this()).is_some() {
+        r.set(v8::Integer::new(s, 1).into());
+    } else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
     }
 }
 fn option(

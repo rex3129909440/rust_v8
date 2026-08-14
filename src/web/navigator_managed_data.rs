@@ -95,11 +95,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.handler),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.handler, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -122,7 +122,12 @@ fn get_configuration(
     mut r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "NavigatorManagedData",
+            "getManagedConfiguration",
+            r,
+        );
         return;
     };
     let object = v8::Object::new(s);

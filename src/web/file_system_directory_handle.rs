@@ -92,6 +92,15 @@ fn get_directory_handle(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemDirectoryHandle",
+            "getDirectoryHandle",
+            r,
+        );
+        return;
+    }
     let name = crate::webidl::value_to_string(s, a.get(0));
     if let Some(v) = s
         .get_slot_mut::<FileSystemDirectoryHandleStore>()
@@ -104,8 +113,6 @@ fn get_directory_handle(
             Ok(x) => resolve(s, x.into(), r),
             Err(e) => crate::webidl::throw_type_error(s, &e),
         }
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn get_file_handle(
@@ -113,6 +120,15 @@ fn get_file_handle(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemDirectoryHandle",
+            "getFileHandle",
+            r,
+        );
+        return;
+    }
     let name = crate::webidl::value_to_string(s, a.get(0));
     if let Some(v) = s
         .get_slot_mut::<FileSystemDirectoryHandleStore>()
@@ -125,8 +141,6 @@ fn get_file_handle(
             Ok(x) => resolve(s, x.into(), r),
             Err(e) => crate::webidl::throw_type_error(s, &e),
         }
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn remove_entry(
@@ -134,6 +148,15 @@ fn remove_entry(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemDirectoryHandle",
+            "removeEntry",
+            r,
+        );
+        return;
+    }
     let name = crate::webidl::value_to_string(s, a.get(0));
     if let Some(v) = s
         .get_slot_mut::<FileSystemDirectoryHandleStore>()
@@ -143,8 +166,6 @@ fn remove_entry(
         v.files.retain(|x| x != &name);
         let x = v8::undefined(s);
         resolve(s, x.into(), r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn resolve_path(
@@ -153,7 +174,12 @@ fn resolve_path(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemDirectoryHandle",
+            "resolve",
+            r,
+        );
         return;
     }
     let array = v8::Array::new(s, 0);

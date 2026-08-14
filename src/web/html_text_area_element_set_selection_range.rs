@@ -25,6 +25,13 @@ fn set_selection_range(
     } else {
         crate::webidl::value_to_string(scope, arguments.get(2))
     };
+    let effective_length = record(scope, arguments.this()).map(|record| {
+        if record.value_dirty {
+            text_len(&record.value)
+        } else {
+            text_len(&super::node::node_text(scope, arguments.this()))
+        }
+    });
     if let Some(record) = scope
         .get_slot_mut::<HtmlTextAreaElementStore>()
         .and_then(|store| {
@@ -33,7 +40,7 @@ fn set_selection_range(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     {
-        let length = text_len(&record.value);
+        let length = effective_length.unwrap_or(0);
         record.selection_end = end.min(length);
         record.selection_start = start.min(record.selection_end);
         record.selection_direction = if direction == "forward" || direction == "backward" {

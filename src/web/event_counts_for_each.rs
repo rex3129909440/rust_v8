@@ -12,12 +12,12 @@ fn for_each(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "The callback must be a function");
-        return;
-    };
     let Some(values) = snapshot(s, a.this()) else {
         crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    let Ok(callback) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
+        crate::webidl::throw_type_error(s, "The callback must be a function");
         return;
     };
     for (key, value) in values {

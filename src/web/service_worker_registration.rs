@@ -15,6 +15,7 @@ struct Registration {
     background_fetch: v8::Global<v8::Object>,
     periodic_sync: v8::Global<v8::Object>,
     sync: v8::Global<v8::Object>,
+    index: v8::Global<v8::Object>,
     cookies: v8::Global<v8::Object>,
     push: v8::Global<v8::Object>,
     handler: Option<v8::Global<v8::Value>>,
@@ -71,6 +72,7 @@ fn ensure<'s>(scope: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Func
     super::service_worker_registration_background_fetch_property::define(scope, prototype)?;
     super::service_worker_registration_periodic_sync_property::define(scope, prototype)?;
     super::service_worker_registration_sync_property::define(scope, prototype)?;
+    super::service_worker_registration_index_property::define(scope, prototype)?;
     super::service_worker_registration_cookies_property::define(scope, prototype)?;
     super::service_worker_registration_push_manager_property::define(scope, prototype)?;
     super::service_worker_registration_get_notifications::define(scope, prototype)?;
@@ -110,6 +112,7 @@ pub(crate) fn create<'s>(
     let background_fetch = super::background_fetch_manager::create(scope)?;
     let periodic_sync = super::periodic_sync_manager::create(scope)?;
     let sync = super::sync_manager::create(scope)?;
+    let index = super::content_index::create(scope)?;
     let cookies = super::cookie_store_manager::create(scope)?;
     let push = super::push_manager::create(scope)?;
     let object_id = object.get_identity_hash().get();
@@ -127,6 +130,7 @@ pub(crate) fn create<'s>(
         background_fetch: v8::Global::new(scope, background_fetch),
         periodic_sync: v8::Global::new(scope, periodic_sync),
         sync: v8::Global::new(scope, sync),
+        index: v8::Global::new(scope, index),
         cookies: v8::Global::new(scope, cookies),
         push: v8::Global::new(scope, push),
         handler: None,
@@ -160,6 +164,7 @@ pub(crate) fn create_alias<'s>(
     let background_fetch = super::background_fetch_manager::create(scope)?;
     let periodic_sync = super::periodic_sync_manager::create(scope)?;
     let sync = super::sync_manager::create(scope)?;
+    let index = super::content_index::create(scope)?;
     let cookies = super::cookie_store_manager::create(scope)?;
     let push = super::push_manager::create(scope)?;
     let worker = v8::Global::new(scope, worker);
@@ -177,6 +182,7 @@ pub(crate) fn create_alias<'s>(
         background_fetch: v8::Global::new(scope, background_fetch),
         periodic_sync: v8::Global::new(scope, periodic_sync),
         sync: v8::Global::new(scope, sync),
+        index: v8::Global::new(scope, index),
         cookies: v8::Global::new(scope, cookies),
         push: v8::Global::new(scope, push),
         handler: None,
@@ -233,6 +239,7 @@ pub(crate) enum ObjectProperty {
     BackgroundFetch,
     PeriodicSync,
     Sync,
+    Index,
     Cookies,
     PushManager,
 }
@@ -253,6 +260,7 @@ pub(crate) fn get_object(
         ObjectProperty::BackgroundFetch => record.background_fetch,
         ObjectProperty::PeriodicSync => record.periodic_sync,
         ObjectProperty::Sync => record.sync,
+        ObjectProperty::Index => record.index,
         ObjectProperty::Cookies => record.cookies,
         ObjectProperty::PushManager => record.push,
     };
@@ -288,8 +296,11 @@ pub(crate) fn get_handler(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.handler);
-    super::window_event_handler_support::return_handler(scope, handler, result);
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(scope, record.handler, result);
 }
 
 pub(crate) fn set_handler(
@@ -328,7 +339,12 @@ pub(crate) fn unregister(
 ) {
     let id = arguments.this().get_identity_hash().get();
     let Some(snapshot) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerRegistration",
+            "unregister",
+            result,
+        );
         return;
     };
     if snapshot.unregistered {
@@ -361,7 +377,12 @@ pub(crate) fn update(
     if record(scope, arguments.this()).is_some() {
         resolve(scope, arguments.this().into(), result);
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerRegistration",
+            "update",
+            result,
+        );
     }
 }
 
@@ -370,6 +391,15 @@ pub(crate) fn show_notification(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerRegistration",
+            "showNotification",
+            result,
+        );
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(scope, "1 argument required");
         return;
@@ -404,7 +434,12 @@ pub(crate) fn show_notification(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerRegistration",
+            "showNotification",
+            result,
+        );
         return;
     };
     record.notifications.push(notification);
@@ -417,7 +452,12 @@ pub(crate) fn get_notifications(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerRegistration",
+            "getNotifications",
+            result,
+        );
         return;
     };
     let array = v8::Array::new(scope, record.notifications.len() as i32);

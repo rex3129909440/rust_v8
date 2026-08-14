@@ -113,9 +113,13 @@ fn abort(
     };
     let signal = v8::Local::new(scope, &v);
     let reason = if a.length() == 0 {
-        v8::String::new(scope, "This operation was aborted")
-            .map(Into::into)
-            .unwrap_or_else(|| v8::undefined(scope).into())
+        super::dom_exception::create(
+            scope,
+            "This operation was aborted".to_owned(),
+            "AbortError".to_owned(),
+        )
+        .map(Into::into)
+        .unwrap_or_else(|_| v8::undefined(scope).into())
     } else {
         a.get(0)
     };

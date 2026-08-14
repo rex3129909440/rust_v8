@@ -20,13 +20,37 @@ fn create_processing_instruction(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let target = crate::webidl::value_to_string(scope, arguments.get(0));
-    let data = crate::webidl::value_to_string(scope, arguments.get(1));
+    if arguments.length() < 2 {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'createProcessingInstruction' on 'Document': 2 arguments required, but only {} present.",
+                arguments.length()
+            ),
+        );
+        return;
+    }
+    let Some(target) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'createProcessingInstruction' on 'Document'",
+    ) else {
+        return;
+    };
+    let Some(data) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(1),
+        "Failed to execute 'createProcessingInstruction' on 'Document'",
+    ) else {
+        return;
+    };
     if !super::document::valid_xml_name(&target) || target.contains(':') {
         super::node::throw_dom_exception(
             scope,
             "InvalidCharacterError",
-            "The target is not a valid XML name",
+            &format!(
+                "Failed to execute 'createProcessingInstruction' on 'Document': The target provided ('{target}') is not a valid name."
+            ),
         );
         return;
     }
@@ -34,7 +58,9 @@ fn create_processing_instruction(
         super::node::throw_dom_exception(
             scope,
             "InvalidCharacterError",
-            "Processing instruction data cannot contain '?>'",
+            &format!(
+                "Failed to execute 'createProcessingInstruction' on 'Document': The data provided ('{data}') contains '?>'."
+            ),
         );
         return;
     }

@@ -312,7 +312,12 @@ fn get_lost(
     if let Some(v) = record(s, a.this()) {
         r.set(v8::Local::new(s, &v.lost).into())
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            s,
+            "Failed to read the 'lost' property from 'GPUDevice': Illegal invocation",
+        ) {
+            r.set(promise.into())
+        }
     }
 }
 fn get_queue(
@@ -331,8 +336,11 @@ fn get_on_uncaptured_error(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|value| value.on_uncaptured_error);
-    super::window_event_handler_support::return_handler(scope, handler, result);
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(scope, record.on_uncaptured_error, result);
 }
 fn set_on_uncaptured_error(
     scope: &mut v8::PinScope<'_, '_>,
@@ -456,6 +464,15 @@ fn create_compute_pipeline_async<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     mut r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "GPUDevice",
+            "createComputePipelineAsync",
+            r,
+        );
+        return;
+    }
     if !require_active(s, a.this()) {
         return;
     }
@@ -536,6 +553,15 @@ fn create_render_pipeline_async<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     mut r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "GPUDevice",
+            "createRenderPipelineAsync",
+            r,
+        );
+        return;
+    }
     if !require_active(s, a.this()) {
         return;
     }
@@ -637,7 +663,12 @@ fn pop_error_scope(
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "GPUDevice",
+            "popErrorScope",
+            result,
+        );
         return;
     };
     if record.error_scopes.pop().is_none() {

@@ -94,7 +94,7 @@ fn get_availability(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "Bluetooth", "getAvailability", r);
         return;
     }
     let available = crate::fingerprint::edge(s)
@@ -109,7 +109,7 @@ fn request_device(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "Bluetooth", "requestDevice", r);
         return;
     }
     let Some(profile) = crate::fingerprint::edge(s)

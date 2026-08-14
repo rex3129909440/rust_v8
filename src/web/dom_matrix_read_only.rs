@@ -77,6 +77,21 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "transformPoint", 0, transform_point)?;
     crate::webidl::define_method(scope, prototype, "translate", 0, translate)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(
+        scope,
+        constructor.into(),
+        "fromFloat32Array",
+        1,
+        from_float_32_array,
+    )?;
+    crate::webidl::define_method(
+        scope,
+        constructor.into(),
+        "fromFloat64Array",
+        1,
+        from_float_64_array,
+    )?;
+    crate::webidl::define_method(scope, constructor.into(), "fromMatrix", 0, from_matrix)?;
     crate::webidl::define_method(scope, prototype, "toString", 0, to_string)?;
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
@@ -89,6 +104,141 @@ pub(crate) fn ensure_constructor<'s>(
 
 pub(crate) fn identity() -> [f64; 16] {
     super::dom_matrix::identity()
+}
+
+pub(crate) fn create_from_matrix<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    matrix: [f64; 16],
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let object = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
+        return Err("cannot create DOMMatrixReadOnly".to_owned());
+    }
+    attach(scope, object, matrix);
+    Ok(object)
+}
+
+fn return_created_matrix(
+    scope: &mut v8::PinScope<'_, '_>,
+    matrix: [f64; 16],
+    mut result: v8::ReturnValue<'_>,
+) {
+    match create_from_matrix(scope, matrix) {
+        Ok(matrix) => result.set(matrix.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
+}
+
+fn matrix_from_typed_array(
+    scope: &mut v8::PinScope<'_, '_>,
+    array: v8::Local<'_, v8::Object>,
+    length: usize,
+    method: &str,
+) -> Result<[f64; 16], String> {
+    if length != 6 && length != 16 {
+        let three_dimensional_phrase = if method == "fromFloat32Array" {
+            "16 elements a for 3D matrix"
+        } else {
+            "16 elements for a 3D matrix"
+        };
+        return Err(format!(
+            "Failed to execute '{method}' on 'DOMMatrixReadOnly': The sequence must contain 6 elements for a 2D matrix or {three_dimensional_phrase}."
+        ));
+    }
+    let mut values = Vec::with_capacity(length);
+    for index in 0..length {
+        values.push(
+            array
+                .get_index(scope, index as u32)
+                .and_then(|value| value.number_value(scope))
+                .unwrap_or(f64::NAN),
+        );
+    }
+    if length == 6 {
+        let mut matrix = identity();
+        matrix[0] = values[0];
+        matrix[1] = values[1];
+        matrix[4] = values[2];
+        matrix[5] = values[3];
+        matrix[12] = values[4];
+        matrix[13] = values[5];
+        Ok(matrix)
+    } else {
+        values
+            .try_into()
+            .map_err(|_| "DOMMatrixReadOnly sequence length is invalid".to_owned())
+    }
+}
+
+fn from_float_32_array(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    result: v8::ReturnValue<'_>,
+) {
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'fromFloat32Array' on 'DOMMatrixReadOnly': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Ok(array) = v8::Local::<v8::Float32Array>::try_from(arguments.get(0)) else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'fromFloat32Array' on 'DOMMatrixReadOnly': parameter 1 is not of type 'Float32Array'.",
+        );
+        return;
+    };
+    match matrix_from_typed_array(scope, array.into(), array.length(), "fromFloat32Array") {
+        Ok(matrix) => return_created_matrix(scope, matrix, result),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
+}
+
+fn from_float_64_array(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    result: v8::ReturnValue<'_>,
+) {
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'fromFloat64Array' on 'DOMMatrixReadOnly': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Ok(array) = v8::Local::<v8::Float64Array>::try_from(arguments.get(0)) else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'fromFloat64Array' on 'DOMMatrixReadOnly': parameter 1 is not of type 'Float64Array'.",
+        );
+        return;
+    };
+    match matrix_from_typed_array(scope, array.into(), array.length(), "fromFloat64Array") {
+        Ok(matrix) => return_created_matrix(scope, matrix, result),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
+}
+
+fn from_matrix(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    result: v8::ReturnValue<'_>,
+) {
+    let matrix = if arguments.get(0).is_undefined() {
+        identity()
+    } else {
+        match super::dom_matrix::matrix_from_value(scope, arguments.get(0)) {
+            Ok(matrix) => matrix,
+            Err(message) => {
+                crate::webidl::throw_type_error(scope, &message);
+                return;
+            }
+        }
+    };
+    return_created_matrix(scope, matrix, result);
 }
 
 fn construct(
@@ -289,6 +439,9 @@ fn flip_x(
     };
     let mut flip = identity();
     flip[0] = -1.0;
+    flip[1] = -0.0;
+    flip[2] = -0.0;
+    flip[3] = -0.0;
     return_matrix(s, super::dom_matrix::multiply(matrix, flip), r)
 }
 
@@ -302,6 +455,9 @@ fn flip_y(
     };
     let mut flip = identity();
     flip[5] = -1.0;
+    flip[4] = -0.0;
+    flip[6] = -0.0;
+    flip[7] = -0.0;
     return_matrix(s, super::dom_matrix::multiply(matrix, flip), r)
 }
 
@@ -365,6 +521,8 @@ fn axis_rotation(x: f64, y: f64, z: f64, degrees: f64) -> [f64; 16] {
     }
     let (x, y, z) = (x / length, y / length, z / length);
     let (sin, cos) = degrees.to_radians().sin_cos();
+    let sin = super::dom_matrix::snap_trigonometric_zero(sin);
+    let cos = super::dom_matrix::snap_trigonometric_zero(cos);
     let t = 1.0 - cos;
     [
         t * x * x + cos,

@@ -53,12 +53,20 @@ pub(crate) fn construct(
         return;
     }
     if arguments.length() < 2 {
-        crate::webidl::throw_type_error(scope, "2 arguments required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'GPUUncapturedErrorEvent': 2 arguments required, but only 1 present.",
+        );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "eventInitDict is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'GPUUncapturedErrorEvent': The provided value is not of type 'GPUUncapturedErrorEventInit'.",
+        );
         return;
     };
     let Some(key) = v8::String::new(scope, "error") else {
@@ -68,7 +76,10 @@ pub(crate) fn construct(
         return;
     };
     let Ok(error) = v8::Local::<v8::Object>::try_from(value) else {
-        crate::webidl::throw_type_error(scope, "error must be a GPUError");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'GPUUncapturedErrorEvent': Failed to read the 'error' property from 'GPUUncapturedErrorEventInit': Required member is undefined.",
+        );
         return;
     };
     let object = arguments.this();

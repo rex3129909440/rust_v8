@@ -137,6 +137,12 @@ pub(crate) fn parse_declarations(text: &str) -> Vec<CssProperty> {
         let Some(value) = super::css_calculation::normalize_property_value(&name, &source) else {
             continue;
         };
+        if name == "overflow" {
+            // A shorthand resets both longhands at this point in declaration
+            // order. Keeping an earlier overflow-x/y entry would make the
+            // earlier declaration incorrectly outrank the later shorthand.
+            properties.retain(|entry| !matches!(entry.name.as_str(), "overflow-x" | "overflow-y"));
+        }
         if let Some(existing) = properties.iter_mut().find(|entry| entry.name == name) {
             existing.value = value;
             existing.priority = priority;
@@ -185,6 +191,12 @@ pub(crate) fn create<'s>(
             .enumerator(named_enumerator)
             .descriptor(named_descriptor),
     );
+    template.set_indexed_property_handler(
+        v8::IndexedPropertyHandlerConfiguration::new()
+            .getter(indexed_getter)
+            .query(indexed_query)
+            .enumerator(indexed_enumerator),
+    );
     let object = template
         .new_instance(scope)
         .ok_or_else(|| "cannot create CSSStyleDeclaration exotic object".to_owned())?;
@@ -192,6 +204,49 @@ pub(crate) fn create<'s>(
         return Err("cannot create CSSStyleDeclaration".to_owned());
     }
     attach(scope, object, declarations, parent_rule, style_map)?;
+    Ok(object)
+}
+
+pub(crate) fn create_readonly<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    properties: Vec<CssProperty>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let template = v8::ObjectTemplate::new(scope);
+    template.set_named_property_handler(
+        v8::NamedPropertyHandlerConfiguration::new()
+            .getter(named_getter)
+            .setter(named_setter)
+            .query(named_query)
+            .enumerator(named_enumerator)
+            .descriptor(named_descriptor),
+    );
+    template.set_indexed_property_handler(
+        v8::IndexedPropertyHandlerConfiguration::new()
+            .getter(indexed_getter)
+            .query(indexed_query)
+            .enumerator(indexed_enumerator),
+    );
+    let object = template
+        .new_instance(scope)
+        .ok_or_else(|| "cannot create CSSStyleDeclaration exotic object".to_owned())?;
+    if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
+        return Err("cannot create CSSStyleDeclaration".to_owned());
+    }
+    let record = CssStyleDeclarationRecord {
+        properties,
+        parent_rule: None,
+        style_map: None,
+        owner_element: None,
+        readonly: true,
+    };
+    scope
+        .get_slot_mut::<CssStyleDeclarationStore>()
+        .ok_or_else(|| "CSSStyleDeclaration state was not prepared".to_owned())?
+        .records
+        .insert(object.get_identity_hash().get(), record);
+    refresh_indexes(scope, object, 0);
     Ok(object)
 }
 
@@ -224,13 +279,17 @@ pub(crate) fn mark_readonly(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> bool {
-    let Some(record) = scope
-        .get_slot_mut::<CssStyleDeclarationStore>()
-        .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
-    else {
-        return false;
+    let previous_length = {
+        let Some(record) = scope
+            .get_slot_mut::<CssStyleDeclarationStore>()
+            .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
+        else {
+            return false;
+        };
+        record.readonly = true;
+        record.properties.len()
     };
-    record.readonly = true;
+    refresh_indexes(scope, object, previous_length);
     true
 }
 
@@ -374,8 +433,16 @@ fn refresh_indexes(
     for index in 0..previous_length {
         let _ = object.delete_index(scope, index as u32);
     }
-    for (index, property) in snapshot.properties.iter().enumerate() {
-        if let Some(name) = v8::String::new(scope, &property.name) {
+    if snapshot.readonly {
+        return;
+    }
+    let indexed_names = snapshot
+        .properties
+        .iter()
+        .map(|property| property.name.as_str())
+        .collect::<Vec<_>>();
+    for (index, property_name) in indexed_names.into_iter().enumerate() {
+        if let Some(name) = v8::String::new(scope, property_name) {
             let Some(key) = v8::String::new(scope, &index.to_string()) else {
                 continue;
             };
@@ -387,6 +454,63 @@ fn refresh_indexes(
             );
         }
     }
+}
+
+fn indexed_getter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "get", index, None);
+    if !record(scope, arguments.holder()).is_some_and(|record| record.readonly) {
+        return v8::Intercepted::kNo;
+    }
+    let Some(name) =
+        super::css_computed_style_properties::EDGE_150_COMPUTED_PROPERTIES.get(index as usize)
+    else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(name) = v8::String::new(scope, name) else {
+        return v8::Intercepted::kNo;
+    };
+    result.set(name.into());
+    v8::Intercepted::kYes
+}
+
+fn indexed_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "has", index, None);
+    if record(scope, arguments.holder()).is_some_and(|record| record.readonly)
+        && (index as usize)
+            < super::css_computed_style_properties::EDGE_150_COMPUTED_PROPERTIES.len()
+    {
+        result.set_int32(1);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
+    }
+}
+
+fn indexed_enumerator(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Array>,
+) {
+    crate::trace::record_native_enumeration(scope, &arguments);
+    let length = if record(scope, arguments.holder()).is_some_and(|record| record.readonly) {
+        super::css_computed_style_properties::EDGE_150_COMPUTED_PROPERTIES.len()
+    } else {
+        0
+    };
+    let indices = (0..length)
+        .map(|index| v8::Integer::new_from_unsigned(scope, index as u32).into())
+        .collect::<Vec<v8::Local<v8::Value>>>();
+    result.set(v8::Array::new_with_elements(scope, &indices));
 }
 
 fn sync_style_map(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) {
@@ -494,7 +618,9 @@ fn get_css_text(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(value) = serialize(scope, arguments.this()) {
+    if record(scope, arguments.this()).is_some_and(|record| record.readonly) {
+        result.set(v8::String::empty(scope).into());
+    } else if let Some(value) = serialize(scope, arguments.this()) {
         if let Some(value) = v8::String::new(scope, &value) {
             result.set(value.into());
         }
@@ -519,7 +645,12 @@ fn get_length(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Integer::new_from_unsigned(scope, record.properties.len() as u32).into());
+        let length = if record.readonly {
+            super::css_computed_style_properties::EDGE_150_COMPUTED_PROPERTIES.len()
+        } else {
+            record.properties.len()
+        };
+        result.set(v8::Integer::new_from_unsigned(scope, length as u32).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -547,6 +678,115 @@ fn find_property(record: &CssStyleDeclarationRecord, name: &str) -> Option<CssPr
         .cloned()
 }
 
+fn find_property_in(properties: &[CssProperty], name: &str) -> Option<String> {
+    properties
+        .iter()
+        .find(|property| property.name == name)
+        .map(|property| property.value.clone())
+}
+
+pub(crate) fn computed_value_from_properties(properties: &[CssProperty], name: &str) -> String {
+    find_property_in(properties, name)
+        .or_else(|| computed_shorthand(properties, name))
+        .unwrap_or_default()
+}
+
+fn computed_shorthand(properties: &[CssProperty], name: &str) -> Option<String> {
+    match name {
+        "font" => computed_font_shorthand(properties),
+        "margin" | "padding" | "border-width" | "border-style" | "border-color" => {
+            let stem = name.strip_prefix("border-");
+            let property = |side: &str| match stem {
+                Some(suffix) => format!("border-{side}-{suffix}"),
+                None => format!("{name}-{side}"),
+            };
+            let default = match name {
+                "border-style" => "none",
+                "border-color" => "rgb(0, 0, 0)",
+                _ => "0px",
+            };
+            let top = find_property_in(properties, &property("top"))
+                .unwrap_or_else(|| default.to_owned());
+            let right = find_property_in(properties, &property("right"))
+                .unwrap_or_else(|| default.to_owned());
+            let bottom = find_property_in(properties, &property("bottom"))
+                .unwrap_or_else(|| default.to_owned());
+            let left = find_property_in(properties, &property("left"))
+                .unwrap_or_else(|| default.to_owned());
+            Some(serialize_quad(&top, &right, &bottom, &left))
+        }
+        _ => None,
+    }
+}
+
+fn computed_initial_longhand(name: &str) -> Option<&'static str> {
+    match name {
+        "padding-top"
+        | "padding-right"
+        | "padding-bottom"
+        | "padding-left"
+        | "margin-top"
+        | "margin-right"
+        | "margin-bottom"
+        | "margin-left"
+        | "border-top-width"
+        | "border-right-width"
+        | "border-bottom-width"
+        | "border-left-width" => Some("0px"),
+        "border-top-style" | "border-right-style" | "border-bottom-style" | "border-left-style" => {
+            Some("none")
+        }
+        "border-top-color" | "border-right-color" | "border-bottom-color" | "border-left-color" => {
+            Some("rgb(0, 0, 0)")
+        }
+        _ => None,
+    }
+}
+
+fn serialize_quad(top: &str, right: &str, bottom: &str, left: &str) -> String {
+    if top == right && top == bottom && top == left {
+        top.to_owned()
+    } else if top == bottom && right == left {
+        format!("{top} {right}")
+    } else if right == left {
+        format!("{top} {right} {bottom}")
+    } else {
+        format!("{top} {right} {bottom} {left}")
+    }
+}
+
+fn computed_font_shorthand(properties: &[CssProperty]) -> Option<String> {
+    let style = find_property_in(properties, "font-style").unwrap_or_else(|| "normal".to_owned());
+    let variant =
+        find_property_in(properties, "font-variant").unwrap_or_else(|| "normal".to_owned());
+    let weight = find_property_in(properties, "font-weight").unwrap_or_else(|| "400".to_owned());
+    let stretch = find_property_in(properties, "font-stretch").unwrap_or_else(|| "100%".to_owned());
+    let size = find_property_in(properties, "font-size")?;
+    let line_height =
+        find_property_in(properties, "line-height").unwrap_or_else(|| "normal".to_owned());
+    let family = find_property_in(properties, "font-family")?;
+    let mut components = Vec::new();
+    if style != "normal" {
+        components.push(style);
+    }
+    if variant != "normal" {
+        components.push(variant);
+    }
+    if weight != "normal" && weight != "400" {
+        components.push(weight);
+    }
+    if stretch != "normal" && stretch != "100%" {
+        components.push(stretch);
+    }
+    if line_height == "normal" {
+        components.push(size);
+    } else {
+        components.push(format!("{size} / {line_height}"));
+    }
+    components.push(family);
+    Some(components.join(" "))
+}
+
 fn property_name(scope: &v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>) -> Option<String> {
     if key.is_symbol() {
         return None;
@@ -556,6 +796,24 @@ fn property_name(scope: &v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>) -> 
 }
 
 fn css_named_property(name: &str) -> Option<String> {
+    // Blink's legacy own-key enumerator still lists these historical EPUB
+    // aliases, but the named-property getter/query does not expose them.
+    // Consequently Reflect.ownKeys() includes them while
+    // getOwnPropertyDescriptor() and Object.keys() omit them.
+    if matches!(
+        name,
+        "epubCaptionSide"
+            | "epubTextCombine"
+            | "epubTextEmphasis"
+            | "epubTextEmphasisColor"
+            | "epubTextEmphasisStyle"
+            | "epubTextOrientation"
+            | "epubTextTransform"
+            | "epubWordBreak"
+            | "epubWritingMode"
+    ) {
+        return None;
+    }
     if matches!(
         name,
         "cssText"
@@ -583,6 +841,11 @@ fn css_named_property(name: &str) -> Option<String> {
     }
     if name == "cssFloat" {
         return Some("float".to_owned());
+    }
+    // Blink exposes the legacy IDL spelling as an alias of the unprefixed
+    // property. Both accessors read and write the same declaration slot.
+    if name == "webkitTextSizeAdjust" {
+        return Some("text-size-adjust".to_owned());
     }
     if !super::css_style_declaration_supported_properties::contains(name) {
         return None;
@@ -738,11 +1001,194 @@ pub(crate) fn named_value(
     name: &str,
 ) -> Option<String> {
     let name = normalize_name(name);
+    let record = record(scope, object)?;
     Some(
-        find_property(&record(scope, object)?, &name)
+        find_property(&record, &name)
             .map(|property| property.value)
+            .or_else(|| {
+                find_property(&record, "font").and_then(|font| {
+                    font_longhands_from_shorthand(&font.source)
+                        .into_iter()
+                        .find(|property| property.name == name)
+                        .map(|property| property.value)
+                })
+            })
+            .or_else(|| {
+                record
+                    .readonly
+                    .then(|| computed_shorthand(&record.properties, &name))
+                    .flatten()
+            })
+            .or_else(|| {
+                record
+                    .readonly
+                    .then(|| computed_initial_longhand(&name).map(str::to_owned))
+                    .flatten()
+            })
             .unwrap_or_default(),
     )
+}
+
+pub(crate) fn font_longhands_from_shorthand(value: &str) -> Vec<CssProperty> {
+    let tokens = split_font_shorthand_tokens(value);
+    let Some(size_index) = tokens.iter().position(|token| is_font_size_token(token)) else {
+        return Vec::new();
+    };
+    let mut style = "normal".to_owned();
+    let mut variant = "normal".to_owned();
+    let mut weight = "400".to_owned();
+    let mut stretch = "100%".to_owned();
+    for token in &tokens[..size_index] {
+        let lower = token.to_ascii_lowercase();
+        if matches!(lower.as_str(), "italic" | "oblique") || lower.starts_with("oblique(") {
+            style = token.clone();
+        } else if lower == "small-caps" {
+            variant = token.clone();
+        } else if matches!(
+            lower.as_str(),
+            "bold"
+                | "bolder"
+                | "lighter"
+                | "100"
+                | "200"
+                | "300"
+                | "400"
+                | "500"
+                | "600"
+                | "700"
+                | "800"
+                | "900"
+        ) {
+            weight = if lower == "bold" {
+                "700".to_owned()
+            } else {
+                token.clone()
+            };
+        } else if matches!(
+            lower.as_str(),
+            "ultra-condensed"
+                | "extra-condensed"
+                | "condensed"
+                | "semi-condensed"
+                | "semi-expanded"
+                | "expanded"
+                | "extra-expanded"
+                | "ultra-expanded"
+        ) {
+            stretch = token.clone();
+        }
+    }
+    let size = tokens[size_index].clone();
+    let mut family_index = size_index + 1;
+    let mut line_height = "normal".to_owned();
+    if tokens.get(family_index).is_some_and(|token| token == "/") {
+        if let Some(value) = tokens.get(family_index + 1) {
+            line_height = value.clone();
+            family_index += 2;
+        }
+    }
+    let family = tokens[family_index..].join(" ");
+    if family.is_empty() {
+        return Vec::new();
+    }
+    [
+        ("font-style", style),
+        ("font-variant", variant),
+        ("font-weight", weight),
+        ("font-stretch", stretch),
+        ("font-size", size),
+        ("line-height", line_height),
+        ("font-family", family),
+    ]
+    .into_iter()
+    .map(|(name, value)| CssProperty {
+        name: name.to_owned(),
+        source: value.clone(),
+        value,
+        priority: String::new(),
+    })
+    .collect()
+}
+
+fn split_font_shorthand_tokens(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut depth = 0_u32;
+    for character in value.chars() {
+        if let Some(active) = quote {
+            current.push(character);
+            if character == active {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => {
+                quote = Some(character);
+                current.push(character);
+            }
+            '(' => {
+                depth += 1;
+                current.push(character);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                current.push(character);
+            }
+            '/' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    tokens.push(current.trim().to_owned());
+                }
+                current.clear();
+                tokens.push("/".to_owned());
+            }
+            character if character.is_whitespace() && depth == 0 => {
+                if !current.trim().is_empty() {
+                    tokens.push(current.trim().to_owned());
+                    current.clear();
+                }
+            }
+            _ => current.push(character),
+        }
+    }
+    if !current.trim().is_empty() {
+        tokens.push(current.trim().to_owned());
+    }
+    tokens
+}
+
+fn is_font_size_token(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "xx-small"
+            | "x-small"
+            | "small"
+            | "medium"
+            | "large"
+            | "x-large"
+            | "xx-large"
+            | "xxx-large"
+            | "smaller"
+            | "larger"
+    ) || lower.starts_with("calc(")
+        || lower.starts_with("min(")
+        || lower.starts_with("max(")
+        || lower.starts_with("clamp(")
+    {
+        return true;
+    }
+    const UNITS: &[&str] = &[
+        "px", "pt", "pc", "in", "cm", "mm", "q", "em", "rem", "ex", "rex", "ch", "rch", "cap",
+        "rcap", "ic", "ric", "lh", "rlh", "vw", "vh", "vmin", "vmax", "vi", "vb", "svw", "svh",
+        "lvw", "lvh", "dvw", "dvh", "%",
+    ];
+    UNITS.iter().any(|unit| {
+        lower
+            .strip_suffix(unit)
+            .is_some_and(|number| number.trim().parse::<f64>().is_ok())
+    })
 }
 
 pub(crate) fn set_named_value(
@@ -773,8 +1219,14 @@ fn get_property_value(
             find_property(&record, &name)
                 .map(|property| property.value)
                 .or_else(|| {
-                    (record.readonly && name == "background")
-                        .then(|| computed_background_shorthand(&record))
+                    record.readonly.then(|| {
+                        if name == "background" {
+                            Some(computed_background_shorthand(&record))
+                        } else {
+                            computed_shorthand(&record.properties, &name)
+                                .or_else(|| computed_initial_longhand(&name).map(str::to_owned))
+                        }
+                    })?
                 })
                 .unwrap_or_default()
         })
@@ -839,11 +1291,18 @@ fn item(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let value = record
-        .properties
-        .get(index)
-        .map(|property| property.name.as_str())
-        .unwrap_or("");
+    let value = if record.readonly {
+        super::css_computed_style_properties::EDGE_150_COMPUTED_PROPERTIES
+            .get(index)
+            .copied()
+            .unwrap_or("")
+    } else {
+        record
+            .properties
+            .get(index)
+            .map(|property| property.name.as_str())
+            .unwrap_or("")
+    };
     if let Some(value) = v8::String::new(scope, value) {
         result.set(value.into());
     }
@@ -862,6 +1321,10 @@ fn set_named_property(
         return;
     };
     mutate(scope, object, |properties| {
+        if name == "overflow" && !value.is_empty() {
+            properties
+                .retain(|property| !matches!(property.name.as_str(), "overflow-x" | "overflow-y"));
+        }
         if value.is_empty() {
             properties.retain(|property| property.name != name);
         } else if let Some(property) = properties.iter_mut().find(|property| property.name == name)
@@ -885,6 +1348,10 @@ fn set_property(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let requested_name = crate::webidl::value_to_string(scope, arguments.get(0));
     let name = css_declaration_name(&requested_name);
     let value = crate::webidl::value_to_string(scope, arguments.get(1))

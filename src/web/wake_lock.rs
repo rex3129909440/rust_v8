@@ -64,7 +64,7 @@ fn request(
         .get_slot::<WakeLockStore>()
         .is_some_and(|x| x.instances.contains(&a.this().get_identity_hash().get()))
     {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "WakeLock", "request", r);
         return;
     }
     let kind = if a.get(0).is_undefined() {

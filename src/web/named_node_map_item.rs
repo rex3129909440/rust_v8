@@ -13,6 +13,13 @@ fn item(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'item' on 'NamedNodeMap': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let index = arguments.get(0).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     if let Some(attribute) = attributes.get(index) {
         result.set((*attribute).into());

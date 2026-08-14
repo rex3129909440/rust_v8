@@ -11,7 +11,12 @@ fn get(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = super::navigator_ua_data::record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "NavigatorUAData",
+            "getHighEntropyValues",
+            result,
+        );
         return;
     };
     let output = super::navigator_ua_data::to_object(scope, &record);

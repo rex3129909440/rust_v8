@@ -14,23 +14,61 @@ fn create_tree_walker(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createTreeWalker' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let Ok(root) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The root must be a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createTreeWalker' on 'Document': parameter 1 is not of type 'Node'.",
+        );
         return;
     };
     if super::node::record(scope, root).is_none() {
-        crate::webidl::throw_type_error(scope, "The root must be a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createTreeWalker' on 'Document': parameter 1 is not of type 'Node'.",
+        );
         return;
     }
     let what_to_show = if arguments.get(1).is_undefined() {
         None
     } else {
-        Some(arguments.get(1).uint32_value(scope).unwrap_or(u32::MAX))
+        let value = arguments.get(1);
+        if value.is_symbol() || value.is_big_int() {
+            let kind = if value.is_symbol() {
+                "Symbol"
+            } else {
+                "BigInt"
+            };
+            crate::webidl::throw_type_error(
+                scope,
+                &format!(
+                    "Failed to execute 'createTreeWalker' on 'Document': Cannot convert a {kind} value to a number"
+                ),
+            );
+            return;
+        }
+        let Some(value) = value.uint32_value(scope) else {
+            return;
+        };
+        Some(value)
     };
     let filter = if arguments.get(2).is_null_or_undefined() {
         None
     } else {
-        Some(arguments.get(2))
+        let Ok(filter) = v8::Local::<v8::Object>::try_from(arguments.get(2)) else {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'createTreeWalker' on 'Document': parameter 3 is not of type 'Object'.",
+            );
+            return;
+        };
+        Some(filter)
     };
     match super::tree_walker::create(scope, root, what_to_show, filter) {
         Ok(walker) => result.set(walker.into()),

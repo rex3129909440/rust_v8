@@ -81,11 +81,17 @@ fn construct(
         return;
     }
     let Ok(context) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'DynamicsCompressorNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     };
     if !super::base_audio_context::is_context(s, context) {
-        crate::webidl::throw_type_error(s, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'DynamicsCompressorNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     }
     match attach(s, a.this(), context) {

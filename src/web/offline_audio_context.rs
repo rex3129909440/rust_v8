@@ -90,6 +90,28 @@ fn construct(
         return;
     }
     let configuration = if let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(0)) {
+        let length_key = v8::String::new(scope, "length").expect("length key");
+        if options
+            .get(scope, length_key.into())
+            .is_none_or(|value| value.is_undefined())
+        {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'OfflineAudioContext': Failed to read the 'length' property from 'OfflineAudioContextOptions': Required member is undefined.",
+            );
+            return;
+        }
+        let sample_rate_key = v8::String::new(scope, "sampleRate").expect("sampleRate key");
+        if options
+            .get(scope, sample_rate_key.into())
+            .is_none_or(|value| value.is_undefined())
+        {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'OfflineAudioContext': Failed to read the 'sampleRate' property from 'OfflineAudioContextOptions': Required member is undefined.",
+            );
+            return;
+        }
         let channels =
             super::event::number_property(scope, options, "numberOfChannels", 1.0) as u32;
         let length = super::event::number_property(scope, options, "length", 0.0) as u32;
@@ -107,7 +129,7 @@ fn construct(
     let Some((channels, length, sample_rate)) = configuration else {
         crate::webidl::throw_type_error(
             scope,
-            "The OfflineAudioContext configuration is incomplete",
+            "Failed to construct 'OfflineAudioContext': The provided value is not of type 'OfflineAudioContextOptions'.",
         );
         return;
     };
@@ -271,7 +293,12 @@ fn resume(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(snapshot) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "OfflineAudioContext",
+            "resume",
+            result,
+        );
         return;
     };
     if !snapshot.rendering_started || snapshot.rendering_finished {
@@ -295,7 +322,12 @@ fn suspend(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "OfflineAudioContext",
+            "suspend",
+            result,
+        );
         return;
     };
     if record.rendering_finished {
@@ -366,7 +398,12 @@ fn start_rendering(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(snapshot) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "OfflineAudioContext",
+            "startRendering",
+            result,
+        );
         return;
     };
     if snapshot.rendering_started {

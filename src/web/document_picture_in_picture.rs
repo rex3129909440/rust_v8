@@ -119,8 +119,11 @@ fn get_onenter(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.onenter);
-    super::window_event_handler_support::return_handler(scope, handler, result);
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(scope, record.onenter, result);
 }
 
 fn set_onenter(
@@ -149,7 +152,12 @@ fn request_window(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "DocumentPictureInPicture",
+            "requestWindow",
+            result,
+        );
         return;
     }
     let Ok(error) = super::dom_exception::create(

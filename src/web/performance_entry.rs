@@ -44,6 +44,7 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_readonly_accessor(scope, prototype, "duration", get_duration)?;
     crate::webidl::define_method(scope, prototype, "toJSON", 0, to_json)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_readonly_accessor(scope, prototype, "navigationId", get_navigation_id)?;
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
         .get_slot_mut::<PerformanceEntryStore>()
@@ -175,6 +176,20 @@ fn get_duration(
     r: v8::ReturnValue<'_>,
 ) {
     return_number(s, a, r, |record| record.duration)
+}
+
+fn get_navigation_id(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    if let Some(value) = v8::String::new(scope, "") {
+        result.set(value.into());
+    }
 }
 
 fn define_data(

@@ -82,6 +82,14 @@ fn redirect(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<NavigationPrecommitControllerStore>()
+        .and_then(|store| store.records.get(&a.this().get_identity_hash().get()))
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(options) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "redirect requires options");
         return;
@@ -111,6 +119,14 @@ fn add_handler(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<NavigationPrecommitControllerStore>()
+        .and_then(|store| store.records.get(&a.this().get_identity_hash().get()))
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(handler) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "addHandler requires a function");
         return;

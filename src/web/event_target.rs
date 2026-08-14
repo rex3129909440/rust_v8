@@ -47,6 +47,7 @@ pub(crate) struct ListenerOptions {
     pub(crate) capture: bool,
     pub(crate) once: bool,
     pub(crate) passive: bool,
+    pub(crate) passive_specified: bool,
     pub(crate) signal: Option<i32>,
 }
 
@@ -125,6 +126,56 @@ pub(crate) fn target_record_id(
         .and_then(|store| store.aliases.get(&identity))
         .copied()
         .unwrap_or(identity)
+}
+
+pub(crate) fn is_event_target(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> bool {
+    let identity = target_record_id(scope, object);
+    scope
+        .get_slot::<EventTargetStore>()
+        .is_some_and(|store| store.targets.contains_key(&identity))
+}
+
+pub(crate) fn has_listener(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    event_type: &str,
+) -> bool {
+    let identity = target_record_id(scope, object);
+    scope
+        .get_slot::<EventTargetStore>()
+        .and_then(|store| store.targets.get(&identity))
+        .is_some_and(|record| {
+            record
+                .listeners
+                .get(event_type)
+                .is_some_and(|listeners| !listeners.is_empty())
+                || record.attribute_handlers.contains_key(event_type)
+        })
+}
+
+pub(crate) fn has_non_passive_listener_on_path(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+    event_type: &str,
+) -> bool {
+    propagation_path(scope, target, true)
+        .into_iter()
+        .any(|node| {
+            let node = v8::Local::new(scope, &node);
+            let identity = target_record_id(scope, node);
+            scope
+                .get_slot::<EventTargetStore>()
+                .and_then(|store| store.targets.get(&identity))
+                .is_some_and(|record| {
+                    record.attribute_handlers.contains_key(event_type)
+                        || record.listeners.get(event_type).is_some_and(|listeners| {
+                            listeners.iter().any(|listener| !listener.passive)
+                        })
+                })
+        })
 }
 
 pub(crate) fn reset(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) {
@@ -350,6 +401,11 @@ pub(crate) fn invoke_attribute_handlers(
     super::on_pointer_enter::dispatch(scope, target, event, &event_type);
     super::on_pointer_leave::dispatch(scope, target, event, &event_type);
     super::on_pointer_raw_update::dispatch(scope, target, event, &event_type);
+    super::on_orientation_change::dispatch(scope, target, event, &event_type);
+    super::on_touch_cancel::dispatch(scope, target, event, &event_type);
+    super::on_touch_end::dispatch(scope, target, event, &event_type);
+    super::on_touch_move::dispatch(scope, target, event, &event_type);
+    super::on_touch_start::dispatch(scope, target, event, &event_type);
     super::on_select_start::dispatch(scope, target, event, &event_type);
     super::on_selection_change::dispatch(scope, target, event, &event_type);
     super::on_animation_cancel::dispatch(scope, target, event, &event_type);
@@ -658,6 +714,9 @@ pub(crate) fn listener_options(
     let capture = boolean_member(scope, object, "capture");
     let once = boolean_member(scope, object, "once");
     let passive = boolean_member(scope, object, "passive");
+    let passive_specified = object
+        .has(scope, v8::String::new(scope, "passive")?.into())
+        .unwrap_or(false);
     let signal = object_member(scope, object, "signal");
     let signal = match signal {
         None => None,
@@ -687,6 +746,7 @@ pub(crate) fn listener_options(
         capture,
         once,
         passive,
+        passive_specified,
         signal,
     })
 }

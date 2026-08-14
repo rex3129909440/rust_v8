@@ -23,6 +23,7 @@ pub(crate) struct Record {
     pub(crate) zoom_and_pan: i32,
     pub(crate) animations_paused: bool,
     pub(crate) current_time: f64,
+    pub(crate) timeline_started_ms: Option<f64>,
     pub(crate) next_redraw_handle: u32,
     pub(crate) suspended_redraws: HashSet<u32>,
     pub(crate) redraw_count: u64,
@@ -167,6 +168,10 @@ pub(crate) fn create<'s>(
         zoom_and_pan: ZOOM_AND_PAN_MAGNIFY,
         animations_paused: false,
         current_time: 0.0,
+        timeline_started_ms: Some(super::animation_timeline::document_sample(
+            scope,
+            crate::webidl::realm_id(scope),
+        )),
         next_redraw_handle: 1,
         suspended_redraws: HashSet::new(),
         redraw_count: 0,
@@ -369,9 +374,11 @@ pub(crate) fn check_enclosure(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let valid = record(scope, arguments.this()).is_some()
-        && arguments.get(0).is_object()
-        && arguments.get(1).is_object();
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let valid = arguments.get(0).is_object() && arguments.get(1).is_object();
     result.set(v8::Boolean::new(scope, valid).into());
 }
 
@@ -553,11 +560,45 @@ pub(crate) fn get_current_time(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Number::new(scope, record.current_time).into());
+    if let Some(value) = current_time(scope, arguments.this()) {
+        result.set(v8::Number::new(scope, value).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
+}
+
+pub(crate) fn current_time(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<f64> {
+    let record = record(scope, object)?;
+    if record.animations_paused {
+        return Some(record.current_time);
+    }
+    let sample = super::animation_timeline::document_sample(scope, crate::webidl::realm_id(scope));
+    let connected = super::node::is_connected(scope, object);
+    if !connected {
+        let frozen = record.current_time
+            + record
+                .timeline_started_ms
+                .map(|started| (sample - started).max(0.0) / 1_000.0)
+                .unwrap_or(0.0);
+        update(scope, object, |record| {
+            record.current_time = frozen;
+            record.timeline_started_ms = None;
+        });
+        return Some(frozen);
+    }
+    let Some(started) = record.timeline_started_ms else {
+        update(scope, object, |record| {
+            record.timeline_started_ms = Some(sample)
+        });
+        return Some(record.current_time);
+    };
+    // SMIL time is sampled on the document rendering timeline.  It is stable
+    // throughout one task and advances at RAF/vsync samples; using raw wall
+    // time made getCurrentTime() drift during synchronous JavaScript.
+    Some(record.current_time + (sample - started).max(0.0) / 1_000.0)
 }
 
 pub(crate) fn element_has_id(
@@ -639,8 +680,13 @@ pub(crate) fn pause_animations(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let current_time = current_time(scope, arguments.this());
     update(scope, arguments.this(), |record| {
-        record.animations_paused = true
+        if let Some(current_time) = current_time {
+            record.current_time = current_time;
+        }
+        record.timeline_started_ms = None;
+        record.animations_paused = true;
     });
 }
 
@@ -650,8 +696,12 @@ pub(crate) fn set_current_time(
     _: v8::ReturnValue<'_>,
 ) {
     let value = arguments.get(0).number_value(scope).unwrap_or(0.0);
+    let now = super::animation_timeline::document_sample(scope, crate::webidl::realm_id(scope));
     update(scope, arguments.this(), |record| {
-        record.current_time = value.max(0.0)
+        record.current_time = value.max(0.0);
+        if !record.animations_paused {
+            record.timeline_started_ms = Some(now);
+        }
     });
 }
 
@@ -677,8 +727,12 @@ pub(crate) fn unpause_animations(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let now = super::animation_timeline::document_sample(scope, crate::webidl::realm_id(scope));
     update(scope, arguments.this(), |record| {
-        record.animations_paused = false
+        if record.animations_paused {
+            record.timeline_started_ms = Some(now);
+        }
+        record.animations_paused = false;
     });
 }
 

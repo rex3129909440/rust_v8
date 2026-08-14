@@ -41,14 +41,29 @@ fn construct(
         crate::webidl::value_to_string(scope, arguments.get(0))
     };
     let value = if arguments.get(1).is_undefined() {
-        text.clone()
+        super::html_option_element::normalize_option_text(&text)
     } else {
         crate::webidl::value_to_string(scope, arguments.get(1))
     };
     let default_selected = arguments.get(2).boolean_value(scope);
     let selected = arguments.get(3).boolean_value(scope);
-    match super::html_option_element::create(scope, text, value, default_selected, selected) {
-        Ok(object) => result.set(object.into()),
+    match super::html_option_element::create(scope, text, value.clone(), default_selected, selected)
+    {
+        Ok(object) => {
+            if arguments.length() > 1 && !arguments.get(1).is_undefined() {
+                super::element::set_attribute_full(scope, object, "value".to_owned(), value, None);
+            }
+            if default_selected {
+                super::element::set_attribute_full(
+                    scope,
+                    object,
+                    "selected".to_owned(),
+                    String::new(),
+                    None,
+                );
+            }
+            result.set(object.into())
+        }
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }
 }

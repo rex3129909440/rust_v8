@@ -306,6 +306,10 @@ fn set_automation_rate(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, a.get(0));
     if !matches!(value.as_str(), "a-rate" | "k-rate") {
         crate::webidl::throw_type_error(scope, "Invalid automationRate");
@@ -417,6 +421,10 @@ fn exponential_ramp_to_value_at_time(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = a.get(0).number_value(scope).unwrap_or(f64::NAN) as f32;
     let time = a.get(1).number_value(scope).unwrap_or(f64::NAN);
     if !value.is_finite() {
@@ -491,6 +499,10 @@ fn set_value_curve_at_time(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "curve must be a typed array");
         return;

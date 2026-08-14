@@ -9,8 +9,11 @@ pub(crate) fn define(
 
 fn array(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Array::new(s, 0).into())
 }

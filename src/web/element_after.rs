@@ -14,20 +14,7 @@ fn after(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let Some(parent) = super::node::parent(scope, arguments.this()) else {
-        return;
-    };
-    let Some(index) = super::dom_nodes::child_index(scope, parent, arguments.this()) else {
-        return;
-    };
-    let nodes = match super::dom_nodes::arguments(scope, &arguments) {
-        Ok(nodes) => nodes,
-        Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
-            return;
-        }
-    };
-    if let Err(error) = super::dom_nodes::insert(scope, parent, index + 1, &nodes) {
+    if let Err(error) = super::dom_nodes::child_after(scope, arguments.this(), &arguments) {
         super::dom_nodes::insert_error(scope, error);
     }
 }

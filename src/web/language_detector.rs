@@ -130,7 +130,7 @@ fn detect(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "LanguageDetector", "detect", r);
         return;
     }
     let item = v8::Object::new(s);
@@ -152,6 +152,15 @@ fn measure(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "LanguageDetector",
+            "measureInputUsage",
+            r,
+        );
+        return;
+    }
     let n = crate::webidl::value_to_string(s, a.get(0)).chars().count() as f64;
     let v = v8::Number::new(s, n);
     promise(s, v.into(), r)

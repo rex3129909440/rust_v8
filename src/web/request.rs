@@ -131,6 +131,7 @@ fn ensure_constructor<'s>(
     )?;
     crate::webidl::define_readonly_accessor(scope, prototype, "body", get_body)?;
     crate::webidl::define_method(scope, prototype, "bytes", 0, bytes)?;
+    crate::webidl::define_method(scope, prototype, "textStream", 0, text_stream)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     let realm_id = crate::webidl::realm_id(scope);
     let stored = v8::Global::new(scope, constructor);
@@ -163,7 +164,11 @@ fn construct<'s>(
     // getter order, taking one snapshot prevents user getters from being
     // invoked more than once during the same conversion.
     let init_values = snapshot_request_init(scope, init);
-    let Ok(parsed_url) = url::Url::parse(&input_url) else {
+    let Ok(resolved_url) = super::fetch_global::resolve_request_url(scope, &input_url) else {
+        crate::webidl::throw_type_error(scope, "Request URL must be absolute");
+        return;
+    };
+    let Ok(parsed_url) = url::Url::parse(&resolved_url) else {
         crate::webidl::throw_type_error(scope, "Request URL must be absolute");
         return;
     };
@@ -188,14 +193,30 @@ fn construct<'s>(
         crate::webidl::throw_type_error(scope, "GET or HEAD request cannot have a body");
         return;
     }
-    let headers =
-        match request_headers_from_value(scope, init_values.get("headers"), inherited.as_ref()) {
-            Ok(headers) => headers,
-            Err(message) => {
-                crate::webidl::throw_type_error(scope, &message);
-                return;
-            }
-        };
+    let mode = snapshot_option_or(
+        scope,
+        &init_values,
+        "mode",
+        inherited.as_ref().map(|r| r.mode.as_str()),
+        "cors",
+    );
+    let guard = if mode == "no-cors" {
+        super::headers::Guard::RequestNoCors
+    } else {
+        super::headers::Guard::Request
+    };
+    let headers = match request_headers_from_value(
+        scope,
+        init_values.get("headers"),
+        inherited.as_ref(),
+        guard,
+    ) {
+        Ok(headers) => headers,
+        Err(message) => {
+            crate::webidl::throw_type_error(scope, &message);
+            return;
+        }
+    };
     let signal = if let Some(value) = init_values.get("signal") {
         v8::Local::<v8::Object>::try_from(value)
             .ok()
@@ -235,13 +256,7 @@ fn construct<'s>(
             inherited.as_ref().map(|r| r.referrer_policy.as_str()),
             "",
         ),
-        mode: snapshot_option_or(
-            scope,
-            &init_values,
-            "mode",
-            inherited.as_ref().map(|r| r.mode.as_str()),
-            "cors",
-        ),
+        mode,
         credentials: snapshot_option_or(
             scope,
             &init_values,
@@ -435,46 +450,23 @@ fn request_headers<'s>(
     inherited: Option<&RequestRecord>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let value = init.and_then(|object| property(s, object, "headers"));
-    request_headers_from_value(s, value, inherited)
+    request_headers_from_value(s, value, inherited, super::headers::Guard::Request)
 }
 
 fn request_headers_from_value<'s>(
     s: &mut v8::PinScope<'s, '_>,
     value: Option<v8::Local<'s, v8::Value>>,
     inherited: Option<&RequestRecord>,
+    guard: super::headers::Guard,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
-    if let Some(value) = value.and_then(|v| v8::Local::<v8::Object>::try_from(v).ok()) {
-        if let Some(values) = super::headers::snapshot(s, value) {
-            return super::headers::create(s, values);
-        }
-        let mut values = Vec::new();
-        if let Some(names) = value.get_own_property_names(
-            s,
-            v8::GetPropertyNamesArgs {
-                mode: v8::KeyCollectionMode::OwnOnly,
-                property_filter: v8::PropertyFilter::ONLY_ENUMERABLE,
-                index_filter: v8::IndexFilter::IncludeIndices,
-                key_conversion: v8::KeyConversionMode::ConvertToString,
-            },
-        ) {
-            for index in 0..names.length() {
-                let Some(key) = names.get_index(s, index) else {
-                    continue;
-                };
-                let name = crate::webidl::value_to_string(s, key);
-                let text = value
-                    .get(s, key)
-                    .map(|v| crate::webidl::value_to_string(s, v))
-                    .unwrap_or_default();
-                values.push((name, text));
-            }
-        }
-        return super::headers::create(s, values);
+    if let Some(value) = value.filter(|value| !value.is_undefined()) {
+        let values = super::headers::init_values(s, value)?;
+        return super::headers::create_with_guard(s, values, guard);
     }
     let values = inherited
         .and_then(|r| super::headers::snapshot(s, v8::Local::new(s, &r.headers)))
         .unwrap_or_default();
-    super::headers::create(s, values)
+    super::headers::create_with_guard(s, values, guard)
 }
 fn body_stream<'s>(
     s: &mut v8::PinScope<'s, '_>,
@@ -778,6 +770,10 @@ fn bytes(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Request", "bytes", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => match super::text_encoder::uint8_array(s, data) {
             Ok(v) => resolve(s, v.into(), r),
@@ -791,6 +787,10 @@ fn array_buffer(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Request", "arrayBuffer", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => {
             let b = v8::ArrayBuffer::new_backing_store_from_vec(data).make_shared();
@@ -805,6 +805,10 @@ fn text(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Request", "text", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => {
             let text = String::from_utf8_lossy(&data);
@@ -815,11 +819,29 @@ fn text(
         Err(e) => reject(s, &e, r),
     }
 }
+fn text_stream(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
+    match super::readable_stream::create_empty(s) {
+        Ok(stream) => r.set(stream.into()),
+        Err(message) => crate::webidl::throw_type_error(s, &message),
+    }
+}
 fn json(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Request", "json", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => {
             let text = String::from_utf8_lossy(&data);
@@ -836,6 +858,10 @@ fn blob(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Request", "blob", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(data) => {
             let o = v8::Object::new(s);
@@ -853,6 +879,10 @@ fn form_data(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Request", "formData", r);
+        return;
+    }
     match consume(s, a.this()) {
         Ok(_) => resolve(s, v8::Object::new(s).into(), r),
         Err(e) => reject(s, &e, r),
@@ -889,7 +919,12 @@ fn clone_request(
     }
     let headers =
         super::headers::snapshot(s, v8::Local::new(s, &value.headers)).unwrap_or_default();
-    let Ok(headers) = super::headers::create(s, headers) else {
+    let guard = if value.mode == "no-cors" {
+        super::headers::Guard::RequestNoCors
+    } else {
+        super::headers::Guard::Request
+    };
+    let Ok(headers) = super::headers::create_with_guard(s, headers, guard) else {
         return;
     };
     value.headers = v8::Global::new(s, headers);

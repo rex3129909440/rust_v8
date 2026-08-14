@@ -10,6 +10,15 @@ fn exit_fullscreen(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !super::document::is_document(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "Document",
+            "exitFullscreen",
+            result,
+        );
+        return;
+    }
     if !super::document_method_support::ensure(scope, arguments.this()) {
         return;
     }

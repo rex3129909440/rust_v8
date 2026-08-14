@@ -14,7 +14,20 @@ fn create_comment(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let data = crate::webidl::value_to_string(scope, arguments.get(0));
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createComment' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(data) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'createComment' on 'Document'",
+    ) else {
+        return;
+    };
     match super::comment::create(scope, data) {
         Ok(comment) => {
             super::node::set_owner_document(scope, comment, arguments.this());

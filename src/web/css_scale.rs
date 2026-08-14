@@ -67,9 +67,18 @@ fn scale_value(
     {
         return Some(v8::Global::new(scope, object));
     }
-    let number = value.number_value(scope).unwrap_or(f64::NAN);
+    if let Some(message) = crate::webidl::number_conversion_error(value) {
+        crate::webidl::throw_type_error(scope, &message);
+        return None;
+    }
+    let Some(number) = value.number_value(scope) else {
+        return None;
+    };
     if !number.is_finite() {
-        crate::webidl::throw_type_error(scope, "CSSScale values must be finite");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSScale': The provided double value is non-finite.",
+        );
         return None;
     }
     super::css_unit_value::create(scope, number, "number")

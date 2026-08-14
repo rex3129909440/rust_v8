@@ -5,6 +5,78 @@ const XLINK_NAMESPACE: &str = "http://www.w3.org/1999/xlink";
 const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
 
+pub(crate) struct GetHtmlOptions {
+    serializable_shadow_roots: bool,
+    shadow_roots: std::collections::HashSet<i32>,
+}
+
+pub(crate) fn get_html_options(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    interface: &str,
+) -> Option<GetHtmlOptions> {
+    if value.is_undefined() || value.is_null() {
+        return Some(GetHtmlOptions {
+            serializable_shadow_roots: false,
+            shadow_roots: std::collections::HashSet::new(),
+        });
+    }
+    let Ok(options) = v8::Local::<v8::Object>::try_from(value) else {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'getHTML' on '{interface}': The provided value is not of type 'GetHTMLOptions'."
+            ),
+        );
+        return None;
+    };
+    let serializable_key = v8::String::new(scope, "serializableShadowRoots")?;
+    let serializable_value = options.get(scope, serializable_key.into())?;
+    let serializable_shadow_roots = serializable_value.boolean_value(scope);
+    let roots_key = v8::String::new(scope, "shadowRoots")?;
+    let roots_value = options.get(scope, roots_key.into())?;
+    let mut shadow_roots = std::collections::HashSet::new();
+    if !roots_value.is_undefined() {
+        let values = match crate::webidl::sequence_values(scope, roots_value) {
+            Ok(values) => values,
+            Err(_) => {
+                crate::webidl::throw_type_error(
+                    scope,
+                    &format!(
+                        "Failed to execute 'getHTML' on '{interface}': Failed to read the 'shadowRoots' property from 'GetHTMLOptions': The object must have a callable @@iterator property."
+                    ),
+                );
+                return None;
+            }
+        };
+        for value in values {
+            let value = v8::Local::new(scope, &value);
+            let Ok(root) = v8::Local::<v8::Object>::try_from(value) else {
+                throw_shadow_root_conversion(scope, interface);
+                return None;
+            };
+            if super::shadow_root::record(scope, root).is_none() {
+                throw_shadow_root_conversion(scope, interface);
+                return None;
+            }
+            shadow_roots.insert(root.get_identity_hash().get());
+        }
+    }
+    Some(GetHtmlOptions {
+        serializable_shadow_roots,
+        shadow_roots,
+    })
+}
+
+fn throw_shadow_root_conversion(scope: &v8::PinScope<'_, '_>, interface: &str) {
+    crate::webidl::throw_type_error(
+        scope,
+        &format!(
+            "Failed to execute 'getHTML' on '{interface}': Failed to read the 'shadowRoots' property from 'GetHTMLOptions': Failed to convert value to 'ShadowRoot'."
+        ),
+    );
+}
+
 pub(crate) fn parse_fragment(
     scope: &mut v8::PinScope<'_, '_>,
     context: v8::Local<'_, v8::Object>,
@@ -143,8 +215,15 @@ pub(crate) fn parse_fragment(
             } else {
                 xml_element_namespace(scope, parent, raw_name, &parsed_attributes)
             };
-            let normalized_name = normalized_tag_name(&namespace, raw_name);
+            let normalized_name = if html_mode {
+                normalized_tag_name(&namespace, raw_name)
+            } else {
+                raw_name.to_owned()
+            };
             let element = create_element(scope, &namespace, &normalized_name)?;
+            if !html_mode {
+                super::element::set_qualified_name(scope, element, normalized_name.clone());
+            }
             for (name, value) in &parsed_attributes {
                 let namespace_uri = if html_mode {
                     attribute_namespace(name).map(str::to_owned)
@@ -197,14 +276,26 @@ pub(crate) fn replace_children_with_html(
     target: v8::Local<'_, v8::Object>,
     input: &str,
 ) -> Result<(), String> {
+    let shadow_context = super::custom_element_registry::is_shadow_context(scope, target);
+    let registry_id = super::custom_element_registry::registry_id_for_context(scope, target);
     let parsed = parse_fragment(scope, target, input)?;
     let target = template_contents(scope, target).unwrap_or(target);
     for child in super::node::children(scope, target) {
         super::node::detach(scope, child);
     }
     for (index, child) in parsed.iter().enumerate() {
-        super::node::insert_node(scope, target, v8::Local::new(scope, child), index)
+        let child = v8::Local::new(scope, child);
+        super::node::insert_node(scope, target, child, index)
             .map_err(|(_, message)| message.to_owned())?;
+        if shadow_context && let Some(registry_id) = registry_id {
+            let connected = super::node::is_connected(scope, child);
+            super::custom_element_registry::upgrade_tree_for_registry(
+                scope,
+                child,
+                registry_id,
+                connected,
+            );
+        }
     }
     Ok(())
 }
@@ -230,6 +321,104 @@ pub(crate) fn serialize_children(
             }
         })
         .collect()
+}
+
+pub(crate) fn serialize_children_for_get_html(
+    scope: &v8::PinScope<'_, '_>,
+    parent: v8::Local<'_, v8::Object>,
+    options: &GetHtmlOptions,
+) -> String {
+    let parent = template_contents(scope, parent).unwrap_or(parent);
+    super::node::children(scope, parent)
+        .into_iter()
+        .map(|child| serialize_node_for_get_html(scope, child, options))
+        .collect()
+}
+
+pub(crate) fn serialize_element_contents_for_get_html(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    options: &GetHtmlOptions,
+) -> String {
+    let mut output = String::new();
+    if let Some(root) = super::element::record(scope, element)
+        .and_then(|record| record.shadow_root)
+        .map(|root| v8::Local::new(scope, &root))
+        && let Some(record) = super::shadow_root::record(scope, root)
+        && (options
+            .shadow_roots
+            .contains(&root.get_identity_hash().get())
+            || (options.serializable_shadow_roots && record.serializable))
+    {
+        output.push_str("<template shadowrootmode=\"");
+        output.push_str(&escape_attribute(&record.mode));
+        output.push('"');
+        if record.delegates_focus {
+            output.push_str(" shadowrootdelegatesfocus=\"\"");
+        }
+        if record.serializable {
+            output.push_str(" shadowrootserializable=\"\"");
+        }
+        if record.clonable {
+            output.push_str(" shadowrootclonable=\"\"");
+        }
+        output.push('>');
+        output.push_str(&serialize_children_for_get_html(scope, root, options));
+        output.push_str("</template>");
+    }
+    output.push_str(&serialize_children_for_get_html(scope, element, options));
+    output
+}
+
+fn serialize_node_for_get_html(
+    scope: &v8::PinScope<'_, '_>,
+    node: v8::Local<'_, v8::Object>,
+    options: &GetHtmlOptions,
+) -> String {
+    let Some(record) = super::node::record(scope, node) else {
+        return String::new();
+    };
+    if record.node_type != 1 {
+        return serialize_node(scope, node);
+    }
+    serialize_element_for_get_html(scope, node, options)
+}
+
+fn serialize_element_for_get_html(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    options: &GetHtmlOptions,
+) -> String {
+    let Some(record) = super::element::record(scope, element) else {
+        return String::new();
+    };
+    let html = record.namespace_uri.as_deref() == Some(HTML_NAMESPACE);
+    let name = if html {
+        record.tag_name.to_ascii_lowercase()
+    } else {
+        record.tag_name
+    };
+    let mut output = String::with_capacity(name.len() * 2 + 5);
+    output.push('<');
+    output.push_str(&name);
+    for attribute in super::element::attributes_snapshot(scope, element).unwrap_or_default() {
+        output.push(' ');
+        output.push_str(&attribute.name);
+        output.push_str("=\"");
+        output.push_str(&escape_attribute(&attribute.value));
+        output.push('"');
+    }
+    output.push('>');
+    if html && is_void_html_element(HTML_NAMESPACE, &name) {
+        return output;
+    }
+    output.push_str(&serialize_element_contents_for_get_html(
+        scope, element, options,
+    ));
+    output.push_str("</");
+    output.push_str(&name);
+    output.push('>');
+    output
 }
 
 pub(crate) fn serialize_node(
@@ -288,6 +477,11 @@ fn serialize_xml_node_with_namespaces(
         .ok_or_else(|| "The provided value is not a Node".to_owned())?;
     match record.node_type {
         1 => serialize_xml_element(scope, node, inherited_namespaces),
+        2 => Ok(escape_xml_attribute(
+            &super::attr::record(scope, node)
+                .map(|record| record.value)
+                .unwrap_or_default(),
+        )),
         3 => Ok(escape_xml_text(
             &super::character_data::data_if_character(scope, node).unwrap_or_default(),
         )),
@@ -342,7 +536,7 @@ fn serialize_xml_element(
     let record = super::element::record(scope, element)
         .ok_or_else(|| "The provided value is not an Element".to_owned())?;
     let attributes = super::element::attributes_snapshot(scope, element).unwrap_or_default();
-    let serialized_name = if record.namespace_uri.as_deref() == Some(HTML_NAMESPACE) {
+    let raw_name = if record.namespace_uri.as_deref() == Some(HTML_NAMESPACE) {
         record.tag_name.to_ascii_lowercase()
     } else {
         record.tag_name.clone()
@@ -357,12 +551,28 @@ fn serialize_xml_element(
     }
 
     let mut generated_declarations = Vec::new();
-    let element_prefix = record
+    let declared_prefix = record
         .tag_name
         .split_once(':')
         .map(|(prefix, _)| prefix)
         .unwrap_or_default();
     let element_namespace = record.namespace_uri.unwrap_or_default();
+    let reused_prefix = (declared_prefix.is_empty() && !element_namespace.is_empty())
+        .then(|| {
+            inherited_namespaces.iter().find_map(|(prefix, namespace)| {
+                (!prefix.is_empty()
+                    && prefix != "xml"
+                    && prefix != "xmlns"
+                    && namespace == &element_namespace)
+                    .then(|| prefix.clone())
+            })
+        })
+        .flatten();
+    let element_prefix = reused_prefix.as_deref().unwrap_or(declared_prefix);
+    let serialized_name = reused_prefix
+        .as_ref()
+        .map(|prefix| format!("{prefix}:{raw_name}"))
+        .unwrap_or(raw_name);
     ensure_xml_namespace_declaration(
         element_prefix,
         &element_namespace,
@@ -409,7 +619,11 @@ fn serialize_xml_element(
     }
     let children = super::node::children(scope, element);
     if children.is_empty() {
-        output.push_str("/>");
+        if element_namespace == HTML_NAMESPACE {
+            output.push_str(" />");
+        } else {
+            output.push_str("/>");
+        }
         return Ok(output);
     }
     output.push('>');
@@ -444,7 +658,10 @@ fn ensure_xml_namespace_declaration(
 }
 
 fn escape_xml_text(input: &str) -> String {
-    input.replace('&', "&amp;").replace('<', "&lt;")
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn escape_xml_attribute(input: &str) -> String {
@@ -718,6 +935,10 @@ fn find_tag_end(input: &str, start: usize) -> Option<usize> {
         }
     }
     None
+}
+
+pub(crate) fn find_markup_end(input: &str) -> Option<usize> {
+    find_tag_end(input, 1)
 }
 
 fn parse_attributes(input: &str, lowercase_names: bool) -> Vec<(String, String)> {

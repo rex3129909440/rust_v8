@@ -87,8 +87,27 @@ fn construct(
         crate::webidl::throw_type_error(scope, "VTTCue requires startTime, endTime, and text");
         return;
     }
-    let start_time = arguments.get(0).number_value(scope).unwrap_or(f64::NAN);
-    let end_time = arguments.get(1).number_value(scope).unwrap_or(f64::NAN);
+    if let Some(message) = crate::webidl::number_conversion_error(arguments.get(0)) {
+        crate::webidl::throw_type_error(scope, &message);
+        return;
+    }
+    let Some(start_time) = arguments.get(0).number_value(scope) else {
+        return;
+    };
+    if let Some(message) = crate::webidl::number_conversion_error(arguments.get(1)) {
+        crate::webidl::throw_type_error(scope, &message);
+        return;
+    }
+    let Some(end_time) = arguments.get(1).number_value(scope) else {
+        return;
+    };
+    if !start_time.is_finite() || !end_time.is_finite() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'VTTCue': The provided double value is non-finite.",
+        );
+        return;
+    }
     let text = crate::webidl::value_to_string(scope, arguments.get(2));
     let object = arguments.this();
     super::text_track_cue::attach(scope, object, start_time, end_time);
@@ -172,6 +191,10 @@ fn set_vertical(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(s, a.get(0));
     if value != "" && value != "rl" && value != "lr" {
         crate::webidl::throw_type_error(s, "Invalid VTTCue vertical value");
@@ -184,6 +207,10 @@ fn set_align(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(s, a.get(0));
     if !["start", "center", "end", "left", "right"].contains(&value.as_str()) {
         crate::webidl::throw_type_error(s, "Invalid VTTCue align value");

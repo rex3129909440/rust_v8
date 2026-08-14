@@ -270,6 +270,10 @@ fn advance(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !is_cursor(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let count = arguments.get(0).uint32_value(scope).unwrap_or(0);
     if count == 0 {
         crate::webidl::throw_type_error(scope, "The count must be greater than zero");
@@ -289,6 +293,10 @@ fn continue_primary_key(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !is_cursor(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 2 {
         crate::webidl::throw_type_error(scope, "2 arguments required");
         return;

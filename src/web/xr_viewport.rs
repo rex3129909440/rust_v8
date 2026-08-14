@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrViewportStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrViewportStore::default());
@@ -53,6 +56,10 @@ pub(crate) fn create<'s>(
     let p = crate::webidl::prototype(s, c)?;
     let o = v8::Object::new(s);
     let _ = crate::webidl::set_platform_prototype(s, o, p.into());
+    s.get_slot_mut::<XrViewportStore>()
+        .expect("XRViewport state")
+        .instances
+        .insert(o.get_identity_hash().get());
     Ok(o)
 }
 fn n(s: &mut v8::PinScope<'_, '_>, mut r: v8::ReturnValue<'_>, v: f64) {
@@ -60,22 +67,42 @@ fn n(s: &mut v8::PinScope<'_, '_>, mut r: v8::ReturnValue<'_>, v: f64) {
 }
 fn zero(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     n(s, r, 0.0)
 }
 fn width(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     n(s, r, 1280.0)
 }
 fn height(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     n(s, r, 720.0)
+}
+fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = s.get_slot::<XrViewportStore>().is_some_and(|store| {
+        store
+            .instances
+            .contains(&a.this().get_identity_hash().get())
+    });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }

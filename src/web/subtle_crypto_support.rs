@@ -59,11 +59,17 @@ impl HashAlgorithm {
 pub(crate) fn require_receiver(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: &v8::FunctionCallbackArguments<'_>,
+    operation: &str,
+    result: &mut v8::ReturnValue<'_>,
 ) -> bool {
     if super::subtle_crypto::valid(scope, arguments.this()) {
         true
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        let message =
+            format!("Failed to execute '{operation}' on 'SubtleCrypto': Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(scope, &message) {
+            result.set(promise.into());
+        }
         false
     }
 }

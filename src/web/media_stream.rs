@@ -286,8 +286,11 @@ fn get_on_add_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.on_add_track);
-    return_handler(scope, &mut result, handler);
+    if let Some(record) = record(scope, arguments.this()) {
+        return_handler(scope, &mut result, record.on_add_track);
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
 }
 
 fn set_on_add_track(
@@ -312,8 +315,11 @@ fn get_on_remove_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.on_remove_track);
-    return_handler(scope, &mut result, handler);
+    if let Some(record) = record(scope, arguments.this()) {
+        return_handler(scope, &mut result, record.on_remove_track);
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
 }
 
 fn set_on_remove_track(
@@ -338,8 +344,11 @@ fn get_on_active(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.on_active);
-    return_handler(scope, &mut result, handler);
+    if let Some(record) = record(scope, arguments.this()) {
+        return_handler(scope, &mut result, record.on_active);
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
 }
 
 fn set_on_active(
@@ -364,8 +373,11 @@ fn get_on_inactive(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.on_inactive);
-    return_handler(scope, &mut result, handler);
+    if let Some(record) = record(scope, arguments.this()) {
+        return_handler(scope, &mut result, record.on_inactive);
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
 }
 
 fn set_on_inactive(
@@ -390,6 +402,10 @@ fn add_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(scope, "MediaStream.addTrack requires 1 argument");
         return;
@@ -536,6 +552,10 @@ fn remove_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(track) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "MediaStreamTrack object required");
         return;

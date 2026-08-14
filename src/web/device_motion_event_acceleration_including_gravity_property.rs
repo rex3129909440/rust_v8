@@ -18,7 +18,10 @@ fn get_acceleration_including_gravity(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(x) = record(s, a.this()) {
-        r.set(v8::Local::new(s, &x.acceleration_including_gravity).into())
+        match x.acceleration_including_gravity {
+            Some(value) => r.set(v8::Local::new(s, &value).into()),
+            None => r.set(v8::null(s).into()),
+        }
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }

@@ -56,12 +56,18 @@ pub(crate) fn construct(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'OfflineAudioCompletionEvent': 2 arguments required",
+            "Failed to construct 'OfflineAudioCompletionEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "The event initializer must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'OfflineAudioCompletionEvent': The provided value is not of type 'OfflineAudioCompletionEventInit'.",
+        );
         return;
     };
     let Some(rendered_buffer_key) = v8::String::new(scope, "renderedBuffer") else {
@@ -71,16 +77,13 @@ pub(crate) fn construct(
         return;
     };
     let Ok(rendered_buffer) = v8::Local::<v8::Object>::try_from(rendered_buffer_value) else {
-        crate::webidl::throw_type_error(scope, "renderedBuffer is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'OfflineAudioCompletionEvent': Failed to read the 'renderedBuffer' property from 'OfflineAudioCompletionEventInit': Required member is undefined.",
+        );
         return;
     };
-    if let Err(message) = attach(
-        scope,
-        arguments.this(),
-        crate::webidl::value_to_string(scope, arguments.get(0)),
-        init,
-        rendered_buffer,
-    ) {
+    if let Err(message) = attach(scope, arguments.this(), event_type, init, rendered_buffer) {
         crate::webidl::throw_type_error(scope, &message);
         return;
     }

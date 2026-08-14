@@ -275,6 +275,28 @@ fn record(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Op
         .cloned()
 }
 
+pub(crate) fn current_url(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<::url::Url> {
+    record(scope, object)
+}
+
+pub(crate) fn replace_url(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    url: ::url::Url,
+) -> bool {
+    let Some(stored) = scope
+        .get_slot_mut::<LocationStore>()
+        .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
+    else {
+        return false;
+    };
+    *stored = url;
+    true
+}
+
 fn get_component(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

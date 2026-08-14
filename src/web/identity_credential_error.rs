@@ -29,7 +29,7 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
         "IdentityCredentialError",
         0,
         v8::ConstructorBehavior::Allow,
-        illegal,
+        construct,
     )?;
     let p = crate::webidl::prototype(s, c)?;
     crate::webidl::reset_constructor_order(s, p)?;
@@ -47,12 +47,55 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
         .insert(realm_id, realm_constructor);
     Ok(c)
 }
-fn illegal(
+fn string_member(
+    scope: &v8::PinScope<'_, '_>,
+    object: Option<v8::Local<'_, v8::Object>>,
+    name: &str,
+) -> Option<String> {
+    let key = v8::String::new(scope, name)?;
+    let value = object?.get(scope, key.into())?;
+    if value.is_undefined() || value.is_null() {
+        None
+    } else {
+        Some(crate::webidl::value_to_string(scope, value))
+    }
+}
+
+fn construct(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
 ) {
-    crate::webidl::throw_type_error(s, "Illegal constructor")
+    if !a.is_construct_call() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'IdentityCredentialError': Please use the 'new' operator, this DOM object constructor cannot be called as a function.",
+        );
+        return;
+    }
+    let message = if a.get(0).is_undefined() {
+        String::new()
+    } else {
+        crate::webidl::value_to_string(s, a.get(0))
+    };
+    let options = v8::Local::<v8::Object>::try_from(a.get(1)).ok();
+    let code = string_member(s, options, "error").unwrap_or_default();
+    let url = string_member(s, options, "url");
+    super::dom_exception::attach(
+        s,
+        a.this(),
+        "IdentityCredentialError".to_owned(),
+        message,
+        0,
+    );
+    s.get_slot_mut::<IdentityCredentialErrorStore>()
+        .expect("IdentityCredentialError state")
+        .records
+        .insert(
+            a.this().get_identity_hash().get(),
+            IdentityErrorRecord { code, url },
+        );
+    r.set(a.this().into())
 }
 pub(crate) fn create<'s>(
     s: &mut v8::PinScope<'s, '_>,
@@ -104,7 +147,7 @@ fn url(
         if let Some(x) = v.url.and_then(|x| v8::String::new(s, &x)) {
             r.set(x.into())
         } else {
-            r.set(v8::null(s).into())
+            r.set(v8::String::empty(s).into())
         }
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
@@ -115,8 +158,10 @@ fn error(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if record(s, a.this()).is_some() {
-        r.set(a.this().into())
+    if let Some(v) = record(s, a.this()) {
+        if let Some(value) = v8::String::new(s, &v.code) {
+            r.set(value.into())
+        }
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }

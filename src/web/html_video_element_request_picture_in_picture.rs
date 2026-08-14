@@ -19,7 +19,12 @@ fn request_picture_in_picture(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "HTMLVideoElement",
+            "requestPictureInPicture",
+            result,
+        );
         return;
     };
     let Some(resolver) = v8::PromiseResolver::new(scope) else {

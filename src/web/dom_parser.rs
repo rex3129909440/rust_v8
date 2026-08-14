@@ -82,11 +82,7 @@ pub(crate) fn require_instance(
 }
 
 pub(crate) fn html_source(source: &str) -> String {
-    if source.to_ascii_lowercase().contains("<html") {
-        source.to_owned()
-    } else {
-        format!("<html><head></head><body>{source}</body></html>")
-    }
+    source.to_owned()
 }
 
 pub(crate) fn html_title(source: &str) -> Option<String> {

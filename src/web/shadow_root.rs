@@ -16,6 +16,7 @@ pub(crate) struct Record {
     pub clonable: bool,
     pub adopted: Vec<v8::Global<v8::Object>>,
     pub registry: Option<v8::Global<v8::Object>>,
+    pub registry_is_null: bool,
 }
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     isolate.set_slot(ShadowRootStore::default());
@@ -86,6 +87,7 @@ pub(crate) fn create<'s>(
     serializable: bool,
     clonable: bool,
     registry: Option<v8::Local<'_, v8::Object>>,
+    registry_is_null: bool,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let c = ensure_constructor(scope)?;
     let p = crate::webidl::prototype(scope, c)?;
@@ -110,6 +112,7 @@ pub(crate) fn create<'s>(
         clonable,
         adopted: Vec::new(),
         registry: registry.map(|registry| v8::Global::new(scope, registry)),
+        registry_is_null,
     };
     scope
         .get_slot_mut::<ShadowRootStore>()

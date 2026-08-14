@@ -17,11 +17,31 @@ pub(crate) fn attach_internals(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    if let Some(existing) = existing {
-        result.set(v8::Local::new(scope, &existing).into());
+    if existing.is_some() {
+        super::node::throw_dom_exception(
+            scope,
+            "NotSupportedError",
+            "Failed to execute 'attachInternals' on 'HTMLElement': ElementInternals for the specified element was already attached.",
+        );
         return;
     }
-    match super::element_internals::create(scope, None, None) {
+    if !super::custom_element_registry::is_custom(scope, arguments.this()) {
+        super::node::throw_dom_exception(
+            scope,
+            "NotSupportedError",
+            "Failed to execute 'attachInternals' on 'HTMLElement': Unable to attach ElementInternals to non-custom elements.",
+        );
+        return;
+    }
+    if super::custom_element_registry::internals_disabled(scope, arguments.this()) {
+        super::node::throw_dom_exception(
+            scope,
+            "NotSupportedError",
+            "Failed to execute 'attachInternals' on 'HTMLElement': ElementInternals is disabled by disabledFeature static field.",
+        );
+        return;
+    }
+    match super::element_internals::create(scope, arguments.this(), None, None) {
         Ok(internals) => {
             let stored = v8::Global::new(scope, internals);
             if let Some(record) = scope.get_slot_mut::<HtmlElementStore>().and_then(|store| {

@@ -140,17 +140,19 @@ fn get_view(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let view = scope
+    let Some(record) = scope
         .get_slot::<ReadableStreamByobRequestStore>()
         .and_then(|store| {
             store
                 .records
                 .get(&arguments.this().get_identity_hash().get())
         })
-        .and_then(|record| record.view.as_ref())
-        .cloned();
-    match view {
-        Some(view) => result.set(v8::Local::new(scope, &view).into()),
+    else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    match record.view.as_ref() {
+        Some(view) => result.set(v8::Local::new(scope, view).into()),
         None => result.set(v8::null(scope).into()),
     }
 }
@@ -160,6 +162,18 @@ fn respond(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<ReadableStreamByobRequestStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let written = arguments.get(0).uint32_value(scope).unwrap_or(0);
     if written == 0 {
         crate::webidl::throw_type_error(scope, "bytes written is 0");
@@ -187,6 +201,18 @@ fn respond_with_new_view(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<ReadableStreamByobRequestStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(view) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "respondWithNewView requires an ArrayBufferView");
         return;

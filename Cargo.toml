@@ -18,17 +18,25 @@ cipher = { version = "0.4.4", features = ["alloc", "block-padding"] }
 brotli = "8.0.4"
 ego-tree = "0.11"
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+fontdb = { version = "0.24.0", default-features = false, features = ["std", "fs"] }
+font-kit = "0.14.3"
 hkdf = "0.12.4"
 hmac = "0.12.1"
 html5ever = "0.39"
 libm = "0.2.16"
 miniz_oxide = "0.8.9"
 pbkdf2 = "0.12.2"
+pathfinder_geometry = "0.5.1"
+rustybuzz = "0.20.1"
 scraper = { version = "0.27", default-features = false, features = ["deterministic"] }
 serde = { version = "1.0", features = ["derive"] }
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 url = "2.5"
+unicode-segmentation = "1.12"
+unicode-bidi = "0.3.18"
+unicode-linebreak = "0.1.5"
+unicode-vo = "0.1.0"
 v8 = "150.2.0"
 zstd = { version = "0.13.3", default-features = false }
 

@@ -111,7 +111,7 @@ fn set_server_certificate(
     if valid(s, a.this()) {
         resolve(s, v8::Boolean::new(s, true).into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "MediaKeys", "setServerCertificate", r)
     }
 }
 fn get_status_for_policy(
@@ -123,6 +123,6 @@ fn get_status_for_policy(
         let value = v8::String::new(s, "usable").unwrap();
         resolve(s, value.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "MediaKeys", "getStatusForPolicy", r)
     }
 }

@@ -52,9 +52,12 @@ fn checked_value(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
 ) -> Option<String> {
-    let value = crate::webidl::value_to_string(scope, value);
+    let value = crate::webidl::dom_string(scope, value)?;
     if value.is_empty() {
-        crate::webidl::throw_type_error(scope, "CSSKeywordValue does not support empty strings");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSKeywordValue': CSSKeywordValue does not support empty strings",
+        );
         None
     } else {
         Some(value)
@@ -100,9 +103,16 @@ fn set_value(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Some(value) = checked_value(scope, arguments.get(0)) else {
+    let Some(value) = crate::webidl::dom_string(scope, arguments.get(0)) else {
         return;
     };
+    if value.is_empty() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to set the 'value' property on 'CSSKeywordValue': CSSKeywordValue does not support empty strings",
+        );
+        return;
+    }
     if let Some(current) = scope
         .get_slot_mut::<CssKeywordValueStore>()
         .and_then(|store| {

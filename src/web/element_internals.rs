@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 #[derive(Clone)]
 struct ElementInternalsRecord {
+    target: v8::Global<v8::Object>,
     form: Option<v8::Global<v8::Object>>,
     will_validate: bool,
     validity: v8::Global<v8::Object>,
@@ -101,6 +102,7 @@ fn ensure_constructor<'s>(
     crate::webidl::define_method(s, p, "setValidity", 1, set_validity)?;
     define_string_accessor(s, p, "ariaColIndexText")?;
     define_string_accessor(s, p, "ariaRowIndexText")?;
+    define_relation_accessor(s, p, "ariaActionsElements", true)?;
     define_relation_accessor(s, p, "ariaActiveDescendantElement", false)?;
     define_relation_accessor(s, p, "ariaControlsElements", true)?;
     define_relation_accessor(s, p, "ariaDescribedByElements", true)?;
@@ -126,8 +128,9 @@ fn illegal(
 }
 pub(crate) fn create<'s>(
     s: &mut v8::PinScope<'s, '_>,
-    form: Option<v8::Local<'s, v8::Object>>,
-    shadow_root: Option<v8::Local<'s, v8::Object>>,
+    target: v8::Local<'_, v8::Object>,
+    form: Option<v8::Local<'_, v8::Object>>,
+    shadow_root: Option<v8::Local<'_, v8::Object>>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let c = ensure_constructor(s)?;
     let p = crate::webidl::prototype(s, c)?;
@@ -140,6 +143,7 @@ pub(crate) fn create<'s>(
     let labels = super::node_list::create(s, Vec::new())?;
     let states = super::custom_state_set::create(s)?;
     let record = ElementInternalsRecord {
+        target: v8::Global::new(s, target),
         form: form.map(|v| v8::Global::new(s, v)),
         will_validate: true,
         validity: v8::Global::new(s, validity),
@@ -157,6 +161,85 @@ pub(crate) fn create<'s>(
         .insert(o.get_identity_hash().get(), record);
     Ok(o)
 }
+
+pub(crate) fn for_target<'s>(
+    s: &v8::PinScope<'s, '_>,
+    target: v8::Local<'_, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let target_id = target.get_identity_hash().get();
+    let (identity, _) =
+        s.get_slot::<ElementInternalsStore>()?
+            .records
+            .iter()
+            .find(|(_, record)| {
+                v8::Local::new(s, &record.target).get_identity_hash().get() == target_id
+            })?;
+    let html = super::html_element::record(s, target)?;
+    html.internals
+        .map(|internals| v8::Local::new(s, &internals))
+}
+
+pub(crate) fn update_form_owner(
+    s: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+    form: Option<v8::Local<'_, v8::Object>>,
+) {
+    let Some(internals) = for_target(s, target) else {
+        return;
+    };
+    let form = form.map(|value| v8::Global::new(s, value));
+    if let Some(record) = s
+        .get_slot_mut::<ElementInternalsStore>()
+        .and_then(|store| store.records.get_mut(&internals.get_identity_hash().get()))
+    {
+        record.form = form;
+    }
+}
+
+pub(crate) fn set_shadow_root_for_target(
+    s: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+    shadow_root: v8::Local<'_, v8::Object>,
+) {
+    let Some(internals) = for_target(s, target) else {
+        return;
+    };
+    let shadow_root = v8::Global::new(s, shadow_root);
+    if let Some(record) = s
+        .get_slot_mut::<ElementInternalsStore>()
+        .and_then(|store| store.records.get_mut(&internals.get_identity_hash().get()))
+    {
+        record.shadow_root = Some(shadow_root);
+    }
+}
+
+pub(crate) fn form_value_for_target<'s>(
+    s: &v8::PinScope<'s, '_>,
+    target: v8::Local<'_, v8::Object>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let internals = for_target(s, target)?;
+    record(s, internals)?
+        .form_value
+        .map(|value| v8::Local::new(s, &value))
+}
+
+pub(crate) fn is_valid_for_target(
+    s: &v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+) -> Option<bool> {
+    let internals = for_target(s, target)?;
+    valid_record(s, internals).map(|(_, valid)| valid)
+}
+
+pub(crate) fn refresh_labels(s: &mut v8::PinScope<'_, '_>, internals: v8::Local<'_, v8::Object>) {
+    let Some(record) = record(s, internals) else {
+        return;
+    };
+    let target = v8::Local::new(s, &record.target);
+    let labels = super::html_label_element::labels_for(s, target);
+    let list = v8::Local::new(s, &record.labels);
+    super::node_list::replace_snapshot(s, list, labels);
+}
 fn record(
     s: &v8::PinScope<'_, '_>,
     o: v8::Local<'_, v8::Object>,
@@ -165,6 +248,33 @@ fn record(
         .records
         .get(&o.get_identity_hash().get())
         .cloned()
+}
+
+fn require_form_associated(
+    s: &mut v8::PinScope<'_, '_>,
+    internals: v8::Local<'_, v8::Object>,
+    operation: &str,
+    property: bool,
+) -> Option<ElementInternalsRecord> {
+    let Some(record) = record(s, internals) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return None;
+    };
+    let target = v8::Local::new(s, &record.target);
+    if super::custom_element_registry::is_form_associated(s, target) {
+        return Some(record);
+    }
+    let message = if property {
+        format!(
+            "Failed to read the '{operation}' property from 'ElementInternals': The target element is not a form-associated custom element."
+        )
+    } else {
+        format!(
+            "Failed to execute '{operation}' on 'ElementInternals': The target element is not a form-associated custom element."
+        )
+    };
+    super::node::throw_dom_exception(s, "NotSupportedError", &message);
+    None
 }
 fn return_object(
     s: &mut v8::PinScope<'_, '_>,
@@ -182,10 +292,10 @@ fn get_form(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
-        return_object(s, x.form, r)
-    } else {
+    if record(s, a.this()).is_none() {
         crate::webidl::throw_type_error(s, "Illegal invocation")
+    } else if let Some(x) = require_form_associated(s, a.this(), "form", true) {
+        return_object(s, x.form, r)
     }
 }
 fn get_shadow_root(
@@ -204,10 +314,10 @@ fn get_will_validate(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
-        r.set(v8::Boolean::new(s, x.will_validate).into())
-    } else {
+    if record(s, a.this()).is_none() {
         crate::webidl::throw_type_error(s, "Illegal invocation")
+    } else if let Some(x) = require_form_associated(s, a.this(), "willValidate", true) {
+        r.set(v8::Boolean::new(s, x.will_validate).into())
     }
 }
 fn get_validity(
@@ -215,10 +325,10 @@ fn get_validity(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
-        r.set(v8::Local::new(s, &x.validity).into())
-    } else {
+    if record(s, a.this()).is_none() {
         crate::webidl::throw_type_error(s, "Illegal invocation")
+    } else if let Some(x) = require_form_associated(s, a.this(), "validity", true) {
+        r.set(v8::Local::new(s, &x.validity).into())
     }
 }
 fn get_validation_message(
@@ -226,12 +336,12 @@ fn get_validation_message(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation")
+    } else if let Some(x) = require_form_associated(s, a.this(), "validationMessage", true) {
         if let Some(v) = v8::String::new(s, &x.validation_message) {
             r.set(v.into())
         }
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn get_labels(
@@ -239,10 +349,11 @@ fn get_labels(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(s, a.this()) {
-        r.set(v8::Local::new(s, &x.labels).into())
-    } else {
+    if record(s, a.this()).is_none() {
         crate::webidl::throw_type_error(s, "Illegal invocation")
+    } else if let Some(x) = require_form_associated(s, a.this(), "labels", true) {
+        refresh_labels(s, a.this());
+        r.set(v8::Local::new(s, &x.labels).into())
     }
 }
 fn get_states(
@@ -429,7 +540,14 @@ fn check_validity(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some((_, valid)) = valid_record(s, a.this()) {
+    if require_form_associated(s, a.this(), "checkValidity", false).is_none() {
+        return;
+    }
+    if let Some((record, valid)) = valid_record(s, a.this()) {
+        if !valid {
+            let target = v8::Local::new(s, &record.target);
+            super::html_form_element::dispatch_invalid_event(s, target);
+        }
         r.set(v8::Boolean::new(s, valid).into())
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
@@ -440,14 +558,67 @@ fn report_validity(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    check_validity(s, a, r)
+    if require_form_associated(s, a.this(), "reportValidity", false).is_none() {
+        return;
+    }
+    if let Some((record, valid)) = valid_record(s, a.this()) {
+        if !valid {
+            super::html_form_element::dispatch_invalid_event(s, v8::Local::new(s, &record.target));
+        }
+        let mut r = r;
+        r.set(v8::Boolean::new(s, valid).into());
+    }
 }
 fn set_form_value(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let value = (!a.get(0).is_null()).then(|| v8::Global::new(s, a.get(0)));
+    if require_form_associated(s, a.this(), "setFormValue", false).is_none() {
+        return;
+    }
+    if a.length() < 1 {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'setFormValue' on 'ElementInternals': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let raw = a.get(0);
+    let converted: v8::Local<v8::Value> = if raw.is_null() {
+        raw
+    } else if let Ok(object) = v8::Local::<v8::Object>::try_from(raw) {
+        if super::blob::byte_snapshot(s, object).is_some()
+            || super::form_data::is_form_data(s, object)
+        {
+            raw
+        } else {
+            let Some(value) = crate::webidl::dom_string_with_context(
+                s,
+                raw,
+                "Failed to execute 'setFormValue' on 'ElementInternals'",
+            ) else {
+                return;
+            };
+            let Some(value) = v8::String::new(s, &value) else {
+                return;
+            };
+            value.into()
+        }
+    } else {
+        let Some(value) = crate::webidl::dom_string_with_context(
+            s,
+            raw,
+            "Failed to execute 'setFormValue' on 'ElementInternals'",
+        ) else {
+            return;
+        };
+        let Some(value) = v8::String::new(s, &value) else {
+            return;
+        };
+        value.into()
+    };
+    let value = (!converted.is_null()).then(|| v8::Global::new(s, converted));
     if let Some(x) = s
         .get_slot_mut::<ElementInternalsStore>()
         .and_then(|q| q.records.get_mut(&a.this().get_identity_hash().get()))
@@ -468,6 +639,16 @@ fn set_validity(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if require_form_associated(s, a.this(), "setValidity", false).is_none() {
+        return;
+    }
+    if a.length() < 1 {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'setValidity' on 'ElementInternals': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let Some(x) = record(s, a.this()) else {
         crate::webidl::throw_type_error(s, "Illegal invocation");
         return;
@@ -490,8 +671,48 @@ fn set_validity(
     let message = if a.get(1).is_undefined() {
         String::new()
     } else {
-        crate::webidl::value_to_string(s, a.get(1))
+        let Some(message) = crate::webidl::dom_string_with_context(
+            s,
+            a.get(1),
+            "Failed to execute 'setValidity' on 'ElementInternals'",
+        ) else {
+            return;
+        };
+        message
     };
+    let invalid = validity.value_missing
+        || validity.type_mismatch
+        || validity.pattern_mismatch
+        || validity.too_long
+        || validity.too_short
+        || validity.range_underflow
+        || validity.range_overflow
+        || validity.step_mismatch
+        || validity.bad_input
+        || validity.custom_error;
+    if invalid && message.is_empty() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'setValidity' on 'ElementInternals': The second argument should not be empty if one or more flags in the first argument are true.",
+        );
+        return;
+    }
+    if !a.get(2).is_undefined() {
+        let Ok(anchor) = v8::Local::<v8::Object>::try_from(a.get(2)) else {
+            crate::webidl::throw_type_error(
+                s,
+                "Failed to execute 'setValidity' on 'ElementInternals': parameter 3 is not of type 'HTMLElement'.",
+            );
+            return;
+        };
+        if super::html_element::record(s, anchor).is_none() {
+            crate::webidl::throw_type_error(
+                s,
+                "Failed to execute 'setValidity' on 'ElementInternals': parameter 3 is not of type 'HTMLElement'.",
+            );
+            return;
+        }
+    }
     let validity_object = v8::Local::new(s, &x.validity);
     let _ = super::validity_state::replace(s, validity_object, validity);
     if let Some(stored) = s

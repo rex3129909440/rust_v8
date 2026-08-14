@@ -64,6 +64,17 @@ pub(crate) fn create<'s>(
     super::worker_navigator_storage_property::define(scope, prototype)?;
     super::worker_navigator_gpu_property::define(scope, prototype)?;
     super::worker_navigator_storage_buckets_property::define(scope, prototype)?;
+    if super::worker_global_scope::current_record(scope)
+        .is_some_and(|record| record.kind == super::worker_global_scope::RealmKind::Dedicated)
+    {
+        let version = crate::browser_surface::current_version(scope);
+        crate::browser_surface::reorder_string_properties(
+            scope,
+            prototype,
+            crate::browser_surface::worker_navigator_names(version),
+            "WorkerNavigator.prototype",
+        )?;
+    }
     let navigator = v8::Object::new(scope);
     if crate::webidl::set_platform_prototype(scope, navigator, prototype.into()) != Some(true) {
         return Err("cannot create WorkerNavigator".to_owned());

@@ -32,6 +32,10 @@ fn set_adopted_style_sheets(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if super::shadow_root::record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(seq) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "adoptedStyleSheets must be a sequence");
         return;

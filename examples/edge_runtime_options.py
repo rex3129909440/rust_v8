@@ -68,6 +68,7 @@ class EdgeRunOptions:
     """Non-fingerprint inputs used to construct the isolated runtime."""
 
     page: PageInit | None = None
+    cross_origin_isolated: bool = False
     network_replay: tuple[NetworkReplayEntry, ...] = ()
     iframe_hooks: tuple[IframeHook, ...] = ()
     deterministic: DeterministicExecution = field(

@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrHitTestResultStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrHitTestResultStore::default());
@@ -46,21 +49,42 @@ fn illegal(
 }
 fn pose(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     if let Ok(v) = super::xr_pose::create(s) {
         r.set(v.into())
     }
 }
 fn anchor(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !is_instance(s, a.this()) {
+        let message = "Failed to execute 'createAnchor' on 'XRHitTestResult': Illegal invocation";
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(s, message) {
+            r.set(promise.into());
+        }
+        return;
+    }
     if let Ok(v) = super::xr_anchor::create(s)
         && let Ok(p) = super::writable_stream::resolved_promise(s, v.into())
     {
         r.set(p.into())
     }
+}
+fn is_instance(s: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    s.get_slot::<XrHitTestResultStore>()
+        .is_some_and(|store| store.instances.contains(&object.get_identity_hash().get()))
+}
+fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = is_instance(s, a.this());
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }

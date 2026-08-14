@@ -371,6 +371,10 @@ fn set_value_as_string(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let source = crate::webidl::value_to_string(scope, arguments.get(0));
     let Some(parsed) = parse_length(&source) else {
         crate::webidl::throw_type_error(scope, "Invalid SVG length");
@@ -384,6 +388,10 @@ fn convert_to_specified_units(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let unit = arguments.get(0).int32_value(scope).unwrap_or(UNKNOWN);
     if !(NUMBER..=PC).contains(&unit) {
         crate::webidl::throw_type_error(scope, "Invalid SVG length unit");
@@ -401,6 +409,10 @@ fn new_value_specified_units(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let unit = arguments.get(0).int32_value(scope).unwrap_or(UNKNOWN);
     let value = arguments.get(1).number_value(scope).unwrap_or(f64::NAN);
     if !(NUMBER..=PC).contains(&unit) {

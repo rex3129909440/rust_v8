@@ -562,7 +562,15 @@ fn make_xr_compatible(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        let message = v8::String::new(
+            scope,
+            "Failed to execute 'makeXRCompatible' on 'WebGLRenderingContext': Illegal invocation",
+        )
+        .expect("static string");
+        let exception = v8::Exception::type_error(scope, message);
+        if let Ok(promise) = super::writable_stream::rejected_promise(scope, exception) {
+            result.set(promise.into());
+        }
         return;
     }
     let undefined = v8::undefined(scope);
@@ -997,6 +1005,15 @@ fn record(
         .cloned()
 }
 
+fn require_context(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    if record(scope, object).is_some() {
+        true
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        false
+    }
+}
+
 fn update(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -1252,6 +1269,9 @@ fn delete_buffer(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             if let Some(x) = v.buffers.get_mut(&id) {
@@ -1265,6 +1285,9 @@ fn delete_program(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             if let Some(x) = v.programs.get_mut(&id) {
@@ -1278,6 +1301,9 @@ fn delete_shader(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             if let Some(x) = v.shaders.get_mut(&id) {
@@ -1291,6 +1317,9 @@ fn delete_framebuffer(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             v.framebuffers.remove(&id);
@@ -1302,6 +1331,9 @@ fn delete_renderbuffer(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             v.renderbuffers.remove(&id);
@@ -1313,6 +1345,9 @@ fn delete_texture(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             v.textures.remove(&id);
@@ -1325,6 +1360,9 @@ fn shader_source(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let id = object_id(a.get(0));
     let source = crate::webidl::value_to_string(s, a.get(1));
     if let Some(id) = id {
@@ -1341,6 +1379,9 @@ fn compile_shader(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             if let Some(x) = v.shaders.get_mut(&id) {
@@ -1359,6 +1400,9 @@ fn attach_shader(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let p = object_id(a.get(0));
     let sh = object_id(a.get(1));
     if let (Some(p), Some(sh)) = (p, sh) {
@@ -1378,6 +1422,9 @@ fn detach_shader(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let p = object_id(a.get(0));
     let sh = object_id(a.get(1));
     if let (Some(p), Some(sh)) = (p, sh) {
@@ -1393,6 +1440,9 @@ fn link_program(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             let attached = v
@@ -1435,6 +1485,9 @@ fn validate_program(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if let Some(id) = object_id(a.get(0)) {
         update(s, a.this(), |v| {
             if let Some(p) = v.programs.get_mut(&id) {
@@ -1471,6 +1524,9 @@ fn get_shader_parameter(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let id = object_id(a.get(0));
     let parameter = a.get(1).uint32_value(s).unwrap_or(0);
     let value = id.and_then(|id| record(s, a.this())?.shaders.get(&id).cloned());
@@ -1490,6 +1546,9 @@ fn get_shader_source(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let value = object_id(a.get(0)).and_then(|id| {
         record(s, a.this())?
             .shaders
@@ -1507,6 +1566,9 @@ fn get_shader_info_log(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let value = object_id(a.get(0)).and_then(|id| {
         record(s, a.this())?
             .shaders
@@ -1524,6 +1586,9 @@ fn get_program_parameter(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let id = object_id(a.get(0));
     let parameter = a.get(1).uint32_value(s).unwrap_or(0);
     let value = id.and_then(|id| record(s, a.this())?.programs.get(&id).cloned());
@@ -1546,6 +1611,9 @@ fn get_program_info_log(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let value = object_id(a.get(0)).and_then(|id| {
         record(s, a.this())?
             .programs
@@ -1563,6 +1631,9 @@ fn get_attached_shaders(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let shaders = object_id(a.get(0))
         .and_then(|id| {
             let context = record(s, a.this())?;
@@ -1879,6 +1950,9 @@ fn get_uniform_location(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let program = object_id(a.get(0));
     let name = crate::webidl::value_to_string(s, a.get(1));
     let existing = program.and_then(|program| {
@@ -1929,6 +2003,9 @@ fn get_active_attrib(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let program = object_id(a.get(0));
     let index = a.get(1).uint32_value(s).unwrap_or(0) as usize;
     let name = program.and_then(|id| {
@@ -1952,6 +2029,9 @@ fn get_active_uniform(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let program = object_id(a.get(0));
     let index = a.get(1).uint32_value(s).unwrap_or(0) as usize;
     let name = program.and_then(|id| {
@@ -1975,6 +2055,9 @@ fn get_attrib_location(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let program = object_id(a.get(0));
     let name = crate::webidl::value_to_string(s, a.get(1));
     let location = program
@@ -2341,9 +2424,10 @@ fn is_context_lost(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if record(s, a.this()).is_some() {
-        r.set(v8::Boolean::new(s, false).into())
+    if !require_context(s, a.this()) {
+        return;
     }
+    r.set(v8::Boolean::new(s, false).into())
 }
 fn return_membership(
     s: &mut v8::PinScope<'_, '_>,
@@ -2351,6 +2435,9 @@ fn return_membership(
     mut r: v8::ReturnValue<'_>,
     select: impl FnOnce(&ContextRecord, i32) -> bool,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let id = object_id(a.get(0));
     let value = record(s, a.this())
         .zip(id)
@@ -2430,6 +2517,9 @@ fn is_enabled(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let cap = a.get(0).uint32_value(s).unwrap_or(0);
     let value = record(s, a.this()).is_some_and(|v| v.enabled_capabilities.contains(&cap));
     r.set(v8::Boolean::new(s, value).into())
@@ -2572,9 +2662,10 @@ fn check_framebuffer_status(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if record(s, a.this()).is_some() {
-        r.set(v8::Integer::new_from_unsigned(s, FRAMEBUFFER_COMPLETE).into())
+    if !require_context(s, a.this()) {
+        return;
     }
+    r.set(v8::Integer::new_from_unsigned(s, FRAMEBUFFER_COMPLETE).into())
 }
 
 fn get_drawing_buffer_format(
@@ -2582,9 +2673,10 @@ fn get_drawing_buffer_format(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if record(s, a.this()).is_some() {
-        r.set(v8::Integer::new(s, 0x8058).into())
+    if !require_context(s, a.this()) {
+        return;
     }
+    r.set(v8::Integer::new(s, 0x8058).into())
 }
 fn drawing_buffer_storage(
     s: &mut v8::PinScope<'_, '_>,
@@ -3095,6 +3187,9 @@ fn get_vertex_attrib_offset(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let index = a.get(0).uint32_value(s).unwrap_or(0);
     let offset = record(s, a.this())
         .and_then(|context| {
@@ -3164,6 +3259,9 @@ fn set_uniform_values(
     a: v8::FunctionCallbackArguments<'_>,
     values: Vec<f64>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     if a.get(0).is_null() {
         return;
     }
@@ -3360,6 +3458,9 @@ fn get_uniform(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let program = object_id(a.get(0));
     let location = object_id(a.get(1));
     let uniform = location.and_then(|id| record(s, a.this())?.uniform_locations.get(&id).cloned());
@@ -3523,6 +3624,9 @@ fn get_tex_parameter(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let target = a.get(0).uint32_value(s).unwrap_or(0);
     let parameter = a.get(1).uint32_value(s).unwrap_or(0);
     let value = bound_texture_id(s, a.this(), target).and_then(|texture| {
@@ -3591,6 +3695,9 @@ fn get_renderbuffer_parameter(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let parameter = a.get(1).uint32_value(s).unwrap_or(0);
     let value = record(s, a.this()).and_then(|context| {
         let id = global_object_id(s, context.bound_renderbuffer.as_ref())?;
@@ -3662,6 +3769,9 @@ fn get_framebuffer_attachment_parameter(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(s, a.this()) {
+        return;
+    }
     let attachment = a.get(1).uint32_value(s).unwrap_or(0);
     let parameter = a.get(2).uint32_value(s).unwrap_or(0);
     let resource = record(s, a.this()).and_then(|context| {

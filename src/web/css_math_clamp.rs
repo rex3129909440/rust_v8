@@ -68,24 +68,27 @@ fn construct(
     }
     let lower = match super::css_numeric_value::numberish(scope, arguments.get(0)) {
         Ok(value) => value,
-        Err(message) => {
+        Err(super::css_numeric_value::NumberishError::Message(message)) => {
             crate::webidl::throw_type_error(scope, &message);
             return;
         }
+        Err(super::css_numeric_value::NumberishError::Exception) => return,
     };
     let value = match super::css_numeric_value::numberish(scope, arguments.get(1)) {
         Ok(value) => value,
-        Err(message) => {
+        Err(super::css_numeric_value::NumberishError::Message(message)) => {
             crate::webidl::throw_type_error(scope, &message);
             return;
         }
+        Err(super::css_numeric_value::NumberishError::Exception) => return,
     };
     let upper = match super::css_numeric_value::numberish(scope, arguments.get(2)) {
         Ok(value) => value,
-        Err(message) => {
+        Err(super::css_numeric_value::NumberishError::Message(message)) => {
             crate::webidl::throw_type_error(scope, &message);
             return;
         }
+        Err(super::css_numeric_value::NumberishError::Exception) => return,
     };
     let compatibility_values = vec![lower.clone(), value.clone(), upper.clone()];
     if !super::css_numeric_value::compatible(scope, &compatibility_values) {

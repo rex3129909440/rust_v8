@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrVisibilityMaskChangeEventStore {
     pub(crate) constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrVisibilityMaskChangeEventStore::default());
@@ -50,45 +53,91 @@ pub(crate) fn construct(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !a.is_construct_call() || a.length() < 2 {
-        crate::webidl::throw_type_error(s, "2 arguments required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'XRVisibilityMaskChangeEvent': 2 arguments required, but only 1 present.",
+        );
+        return;
+    }
+    let Some(event_type) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
+    if !a.get(1).is_object() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'XRVisibilityMaskChangeEvent': The provided value is not of type 'XRVisibilityMaskChangeEventInit'.",
+        );
+        return;
+    }
+    let eye_missing = v8::Local::<v8::Object>::try_from(a.get(1))
+        .ok()
+        .and_then(|init| v8::String::new(s, "eye").and_then(|key| init.get(s, key.into())))
+        .is_none_or(|value| value.is_undefined());
+    if eye_missing {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'XRVisibilityMaskChangeEvent': Failed to read the 'eye' property from 'XRVisibilityMaskChangeEventInit': Required member is undefined.",
+        );
         return;
     }
     let (bubbles, cancelable, composed) = super::event::event_init(s, a.get(1));
-    super::event::attach(
-        s,
-        a.this(),
-        crate::webidl::value_to_string(s, a.get(0)),
-        bubbles,
-        cancelable,
-        composed,
-    );
+    super::event::attach(s, a.this(), event_type, bubbles, cancelable, composed);
+    s.get_slot_mut::<XrVisibilityMaskChangeEventStore>()
+        .expect("XRVisibilityMaskChangeEvent state")
+        .instances
+        .insert(a.this().get_identity_hash().get());
     r.set(a.this().into())
+}
+pub(crate) fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = s
+        .get_slot::<XrVisibilityMaskChangeEventStore>()
+        .is_some_and(|store| {
+            store
+                .instances
+                .contains(&a.this().get_identity_hash().get())
+        });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }
 pub(crate) fn null(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::null(s).into())
 }
 pub(crate) fn eye(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::String::new(s, "none").unwrap().into())
 }
 pub(crate) fn zero(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Integer::new(s, 0).into())
 }
 pub(crate) fn array(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Array::new(s, 0).into())
 }

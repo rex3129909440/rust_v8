@@ -16,6 +16,15 @@ fn request_storage_access(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !super::document::is_document(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "Document",
+            "requestStorageAccess",
+            result,
+        );
+        return;
+    }
     if !super::document_method_support::ensure(scope, arguments.this()) {
         return;
     }

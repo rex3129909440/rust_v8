@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrLightEstimateStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrLightEstimateStore::default());
@@ -47,16 +50,22 @@ fn illegal(
 }
 fn array(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Array::new(s, 27).into())
 }
 fn object(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Object::new(s).into())
 }
 
@@ -69,5 +78,20 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(s, o, p.into()) != Some(true) {
         return Err("cannot create XRLightEstimate".to_owned());
     }
+    s.get_slot_mut::<XrLightEstimateStore>()
+        .expect("XRLightEstimate state")
+        .instances
+        .insert(o.get_identity_hash().get());
     Ok(o)
+}
+fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = s.get_slot::<XrLightEstimateStore>().is_some_and(|store| {
+        store
+            .instances
+            .contains(&a.this().get_identity_hash().get())
+    });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }

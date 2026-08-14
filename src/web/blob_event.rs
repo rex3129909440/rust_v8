@@ -70,18 +70,29 @@ pub(crate) fn construct(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !arguments.is_construct_call() || arguments.length() < 2 {
-        crate::webidl::throw_type_error(scope, "BlobEvent requires a type and initializer");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'BlobEvent': 2 arguments required, but only 1 present.",
+        );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "BlobEvent initializer must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'BlobEvent': The provided value is not of type 'BlobEventInit'.",
+        );
         return;
     };
     let Some(data) = property(scope, init, "data")
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
     else {
-        crate::webidl::throw_type_error(scope, "BlobEvent data must be a Blob");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'BlobEvent': Failed to read the 'data' property from 'BlobEventInit': Required member is undefined.",
+        );
         return;
     };
     if super::blob::byte_snapshot(scope, data).is_none() {

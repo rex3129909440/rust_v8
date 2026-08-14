@@ -418,7 +418,7 @@ const WORKER_REALM_MATRIX_SETUP: &str = r#"
       Object.getPrototypeOf(BroadcastChannel) === EventTarget,
       console.log instanceof Function,
       console.createTask instanceof Function,
-      Object.prototype.toString.call(console.memory) === "[object MemoryInfo]",
+      typeof console.memory === "undefined",
       performance instanceof Performance,
       performance instanceof EventTarget,
       performance === self.performance,

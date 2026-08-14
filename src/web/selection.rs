@@ -5,6 +5,8 @@ pub(crate) struct SelectionStore {
     constructor: crate::webidl::RealmConstructor,
     records: HashMap<i32, Record>,
     document_selections: HashMap<i32, v8::Global<v8::Object>>,
+    selection_documents: HashMap<i32, v8::Global<v8::Object>>,
+    pending_selectionchange: std::collections::HashSet<i32>,
 }
 #[derive(Clone)]
 pub(crate) struct Record {
@@ -121,11 +123,14 @@ pub(crate) fn for_document<'s>(
     }
     let selection = create(scope)?;
     let stored = v8::Global::new(scope, selection);
-    scope
+    let document_global = v8::Global::new(scope, document);
+    let store = scope
         .get_slot_mut::<SelectionStore>()
-        .ok_or_else(|| "Selection state was not prepared".to_owned())?
-        .document_selections
-        .insert(identity, stored);
+        .ok_or_else(|| "Selection state was not prepared".to_owned())?;
+    store.document_selections.insert(identity, stored);
+    store
+        .selection_documents
+        .insert(selection.get_identity_hash().get(), document_global);
     Ok(selection)
 }
 fn illegal_constructor(
@@ -139,24 +144,125 @@ fn illegal_constructor(
     );
 }
 pub(crate) fn record(scope: &v8::PinScope<'_, '_>, o: v8::Local<'_, v8::Object>) -> Option<Record> {
-    scope
+    let mut record = scope
         .get_slot::<SelectionStore>()?
         .records
         .get(&o.get_identity_hash().get())
-        .cloned()
+        .cloned()?;
+    if let Some(range) = record.ranges.first() {
+        let range = v8::Local::new(scope, range);
+        if let Some(boundary) = super::abstract_range::record(scope, range) {
+            if record.direction == "backward" {
+                record.anchor = Some(boundary.end_container.clone());
+                record.anchor_offset = boundary.end_offset;
+                record.focus = Some(boundary.start_container);
+                record.focus_offset = boundary.start_offset;
+            } else {
+                record.anchor = Some(boundary.start_container.clone());
+                record.anchor_offset = boundary.start_offset;
+                record.focus = Some(boundary.end_container);
+                record.focus_offset = boundary.end_offset;
+            }
+        }
+    }
+    Some(record)
+}
+
+pub(crate) fn associated_document<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    selection: v8::Local<'_, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    scope
+        .get_slot::<SelectionStore>()?
+        .selection_documents
+        .get(&selection.get_identity_hash().get())
+        .map(|document| v8::Local::new(scope, document))
 }
 pub(crate) fn update(
     scope: &mut v8::PinScope<'_, '_>,
     o: v8::Local<'_, v8::Object>,
     change: impl FnOnce(&mut Record),
 ) {
+    let identity = o.get_identity_hash().get();
+    let before = record(scope, o).map(|record| record_signature(scope, &record));
     if let Some(v) = scope
         .get_slot_mut::<SelectionStore>()
-        .and_then(|s| s.records.get_mut(&o.get_identity_hash().get()))
+        .and_then(|s| s.records.get_mut(&identity))
     {
-        change(v)
+        change(v);
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let after = record(scope, o).map(|record| record_signature(scope, &record));
+    if before != after {
+        queue_selectionchange(scope, identity);
+    }
+}
+
+fn record_signature(
+    scope: &v8::PinScope<'_, '_>,
+    record: &Record,
+) -> (i32, u32, i32, u32, Vec<i32>, String) {
+    let identity = |value: &Option<v8::Global<v8::Object>>| {
+        value
+            .as_ref()
+            .map(|value| v8::Local::new(scope, value).get_identity_hash().get())
+            .unwrap_or(0)
+    };
+    let ranges = record
+        .ranges
+        .iter()
+        .map(|range| v8::Local::new(scope, range).get_identity_hash().get())
+        .collect();
+    (
+        identity(&record.anchor),
+        record.anchor_offset,
+        identity(&record.focus),
+        record.focus_offset,
+        ranges,
+        record.direction.clone(),
+    )
+}
+
+fn queue_selectionchange(scope: &mut v8::PinScope<'_, '_>, selection_id: i32) {
+    let should_queue = scope.get_slot_mut::<SelectionStore>().is_some_and(|store| {
+        store.selection_documents.contains_key(&selection_id)
+            && store.pending_selectionchange.insert(selection_id)
+    });
+    if !should_queue {
+        return;
+    }
+    let data = v8::Integer::new(scope, selection_id);
+    if let Some(callback) = v8::Function::builder(deliver_selectionchange)
+        .data(data.into())
+        .length(0)
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope)
+    {
+        scope.enqueue_microtask(callback);
+    }
+}
+
+fn deliver_selectionchange(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let Some(selection_id) = arguments.data().int32_value(scope) else {
+        return;
+    };
+    let document = scope.get_slot_mut::<SelectionStore>().and_then(|store| {
+        store.pending_selectionchange.remove(&selection_id);
+        store.selection_documents.get(&selection_id).cloned()
+    });
+    let Some(document) = document else {
+        return;
+    };
+    let document = v8::Local::new(scope, &document);
+    if let Ok(event) = super::event::create(scope, "selectionchange") {
+        super::event::set_trusted(scope, event, true);
+        super::event_target::dispatch(scope, document, event);
     }
 }
 pub(crate) fn return_node(

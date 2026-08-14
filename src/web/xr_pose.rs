@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrPoseStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrPoseStore::default());
@@ -50,21 +53,45 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(s, o, p.into()) != Some(true) {
         return Err("cannot create XRPose".to_owned());
     }
+    attach(s, o);
     Ok(o)
+}
+pub(crate) fn attach(s: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) {
+    s.get_slot_mut::<XrPoseStore>()
+        .expect("XRPose state")
+        .instances
+        .insert(object.get_identity_hash().get());
+}
+fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = s.get_slot::<XrPoseStore>().is_some_and(|store| {
+        store
+            .instances
+            .contains(&a.this().get_identity_hash().get())
+    });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }
 fn transform(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     if let Ok(v) = super::xr_rigid_transform::create(s) {
         r.set(v.into())
     }
 }
 fn emulated(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Boolean::new(s, false).into())
 }

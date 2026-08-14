@@ -129,6 +129,13 @@ pub(crate) fn sample_current_realm(scope: &mut v8::PinScope<'_, '_>) {
     sample_realm_at(scope, realm_id, timestamp);
 }
 
+pub(crate) fn document_sample(scope: &v8::PinScope<'_, '_>, realm_id: i32) -> f64 {
+    scope
+        .get_slot::<AnimationTimelineStore>()
+        .and_then(|store| store.document_samples.get(&realm_id).copied())
+        .unwrap_or(0.0)
+}
+
 fn record(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -138,6 +145,18 @@ fn record(
         .records
         .get(&object.get_identity_hash().get())
         .cloned()
+}
+
+pub(crate) fn current_time(
+    scope: &v8::PinScope<'_, '_>,
+    timeline: v8::Local<'_, v8::Object>,
+) -> Option<f64> {
+    let record = record(scope, timeline)?;
+    if let Some(origin) = record.document_origin {
+        record.current_time.map(|sample| sample - origin)
+    } else {
+        record.current_time
+    }
 }
 
 fn return_optional_number(

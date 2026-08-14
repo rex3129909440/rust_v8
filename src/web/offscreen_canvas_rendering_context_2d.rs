@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone)]
 enum PaintStyle {
@@ -481,6 +482,15 @@ fn record(
         .cloned()
 }
 
+fn require_context(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    if record(scope, object).is_some() {
+        true
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        false
+    }
+}
+
 pub(crate) fn pixel_snapshot(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -577,6 +587,9 @@ fn set_string(
     select: fn(&mut CanvasState) -> &mut String,
     valid: fn(&str) -> bool,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, a.get(0));
     if valid(&value) {
         update(scope, a.this(), |record| *select(&mut record.state) = value)
@@ -611,7 +624,573 @@ fn set_font(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_string(s, a, |v| &mut v.font, |v| !v.trim().is_empty())
+    if !require_context(s, a.this()) {
+        return;
+    }
+    let value = crate::webidl::value_to_string(s, a.get(0));
+    let fingerprint = crate::fingerprint::edge(s);
+    let context = CanvasFontParseContext {
+        platform: &fingerprint.navigator.platform,
+        viewport_width: fingerprint.screen.viewport_width,
+        viewport_height: fingerprint.screen.viewport_height,
+    };
+    if let Some(value) = parse_canvas_font(&value, context) {
+        update(s, a.this(), |record| {
+            record.state.font = value.serialized;
+            record.state.font_stretch = value.stretch;
+            record.state.font_variant_caps = value.variant_caps;
+        });
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CanvasFontParseContext<'a> {
+    platform: &'a str,
+    viewport_width: f64,
+    viewport_height: f64,
+}
+
+struct ParsedCanvasFont {
+    serialized: String,
+    stretch: String,
+    variant_caps: String,
+}
+
+/// Parse and serialize the CSS `font` shorthand used by Canvas. Invalid
+/// assignments are ignored by the platform setter, so this deliberately
+/// returns `None` instead of retaining an unparsed source string.
+fn canonical_canvas_font(value: &str, context: CanvasFontParseContext<'_>) -> Option<String> {
+    parse_canvas_font(value, context).map(|font| font.serialized)
+}
+
+fn parse_canvas_font(value: &str, context: CanvasFontParseContext<'_>) -> Option<ParsedCanvasFont> {
+    let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    if value.is_empty()
+        || value.contains('\0')
+        || lower.contains("var(")
+        || lower.contains("env(")
+        || lower.contains("!important")
+        || matches!(
+            lower.as_str(),
+            "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+        )
+    {
+        return None;
+    }
+    if let Some(system) = canvas_system_font(&lower, context.platform) {
+        return Some(ParsedCanvasFont {
+            serialized: system.to_owned(),
+            stretch: "normal".to_owned(),
+            variant_caps: "normal".to_owned(),
+        });
+    }
+
+    let tokens = canvas_font_tokens(value)?;
+    let size_index = tokens
+        .iter()
+        .position(|token| canvas_font_size_value(token, context).is_some())?;
+    let size = canvas_font_size_value(&tokens[size_index], context)?;
+    if !size.is_finite() || size < 0.0 {
+        return None;
+    }
+
+    let mut style = None;
+    let mut variant = None;
+    let mut weight = None;
+    let mut stretch = None;
+    let mut position = 0;
+    while position < size_index {
+        let token = tokens[position].to_ascii_lowercase();
+        match token.as_str() {
+            "normal" => {}
+            "italic" if style.is_none() => style = Some("italic"),
+            "oblique" if style.is_none() => {
+                // Edge 150 serializes an angle-less oblique style as italic.
+                // Its Canvas shorthand consumes an optional angle but does not
+                // retain that style in the exposed serialization.
+                if tokens
+                    .get(position + 1)
+                    .is_some_and(|next| is_css_angle(next))
+                {
+                    position += 1;
+                    style = Some("normal");
+                } else {
+                    style = Some("italic");
+                }
+            }
+            "small-caps" if variant.is_none() => variant = Some("small-caps"),
+            "bold" | "bolder" if weight.is_none() => weight = Some("bold".to_owned()),
+            "lighter" if weight.is_none() => weight = Some("100".to_owned()),
+            value
+                if weight.is_none()
+                    && value.parse::<f64>().is_ok_and(|number| number.is_finite()) =>
+            {
+                let number = value.parse::<f64>().ok()?;
+                if !number.is_finite() || !(1.0..=1000.0).contains(&number) {
+                    return None;
+                }
+                weight = match number {
+                    400.0 => Some("normal".to_owned()),
+                    700.0 => Some("bold".to_owned()),
+                    _ => Some(format_css_number(number)),
+                };
+            }
+            value if stretch.is_none() && is_font_stretch_keyword(value) => {
+                stretch = Some(value.to_owned())
+            }
+            _ => return None,
+        }
+        position += 1;
+    }
+
+    position = size_index + 1;
+    if tokens.get(position).is_some_and(|token| token == "/") {
+        let line_height = tokens.get(position + 1)?;
+        if !valid_canvas_line_height(line_height, size, context) {
+            return None;
+        }
+        position += 2;
+    }
+    if position >= tokens.len() || tokens[position] == "/" {
+        return None;
+    }
+    let family = canonical_font_family_list(&tokens[position..].join(" "))?;
+
+    let mut output = Vec::new();
+    if let Some(style) = style.filter(|value| *value != "normal") {
+        output.push(style.to_owned());
+    }
+    if let Some(variant) = variant {
+        output.push(variant.to_owned());
+    }
+    if let Some(weight) = weight.filter(|value| value != "normal") {
+        output.push(weight);
+    }
+    // Canvas retains font-stretch for face selection but omits it from the
+    // `font` getter serialization in Edge 150. Consuming it here still makes
+    // the rest of the shorthand parse correctly.
+    output.push(format!("{}px", format_css_number(size)));
+    output.push(family);
+    Some(ParsedCanvasFont {
+        serialized: output.join(" "),
+        stretch: stretch.unwrap_or_else(|| "normal".to_owned()),
+        variant_caps: variant.unwrap_or("normal").to_owned(),
+    })
+}
+
+fn canvas_system_font(value: &str, platform: &str) -> Option<&'static str> {
+    if platform.to_ascii_lowercase().starts_with("win") {
+        match value {
+            "caption" | "icon" | "message-box" => Some("16px Arial"),
+            "menu" | "small-caption" | "status-bar" => Some("12px \"Microsoft YaHei UI\""),
+            _ => None,
+        }
+    } else if platform.eq_ignore_ascii_case("MacIntel") {
+        match value {
+            "caption" | "icon" | "menu" | "message-box" | "small-caption" | "status-bar" => {
+                Some("13px system-ui")
+            }
+            _ => None,
+        }
+    } else {
+        match value {
+            "caption" | "icon" | "menu" | "message-box" | "small-caption" | "status-bar" => {
+                Some("16px sans-serif")
+            }
+            _ => None,
+        }
+    }
+}
+
+fn canvas_font_tokens(value: &str) -> Option<Vec<String>> {
+    let mut output = Vec::new();
+    let mut token = String::new();
+    let mut quote = None;
+    let mut depth = 0_u32;
+    let mut escaped = false;
+    for character in value.chars() {
+        if escaped {
+            token.push(character);
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            token.push(character);
+            escaped = true;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            token.push(character);
+            if character == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+            token.push(character);
+            continue;
+        }
+        match character {
+            '(' => {
+                depth += 1;
+                token.push(character);
+            }
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                token.push(character);
+            }
+            '/' if depth == 0 => {
+                if !token.is_empty() {
+                    output.push(std::mem::take(&mut token));
+                }
+                output.push("/".to_owned());
+            }
+            character if character.is_whitespace() && depth == 0 => {
+                if !token.is_empty() {
+                    output.push(std::mem::take(&mut token));
+                }
+            }
+            _ => token.push(character),
+        }
+    }
+    if escaped || depth != 0 {
+        return None;
+    }
+    if !token.is_empty() {
+        output.push(token);
+    }
+    (!output.is_empty()).then_some(output)
+}
+
+fn canvas_font_size_value(token: &str, context: CanvasFontParseContext<'_>) -> Option<f64> {
+    let lower = token.to_ascii_lowercase();
+    let named = match lower.as_str() {
+        "xx-small" => Some(9.0),
+        "x-small" => Some(10.0),
+        "small" => Some(13.0),
+        "medium" => Some(16.0),
+        "large" => Some(18.0),
+        "x-large" => Some(24.0),
+        "xx-large" => Some(32.0),
+        "xxx-large" => Some(48.0),
+        "smaller" => Some(8.0),
+        "larger" => Some(12.0),
+        "math" => Some(16.0),
+        _ => None,
+    };
+    if named.is_some() {
+        return named;
+    }
+    let resolved = crate::web::css_calculation::resolve_length(
+        &lower,
+        crate::web::css_calculation::EvaluationContext {
+            viewport_width: context.viewport_width,
+            viewport_height: context.viewport_height,
+            percentage_basis: Some(10.0),
+            font_size: 10.0,
+            root_font_size: 16.0,
+            intrinsic_size: None,
+        },
+    )?;
+    if resolved < 0.0 {
+        return None;
+    }
+    // Absolute units are serialized before LayoutUnit quantization in the
+    // Canvas font getter (16pt -> 21.3333px rather than 21.3281px).
+    crate::web::css_calculation::computed_absolute_length(&lower)
+        .and_then(|value| value.strip_suffix("px")?.parse::<f64>().ok())
+        .or(Some(resolved))
+}
+
+fn valid_canvas_line_height(value: &str, size: f64, context: CanvasFontParseContext<'_>) -> bool {
+    if value.eq_ignore_ascii_case("normal") {
+        return true;
+    }
+    if let Ok(number) = value.parse::<f64>() {
+        return number.is_finite() && number >= 0.0;
+    }
+    crate::web::css_calculation::resolve_line_height(
+        &value.to_ascii_lowercase(),
+        crate::web::css_calculation::EvaluationContext {
+            viewport_width: context.viewport_width,
+            viewport_height: context.viewport_height,
+            percentage_basis: Some(size),
+            font_size: size,
+            root_font_size: 16.0,
+            intrinsic_size: None,
+        },
+    )
+    .is_some_and(|value| value >= 0.0)
+}
+
+fn is_css_angle(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    ["deg", "grad", "rad", "turn"]
+        .iter()
+        .find_map(|unit| lower.strip_suffix(unit))
+        .and_then(|value| value.parse::<f64>().ok())
+        .is_some_and(f64::is_finite)
+}
+
+fn is_font_stretch_keyword(value: &str) -> bool {
+    matches!(
+        value,
+        "ultra-condensed"
+            | "extra-condensed"
+            | "condensed"
+            | "semi-condensed"
+            | "semi-expanded"
+            | "expanded"
+            | "extra-expanded"
+            | "ultra-expanded"
+    )
+}
+
+fn canonical_font_family_list(value: &str) -> Option<String> {
+    let families = split_canvas_font_families(value)?;
+    let mut output = Vec::with_capacity(families.len());
+    for family in families {
+        let family = canonical_font_family(&family)?;
+        output.push(family);
+    }
+    (!output.is_empty()).then(|| output.join(", "))
+}
+
+fn split_canvas_font_families(value: &str) -> Option<Vec<String>> {
+    let mut output = Vec::new();
+    let mut part = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for character in value.chars() {
+        if escaped {
+            part.push('\\');
+            part.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if let Some(delimiter) = quote {
+            part.push(character);
+            if character == delimiter {
+                quote = None;
+            }
+        } else if matches!(character, '\'' | '"') {
+            quote = Some(character);
+            part.push(character);
+        } else if character == ',' {
+            let family = part.trim();
+            if family.is_empty() {
+                return None;
+            }
+            output.push(family.to_owned());
+            part.clear();
+        } else {
+            part.push(character);
+        }
+    }
+    if escaped || part.trim().is_empty() {
+        return None;
+    }
+    output.push(part.trim().to_owned());
+    Some(output)
+}
+
+fn canonical_font_family(value: &str) -> Option<String> {
+    let value = value.trim();
+    let quoted = value.starts_with(['\'', '"']);
+    if !quoted && !valid_unquoted_family(value) {
+        return None;
+    }
+    let raw = if quoted {
+        let delimiter = value.chars().next()?;
+        value
+            .strip_prefix(delimiter)
+            .and_then(|value| value.strip_suffix(delimiter))
+            // Blink accepts an unterminated opening quote in this Canvas
+            // setter and serializes the remaining identifier normally.
+            .unwrap_or_else(|| &value[delimiter.len_utf8()..])
+    } else {
+        value
+    };
+    let family = unescape_css_identifier(raw.trim())?;
+    if family.is_empty()
+        || family.chars().any(|character| character.is_control())
+        || matches!(
+            family.to_ascii_lowercase().as_str(),
+            "inherit" | "initial" | "unset" | "revert" | "revert-layer" | "default"
+        )
+    {
+        return None;
+    }
+    let generic = matches!(
+        family.to_ascii_lowercase().as_str(),
+        "serif"
+            | "sans-serif"
+            | "cursive"
+            | "fantasy"
+            | "monospace"
+            | "system-ui"
+            | "ui-serif"
+            | "ui-sans-serif"
+            | "ui-monospace"
+            | "ui-rounded"
+            | "math"
+            | "fangsong"
+    );
+    let simple = family
+        .chars()
+        .all(|character| character.is_alphanumeric() || matches!(character, '-' | '_'));
+    if generic || (simple && !quoted) {
+        Some(family)
+    } else if simple && quoted && !family.contains(char::is_whitespace) {
+        Some(family)
+    } else {
+        Some(format!(
+            "\"{}\"",
+            family.replace('\\', "\\\\").replace('"', "\\\"")
+        ))
+    }
+}
+
+fn valid_unquoted_family(value: &str) -> bool {
+    let mut escaped = false;
+    let mut at_identifier_start = true;
+    for character in value.chars() {
+        if escaped {
+            escaped = false;
+            at_identifier_start = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+        } else if character.is_whitespace() {
+            at_identifier_start = true;
+        } else if at_identifier_start {
+            if character.is_ascii_digit() || matches!(character, '.' | '+' | '/' | '!' | '(' | ')')
+            {
+                return false;
+            }
+            at_identifier_start = false;
+        } else if matches!(character, '/' | '!' | '(' | ')') {
+            return false;
+        }
+    }
+    !escaped && !at_identifier_start
+}
+
+fn unescape_css_identifier(value: &str) -> Option<String> {
+    let mut output = String::new();
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            output.push(character);
+            continue;
+        }
+        let first = characters.next()?;
+        if first.is_ascii_hexdigit() {
+            let mut digits = String::from(first);
+            while digits.len() < 6
+                && characters
+                    .peek()
+                    .is_some_and(|character| character.is_ascii_hexdigit())
+            {
+                digits.push(characters.next()?);
+            }
+            if characters
+                .peek()
+                .is_some_and(|character| character.is_whitespace())
+            {
+                characters.next();
+            }
+            let scalar = u32::from_str_radix(&digits, 16).ok()?;
+            output.push(char::from_u32(scalar).unwrap_or('\u{FFFD}'));
+        } else if first != '\n' && first != '\r' {
+            output.push(first);
+        }
+    }
+    Some(output)
+}
+
+fn format_css_number(value: f64) -> String {
+    let mut output = format!("{value:.4}");
+    while output.contains('.') && output.ends_with('0') {
+        output.pop();
+    }
+    if output.ends_with('.') {
+        output.pop();
+    }
+    if output == "-0" {
+        "0".to_owned()
+    } else {
+        output
+    }
+}
+
+#[cfg(test)]
+mod canvas_font_parser_tests {
+    use super::{CanvasFontParseContext, canonical_canvas_font};
+
+    fn parse(value: &str) -> Option<String> {
+        canonical_canvas_font(
+            value,
+            CanvasFontParseContext {
+                platform: "Win32",
+                viewport_width: 1536.0,
+                viewport_height: 864.0,
+            },
+        )
+    }
+
+    #[test]
+    fn matches_edge_150_canvas_font_serialization_matrix() {
+        let accepted = [
+            ("caption", "16px Arial"),
+            ("menu", "12px \"Microsoft YaHei UI\""),
+            ("italic 16px serif", "italic 16px serif"),
+            ("oblique 16px serif", "italic 16px serif"),
+            ("oblique 10deg 16px serif", "16px serif"),
+            ("small-caps 16px serif", "small-caps 16px serif"),
+            ("700 16px serif", "bold 16px serif"),
+            ("1000 16px serif", "1000 16px serif"),
+            ("condensed 16px serif", "16px serif"),
+            (
+                "normal normal normal normal 16px/normal serif",
+                "16px serif",
+            ),
+            ("16px/20px Arial", "16px Arial"),
+            ("16px/1.5 Arial", "16px Arial"),
+            ("16pt Arial", "21.3333px Arial"),
+            ("1em Arial", "10px Arial"),
+            ("100% Arial", "10px Arial"),
+            ("medium Arial", "16px Arial"),
+            ("16px Arial, serif", "16px Arial, serif"),
+            (r"16px A\ B", "16px \"A B\""),
+            ("16px \"A B\", serif", "16px \"A B\", serif"),
+            ("16PX Arial", "16px Arial"),
+            ("calc(16px) Arial", "16px Arial"),
+        ];
+        for (source, expected) in accepted {
+            assert_eq!(parse(source).as_deref(), Some(expected), "{source}");
+        }
+        for invalid in [
+            "",
+            "inherit",
+            "initial",
+            "unset",
+            "revert",
+            "revert-layer",
+            "foo",
+            "16px",
+            "1001 16px serif",
+            "75% 16px serif",
+            "-1px Arial",
+            "16px var(--x)",
+            "16px serif !important",
+        ] {
+            assert_eq!(parse(invalid), None, "{invalid}");
+        }
+    }
 }
 fn get_text_align(
     s: &mut v8::PinScope<'_, '_>,
@@ -706,7 +1285,25 @@ fn set_font_stretch(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_string(s, a, |v| &mut v.font_stretch, any)
+    set_string(
+        s,
+        a,
+        |v| &mut v.font_stretch,
+        |v| {
+            matches!(
+                v,
+                "ultra-condensed"
+                    | "extra-condensed"
+                    | "condensed"
+                    | "semi-condensed"
+                    | "normal"
+                    | "semi-expanded"
+                    | "expanded"
+                    | "extra-expanded"
+                    | "ultra-expanded"
+            )
+        },
+    )
 }
 fn get_font_variant_caps(
     s: &mut v8::PinScope<'_, '_>,
@@ -720,7 +1317,23 @@ fn set_font_variant_caps(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_string(s, a, |v| &mut v.font_variant_caps, any)
+    set_string(
+        s,
+        a,
+        |v| &mut v.font_variant_caps,
+        |v| {
+            matches!(
+                v,
+                "normal"
+                    | "small-caps"
+                    | "all-small-caps"
+                    | "petite-caps"
+                    | "all-petite-caps"
+                    | "unicase"
+                    | "titling-caps"
+            )
+        },
+    )
 }
 fn get_letter_spacing(
     s: &mut v8::PinScope<'_, '_>,
@@ -923,6 +1536,9 @@ fn set_style(
     a: v8::FunctionCallbackArguments<'_>,
     select: fn(&mut CanvasState) -> &mut PaintStyle,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let value = a.get(0);
     let style = if let Ok(object) = v8::Local::<v8::Object>::try_from(value) {
         if super::canvas_gradient::is_gradient(scope, object)
@@ -998,6 +1614,9 @@ fn set_number(
     select: fn(&mut CanvasState) -> &mut f64,
     valid: fn(f64) -> bool,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let value = a.get(0).number_value(scope).unwrap_or(f64::NAN);
     if valid(value) {
         update(scope, a.this(), |record| *select(&mut record.state) = value)
@@ -1295,6 +1914,9 @@ fn create_linear_gradient(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let v = values(scope, &a, 4);
     if let Ok(g) = super::canvas_gradient::create(
         scope,
@@ -1308,6 +1930,9 @@ fn create_radial_gradient(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let v = values(scope, &a, 6);
     if v[2] < 0.0 || v[5] < 0.0 {
         throw_index_size(scope, "A radial gradient radius is negative");
@@ -1325,6 +1950,9 @@ fn create_conic_gradient(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let v = values(scope, &a, 3);
     if let Ok(g) = super::canvas_gradient::create(
         scope,
@@ -1338,6 +1966,9 @@ fn create_pattern(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let Ok(source) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "The image source is invalid");
         return;
@@ -1358,6 +1989,9 @@ fn create_image_data(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let (width, height) = if a.get(1).is_undefined() {
         let Ok(source) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
             crate::webidl::throw_type_error(scope, "ImageData or dimensions are required");
@@ -2071,6 +2705,9 @@ fn get_image_data(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let v = values(scope, &a, 4);
     let width = v[2].abs() as u32;
     let height = v[3].abs() as u32;
@@ -2109,6 +2746,9 @@ fn put_image_data(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let Ok(data) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "The source must be ImageData");
         return;
@@ -2138,6 +2778,9 @@ fn draw_image(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     if a.length() < 3 {
         crate::webidl::throw_type_error(
             scope,
@@ -2348,6 +2991,9 @@ fn set_line_dash(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, a.this()) {
+        return;
+    }
     let Ok(sequence) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "The line dash must be a sequence");
         return;
@@ -2560,38 +3206,83 @@ fn measure_text(
     let text = crate::webidl::value_to_string(scope, a.get(0));
     let canvas = &crate::fingerprint::edge(scope).rendering.canvas;
     let font_scale = canvas_font_size(&record.state.font) / 10.0;
-    let (configured_width_scale, monospace) = canvas_font_metrics(scope, &record.state.font);
-    let width = measured_text_width(&text, &record.state, monospace)
-        * canvas.text_width_scale
-        * configured_width_scale
-        * font_scale;
+    let (_, monospace) = canvas_font_metrics(scope, &record.state.font);
+    let shaped = shaped_metrics_for_state(scope, &text, &record.state);
+    let width = shaped
+        .map(|metrics| metrics.advance)
+        .unwrap_or_else(|| measured_text_width_for_state(scope, &text, &record.state));
     let has_ink = !text.is_empty();
-    let glyph_left = if monospace && text.starts_with('W') {
+    let font_size = canvas_font_size(&record.state.font);
+    let native_windows_metrics = uses_native_windows_text_metrics(scope, canvas);
+    let unicode_ink = native_windows_metrics
+        .then(|| {
+            mixed_script_horizontal_ink_bounds(&record.state.font, &text, font_size)
+                .or_else(|| unicode_horizontal_ink_bounds(&text, font_size))
+        })
+        .flatten();
+    let native_ink = unicode_ink.or_else(|| {
+        native_windows_metrics.then(|| {
+            super::font_metric_tables::ascii_text_ink_bounds(
+                &record.state.font,
+                &text,
+                font_size,
+                width,
+            )
+        })?
+    });
+    let glyph_left = if let Some(metrics) = shaped {
+        metrics.actual_left
+    } else if let Some((left, _)) = native_ink {
+        left
+    } else if monospace && text.starts_with('W') {
         0.5 * font_scale
     } else {
         canvas.actual_bounding_box_left * font_scale
     };
-    let glyph_right = width * canvas.actual_bounding_box_right_scale
-        - trailing_glyph_inset(&text, monospace) * font_scale;
+    let glyph_right = shaped
+        .map(|metrics| metrics.actual_right)
+        .or_else(|| native_ink.map(|(_, right)| right))
+        .unwrap_or_else(|| {
+            width * canvas.actual_bounding_box_right_scale
+                - trailing_glyph_inset(&text, monospace) * font_scale
+        });
     let (alignment_left, alignment_right) =
         aligned_text_bounds(width, glyph_left, glyph_right, &record.state);
-    let font_size = canvas_font_size(&record.state.font);
-    let font_ascent = if monospace {
+    let native_vertical = native_windows_metrics
+        .then(|| windows_vertical_text_metrics(&record.state.font, &text, font_size))
+        .flatten();
+    let font_ascent = if let Some(metrics) = shaped {
+        metrics.font_ascent
+    } else if let Some(metrics) = native_vertical {
+        metrics.font_ascent
+    } else if monospace {
         font_size * 0.85
     } else {
         canvas.font_bounding_box_ascent * font_scale
     };
-    let font_descent = if monospace {
+    let font_descent = if let Some(metrics) = shaped {
+        metrics.font_descent
+    } else if let Some(metrics) = native_vertical {
+        metrics.font_descent
+    } else if monospace {
         font_size * 0.15
     } else {
         canvas.font_bounding_box_descent * font_scale
     };
-    let actual_ascent = if monospace {
+    let actual_ascent = if let Some(metrics) = shaped {
+        metrics.actual_ascent
+    } else if let Some(metrics) = native_vertical {
+        metrics.actual_ascent
+    } else if monospace {
         font_size * 0.65
     } else {
         canvas.actual_bounding_box_ascent * font_scale
     };
-    let actual_descent = if monospace {
+    let actual_descent = if let Some(metrics) = shaped {
+        metrics.actual_descent
+    } else if let Some(metrics) = native_vertical {
+        metrics.actual_descent
+    } else if monospace {
         0.0
     } else {
         canvas.actual_bounding_box_descent * font_scale
@@ -2602,15 +3293,31 @@ fn measure_text(
         actual_bounding_box_right: if has_ink { alignment_right } else { 0.0 },
         font_bounding_box_ascent: font_ascent,
         font_bounding_box_descent: font_descent,
-        actual_bounding_box_ascent: if has_ink { actual_ascent } else { 0.0 },
+        // Blink preserves the signed zero produced by its baseline-relative
+        // ink calculation.  `Object.is(measureText("").actualBoundingBoxAscent,
+        // -0)` is true in Edge even though ordinary numeric equality hides it.
+        actual_bounding_box_ascent: if has_ink { actual_ascent } else { -0.0 },
         actual_bounding_box_descent: if has_ink { actual_descent } else { 0.0 },
-        hanging_baseline: if monospace {
+        hanging_baseline: if let Some(metrics) = shaped {
+            (metrics.font_ascent * 0.8) as f32 as f64
+        } else if let Some(metrics) = native_vertical {
+            metrics.hanging_baseline
+        } else if monospace {
             font_size * 0.68
         } else {
             canvas.hanging_baseline * font_scale
         },
-        alphabetic_baseline: canvas.alphabetic_baseline * font_scale,
-        ideographic_baseline: if monospace {
+        alphabetic_baseline: if shaped.is_some() || native_vertical.is_some() {
+            -0.0
+        } else {
+            let baseline = canvas.alphabetic_baseline * font_scale;
+            if baseline == 0.0 { -0.0 } else { baseline }
+        },
+        ideographic_baseline: if let Some(metrics) = shaped {
+            -metrics.font_descent
+        } else if let Some(metrics) = native_vertical {
+            -metrics.font_descent
+        } else if monospace {
             -font_size * 0.15
         } else {
             canvas.ideographic_baseline * font_scale
@@ -2621,11 +3328,513 @@ fn measure_text(
     }
 }
 
-fn canvas_font_size(font: &str) -> f64 {
+#[derive(Clone, Copy)]
+struct NativeVerticalTextMetrics {
+    font_ascent: f64,
+    font_descent: f64,
+    actual_ascent: f64,
+    actual_descent: f64,
+    hanging_baseline: f64,
+}
+
+fn uses_native_windows_text_metrics(
+    scope: &v8::PinScope<'_, '_>,
+    canvas: &crate::fingerprint_surface::CanvasFingerprint,
+) -> bool {
+    let fingerprint = crate::fingerprint::edge(scope);
+    fingerprint
+        .navigator
+        .platform
+        .to_ascii_lowercase()
+        .starts_with("win")
+        && approximately(canvas.font_bounding_box_ascent, 9.0)
+        && approximately(canvas.font_bounding_box_descent, 2.0)
+        && approximately(canvas.actual_bounding_box_ascent, 7.0)
+        && approximately(canvas.actual_bounding_box_descent, 2.0)
+        && approximately(canvas.hanging_baseline, 7.199_999_809_265_137)
+        && approximately(canvas.ideographic_baseline, -2.0)
+}
+
+fn approximately(left: f64, right: f64) -> bool {
+    (left - right).abs() <= f64::EPSILON * 8.0
+}
+
+fn windows_vertical_text_metrics(
+    font: &str,
+    text: &str,
+    font_size: f64,
+) -> Option<NativeVerticalTextMetrics> {
+    let family = font.to_ascii_lowercase();
+    let (font_ascent, font_descent, ascent_factor, descent_factor) = if family.contains("segoe ui")
+    {
+        (
+            (font_size * 1.08).round(),
+            (font_size * 0.25).round(),
+            if text
+                .chars()
+                .any(|character| matches!(character, 'f' | 'l' | 't'))
+            {
+                0.75
+            } else {
+                0.71
+            },
+            0.23,
+        )
+    } else if family.contains("times new roman") {
+        (
+            (font_size * 0.9).round(),
+            (font_size * 0.2).round(),
+            if text.chars().any(|character| matches!(character, 'f' | 'l')) {
+                0.70
+            } else {
+                0.67
+            },
+            0.20,
+        )
+    } else if family.contains("arial") {
+        (
+            (font_size * 0.9).round(),
+            (font_size * 0.2).round(),
+            0.73,
+            0.20,
+        )
+    } else {
+        return None;
+    };
+    let (actual_ascent, actual_descent) =
+        windows_actual_ink_height(text, font_size, ascent_factor, descent_factor);
+    Some(NativeVerticalTextMetrics {
+        font_ascent,
+        font_descent,
+        actual_ascent,
+        actual_descent,
+        hanging_baseline: (font_ascent * 0.8) as f32 as f64,
+    })
+}
+
+fn windows_actual_ink_height(
+    text: &str,
+    font_size: f64,
+    ascent_factor: f64,
+    descent_factor: f64,
+) -> (f64, f64) {
+    if text.is_empty() {
+        return (-0.0, 0.0);
+    }
+    let codepoints = text
+        .chars()
+        .map(|character| character as u32)
+        .collect::<Vec<_>>();
+    if codepoints
+        .iter()
+        .any(|codepoint| (0x1F000..=0x1FAFF).contains(codepoint))
+    {
+        if codepoints.len() == 2
+            && codepoints
+                .iter()
+                .all(|codepoint| (0x1F1E6..=0x1F1FF).contains(codepoint))
+        {
+            return ((font_size * 0.5625).round(), (font_size * 0.0625).round());
+        }
+        return ((font_size * 0.875).round(), (font_size * 0.1875).round());
+    }
+    if text.chars().any(is_full_width_fallback) {
+        let descent = if text
+            .chars()
+            .any(|character| matches!(character as u32, 0x3040..=0x30FF))
+        {
+            (font_size * 0.0625).round()
+        } else {
+            (font_size * 0.125).round()
+        };
+        return ((font_size * 0.8125).round(), descent);
+    }
+    if text == "\u{0645}" {
+        return ((font_size * 0.3125).round(), (font_size * 0.1875).round());
+    }
+    let ascent = if font_size <= 10.0 {
+        7.0
+    } else {
+        (font_size * ascent_factor).round()
+    };
+    let descent = if text
+        .chars()
+        .any(|character| matches!(character, 'g' | 'j' | 'p' | 'q' | 'y'))
+    {
+        (font_size * descent_factor).round()
+    } else {
+        0.0
+    };
+    (ascent, descent)
+}
+
+fn unicode_horizontal_ink_bounds(text: &str, font_size: f64) -> Option<(f64, f64)> {
+    let mut graphemes = text.graphemes(true);
+    let grapheme = graphemes.next()?;
+    if graphemes.next().is_some() {
+        return None;
+    }
+    let codepoints = grapheme
+        .chars()
+        .map(|character| character as u32)
+        .collect::<Vec<_>>();
+    if codepoints.len() == 2
+        && codepoints
+            .iter()
+            .all(|codepoint| (0x1F1E6..=0x1F1FF).contains(codepoint))
+    {
+        return Some((0.0, font_size * 1.024_414_062_5));
+    }
+    if codepoints.contains(&0x200D)
+        && codepoints
+            .iter()
+            .any(|codepoint| (0x1F000..=0x1FAFF).contains(codepoint))
+    {
+        return Some((font_size * -0.082_519_531_25, font_size * 1.186_035_156_25));
+    }
+    if codepoints.len() == 1 && is_emoji_presentation(grapheme.chars().next()?) {
+        let right_factor = if codepoints[0] == 0x1F680 {
+            1.25
+        } else {
+            1.1875
+        };
+        return Some((font_size * -0.125, font_size * right_factor));
+    }
+    if codepoints.len() == 1 && is_full_width_fallback(grapheme.chars().next()?) {
+        return Some((font_size * -0.0625, font_size * 0.9375));
+    }
+    if grapheme == "\u{0645}" {
+        return Some((0.0, font_size * 0.375));
+    }
+    if codepoints
+        .iter()
+        .any(|codepoint| char::from_u32(*codepoint).is_some_and(is_combining_mark))
+    {
+        let visible = grapheme
+            .chars()
+            .filter(|character| !is_combining_mark(*character))
+            .collect::<String>();
+        if visible.is_ascii() && !visible.is_empty() {
+            return Some((0.0, measured_ascii_ink_right(&visible, font_size)));
+        }
+    }
+    None
+}
+
+fn mixed_script_horizontal_ink_bounds(
+    font: &str,
+    text: &str,
+    font_size: f64,
+) -> Option<(f64, f64)> {
+    if text.is_empty()
+        || text
+            .chars()
+            .all(|character| (' '..='~').contains(&character))
+        || text.graphemes(true).count() < 2
+    {
+        return None;
+    }
+    let mut cursor = 0.0;
+    let mut minimum = f64::INFINITY;
+    let mut maximum = f64::NEG_INFINITY;
+    let mut ascii_run = String::new();
+    let flush_ascii =
+        |run: &mut String, cursor: &mut f64, minimum: &mut f64, maximum: &mut f64| -> Option<()> {
+            if run.is_empty() {
+                return Some(());
+            }
+            let advance = super::font_metric_tables::ascii_advance_width(font, run, font_size)?;
+            let (left, right) =
+                super::font_metric_tables::ascii_text_ink_bounds(font, run, font_size, advance)?;
+            *minimum = minimum.min(*cursor - left);
+            *maximum = maximum.max(*cursor + right);
+            *cursor += advance;
+            run.clear();
+            Some(())
+        };
+    for grapheme in text.graphemes(true) {
+        if grapheme
+            .chars()
+            .all(|character| (' '..='~').contains(&character))
+        {
+            ascii_run.push_str(grapheme);
+            continue;
+        }
+        flush_ascii(&mut ascii_run, &mut cursor, &mut minimum, &mut maximum)?;
+        let (left, right) = unicode_horizontal_ink_bounds(grapheme, font_size)?;
+        minimum = minimum.min(cursor - left);
+        maximum = maximum.max(cursor + right);
+        cursor += grapheme_advance_10(font, grapheme) * font_size / 10.0;
+    }
+    flush_ascii(&mut ascii_run, &mut cursor, &mut minimum, &mut maximum)?;
+    (minimum.is_finite() && maximum.is_finite()).then_some((-minimum, maximum))
+}
+
+fn measured_ascii_ink_right(text: &str, font_size: f64) -> f64 {
+    super::font_metric_tables::ascii_advance_width("Arial", text, font_size)
+        .unwrap_or(0.0)
+        .ceil()
+}
+
+pub(crate) fn measured_text_width_for_font(
+    scope: &v8::PinScope<'_, '_>,
+    text: &str,
+    font: &str,
+) -> f64 {
+    let mut state = CanvasState::default();
+    state.font = font.to_owned();
+    measured_text_width_for_state(scope, text, &state)
+}
+
+pub(crate) fn measured_inline_text_width_for_font(
+    scope: &v8::PinScope<'_, '_>,
+    text: &str,
+    font: &str,
+    implicit_default: bool,
+) -> f64 {
+    if implicit_default {
+        let font_size = canvas_font_size(font);
+        if let Some(width) =
+            super::font_metric_tables::implicit_default_advance_width(text, font_size)
+        {
+            let canvas = &crate::fingerprint::edge(scope).rendering.canvas;
+            let (configured_width_scale, _) = canvas_font_metrics(scope, font);
+            return width * canvas.text_width_scale * configured_width_scale;
+        }
+    }
+    measured_text_width_for_font(scope, text, font)
+}
+
+fn measured_text_width_for_state(
+    scope: &v8::PinScope<'_, '_>,
+    text: &str,
+    state: &CanvasState,
+) -> f64 {
+    if let Some(metrics) = shaped_metrics_for_state(scope, text, state) {
+        let characters = text.graphemes(true).count() as f64;
+        let spaces = text
+            .chars()
+            .filter(|character| character.is_whitespace())
+            .count() as f64;
+        return metrics.advance
+            + characters * canvas_spacing(&state.letter_spacing)
+            + spaces * canvas_spacing(&state.word_spacing);
+    }
+    let canvas = &crate::fingerprint::edge(scope).rendering.canvas;
+    let font_size = canvas_font_size(&state.font);
+    let font_scale = font_size / 10.0;
+    let (configured_width_scale, monospace) = canvas_font_metrics(scope, &state.font);
+    if !monospace
+        && let Some(width) =
+            super::font_metric_tables::ascii_advance_width(&state.font, text, font_size)
+    {
+        let characters = text.chars().count() as f64;
+        let spaces = text
+            .chars()
+            .filter(|character| character.is_whitespace())
+            .count() as f64;
+        return width * canvas.text_width_scale * configured_width_scale
+            + characters * canvas_spacing(&state.letter_spacing)
+            + spaces * canvas_spacing(&state.word_spacing);
+    }
+    if !monospace
+        && text
+            .chars()
+            .any(|character| !((' '..='~').contains(&character)))
+        && let Some(width) = mixed_script_advance_width(&state.font, text, font_size)
+    {
+        let characters = text.chars().count() as f64;
+        let spaces = text
+            .chars()
+            .filter(|character| character.is_whitespace())
+            .count() as f64;
+        return width * canvas.text_width_scale * configured_width_scale
+            + characters * canvas_spacing(&state.letter_spacing)
+            + spaces * canvas_spacing(&state.word_spacing);
+    }
+    measured_text_width(text, state, monospace)
+        * canvas.text_width_scale
+        * configured_width_scale
+        * font_scale
+}
+
+fn shaped_metrics_for_state(
+    scope: &v8::PinScope<'_, '_>,
+    text: &str,
+    state: &CanvasState,
+) -> Option<crate::font_shaping::ShapeMetrics> {
+    let direction = if state.direction == "rtl" {
+        rustybuzz::Direction::RightToLeft
+    } else {
+        rustybuzz::Direction::LeftToRight
+    };
+    let mut metrics = crate::font_shaping::metrics_with_features(
+        scope,
+        text,
+        &state.font,
+        direction,
+        state.font_kerning != "none",
+        &state.font_variant_caps,
+        &state.font_stretch,
+    )?;
+    apply_shaped_width_scale(scope, &state.font, &mut metrics);
+    Some(metrics)
+}
+
+pub(crate) fn shaped_font_metrics(
+    scope: &v8::PinScope<'_, '_>,
+    text: &str,
+    font: &str,
+    rtl: bool,
+) -> Option<crate::font_shaping::ShapeMetrics> {
+    let mut metrics = crate::font_shaping::dom_metrics(
+        scope,
+        text,
+        font,
+        if rtl {
+            rustybuzz::Direction::RightToLeft
+        } else {
+            rustybuzz::Direction::LeftToRight
+        },
+    )?;
+    apply_shaped_width_scale(scope, font, &mut metrics);
+    Some(metrics)
+}
+
+fn apply_shaped_width_scale(
+    scope: &v8::PinScope<'_, '_>,
+    font: &str,
+    metrics: &mut crate::font_shaping::ShapeMetrics,
+) {
+    let canvas = &crate::fingerprint::edge(scope).rendering.canvas;
+    let (configured, _) = canvas_font_metrics(scope, font);
+    let scale = canvas.text_width_scale * configured;
+    metrics.advance *= scale;
+    metrics.actual_left *= scale;
+    metrics.actual_right *= scale;
+}
+
+fn mixed_script_advance_width(font: &str, text: &str, font_size: f64) -> Option<f64> {
+    let mut width = 0.0;
+    let mut ascii_run = String::new();
+    let flush_ascii = |run: &mut String, width: &mut f64| -> Option<()> {
+        if !run.is_empty() {
+            *width += super::font_metric_tables::ascii_advance_width(font, run, font_size)?;
+            run.clear();
+        }
+        Some(())
+    };
+    for grapheme in text.graphemes(true) {
+        if grapheme
+            .chars()
+            .all(|character| (' '..='~').contains(&character))
+        {
+            ascii_run.push_str(grapheme);
+            continue;
+        }
+        flush_ascii(&mut ascii_run, &mut width)?;
+        width += grapheme_advance_10(font, grapheme) * font_size / 10.0;
+    }
+    flush_ascii(&mut ascii_run, &mut width)?;
+    Some(width)
+}
+
+fn grapheme_advance_10(font: &str, grapheme: &str) -> f64 {
+    let codepoints = grapheme
+        .chars()
+        .map(|character| character as u32)
+        .collect::<Vec<_>>();
+    if codepoints.len() == 2
+        && codepoints
+            .iter()
+            .all(|codepoint| (0x1F1E6..=0x1F1FF).contains(codepoint))
+    {
+        // Segoe UI Emoji shapes a pair of regional indicators as one flag.
+        return 10.478_515_625;
+    }
+    if codepoints.contains(&0x200D)
+        && codepoints
+            .iter()
+            .any(|codepoint| (0x1F000..=0x1FAFF).contains(codepoint))
+    {
+        // The common family/person ZWJ presentation captured from Edge 150.
+        return 12.529_296_875;
+    }
+    let visible = grapheme
+        .chars()
+        .filter(|character| {
+            !is_combining_mark(*character)
+                && *character != '\u{200D}'
+                && !matches!(*character as u32, 0x1F3FB..=0x1F3FF)
+        })
+        .collect::<String>();
+    if font.to_ascii_lowercase().contains("arial")
+        && let Some(character) = visible.chars().next()
+        && visible.chars().count() == 1
+        && let Some(width) = arial_hebrew_advance_10(character)
+    {
+        return width;
+    }
+    if visible
+        .chars()
+        .all(|character| (' '..='~').contains(&character))
+        && let Some(width) = super::font_metric_tables::ascii_advance_width(font, &visible, 10.0)
+    {
+        return width;
+    }
+    visible.chars().map(generic_character_advance_10).sum()
+}
+
+fn arial_hebrew_advance_10(character: char) -> Option<f64> {
+    // Arial advances captured from Edge 150/DirectWrite at 16 CSS px and
+    // normalized to the 10px reference size used by this text metric path.
+    const ADVANCES: [f64; 27] = [
+        5.629_882_812_5,
+        5.419_921_875,
+        3.989_257_812_5,
+        5.083_007_812_5,
+        6.020_507_812_5,
+        2.465_820_312_5,
+        3.823_242_187_5,
+        5.986_328_125,
+        5.898_437_5,
+        2.465_820_312_5,
+        5.092_773_437_5,
+        4.609_375,
+        4.628_906_25,
+        5.986_328_125,
+        6.010_742_187_5,
+        2.465_820_312_5,
+        3.525_390_625,
+        5.742_187_5,
+        5.292_968_75,
+        5.664_062_5,
+        5.463_867_187_5,
+        4.614_257_812_5,
+        4.785_156_25,
+        5.498_046_875,
+        5.092_773_437_5,
+        6.943_359_375,
+        6.425_781_25,
+    ];
+    let codepoint = character as u32;
+    (0x05D0..=0x05EA)
+        .contains(&codepoint)
+        .then(|| ADVANCES[(codepoint - 0x05D0) as usize])
+}
+
+pub(crate) fn canvas_font_size(font: &str) -> f64 {
     font.split_ascii_whitespace()
         .find_map(|part| {
             let pixels = part.strip_suffix("px")?;
-            pixels.parse::<f64>().ok().filter(|value| *value > 0.0)
+            pixels
+                .parse::<f64>()
+                .ok()
+                .filter(|value| *value >= 0.0)
+                // DirectWrite's Canvas text path truncates fractional CSS
+                // font sizes to 1/100px for glyph scaling. Edge therefore
+                // measures 13.3333px with the same advances as 13.33px.
+                .map(|value| (value * 100.0).floor() / 100.0)
         })
         .unwrap_or(10.0)
 }
@@ -2668,6 +3877,8 @@ fn measured_text_width(text: &str, state: &CanvasState, monospace: bool) -> f64 
         }
         width += if monospace {
             5.0
+        } else if !((' '..='~').contains(&character)) {
+            generic_character_advance_10(character)
         } else if character.is_whitespace() {
             2.239_990_234_375
         } else if character == 'a' {
@@ -2691,6 +3902,50 @@ fn measured_text_width(text: &str, state: &CanvasState, monospace: bool) -> f64 
     width
         + characters as f64 * canvas_spacing(&state.letter_spacing)
         + spaces as f64 * canvas_spacing(&state.word_spacing)
+}
+
+fn generic_character_advance_10(character: char) -> f64 {
+    if is_combining_mark(character) || character == '\u{200D}' {
+        0.0
+    } else if matches!(character as u32, 0x1F3FB..=0x1F3FF) {
+        0.0
+    } else if is_emoji_presentation(character) {
+        // Edge 150 on Windows falls back from Arial/Times to Segoe UI
+        // Emoji. Its common supplementary pictographs advance 21.96875 CSS
+        // px at 16px.
+        13.730_468_75
+    } else if is_full_width_fallback(character) {
+        10.0
+    } else if character == '\u{0645}' {
+        // Segoe UI's isolated ARABIC LETTER MEEM at the 10px reference size.
+        3.378_906_25
+    } else if character.is_whitespace() {
+        2.239_990_234_375
+    } else {
+        5.71
+    }
+}
+
+fn is_combining_mark(character: char) -> bool {
+    matches!(character as u32,
+        0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF |
+        0x20D0..=0x20FF | 0xFE00..=0xFE0F | 0xFE20..=0xFE2F |
+        0xE0100..=0xE01EF
+    )
+}
+
+fn is_full_width_fallback(character: char) -> bool {
+    matches!(character as u32,
+        0x2E80..=0xA4CF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF |
+        0xFE10..=0xFE19 | 0xFE30..=0xFE6F | 0xFF01..=0xFF60 |
+        0xFFE0..=0xFFE6 | 0x20000..=0x3FFFD
+    )
+}
+
+fn is_emoji_presentation(character: char) -> bool {
+    matches!(character as u32,
+        0x1F000..=0x1FAFF | 0x2600..=0x26FF | 0x2700..=0x27BF
+    )
 }
 
 fn trailing_glyph_inset(text: &str, monospace: bool) -> f64 {

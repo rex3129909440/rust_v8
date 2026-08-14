@@ -250,7 +250,12 @@ fn cancel_watch_availability(
     if record(scope, arguments.this()).is_some() {
         resolved_undefined(scope, result);
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "RemotePlayback",
+            "cancelWatchAvailability",
+            result,
+        );
     }
 }
 
@@ -262,7 +267,7 @@ fn prompt(
     if record(scope, arguments.this()).is_some() {
         resolved_undefined(scope, result);
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "RemotePlayback", "prompt", result);
     }
 }
 
@@ -272,7 +277,12 @@ fn watch_availability(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "RemotePlayback",
+            "watchAvailability",
+            result,
+        );
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {

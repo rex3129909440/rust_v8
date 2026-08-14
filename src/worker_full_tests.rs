@@ -354,10 +354,10 @@ fn worker_navigator_services_and_fonts_are_worker_realm_objects() {
               fonts.size,
               fontConstructor.name,
               typeof FontFaceSet,
-              Object.getPrototypeOf(fontConstructor) === EventTarget,
-              fontPrototype === fontConstructor.prototype,
+              !Object.hasOwn(fontPrototype, "constructor"),
+              Object.getPrototypeOf(fontPrototype) === EventTarget.prototype,
               Object.getPrototypeOf(fonts) === fontPrototype,
-              Object.getPrototypeOf(fonts) === fontConstructor.prototype,
+              fonts instanceof EventTarget,
               Function.prototype.toString.call(fonts.add)
             ].join("|"));
           `;
@@ -375,7 +375,7 @@ fn worker_navigator_services_and_fonts_are_worker_realm_objects() {
     "#;
     let expected = concat!(
         "true|true|true|true|true|true|true|true|true|true|true|",
-        "true|true|true|true|1|FontFaceSet|undefined|true|true|true|true|",
+        "true|true|true|true|1|EventTarget|function|true|true|true|true|",
         "function add() { [native code] }"
     );
 
@@ -1206,6 +1206,292 @@ fn dedicated_worker_prototype_surface_matches_edge_evidence() {
 }
 
 #[test]
+fn dedicated_worker_surface_switches_with_chromium_140_through_151() {
+    let expected = [
+        (140, 328),
+        (141, 332),
+        (142, 332),
+        (143, 332),
+        (144, 333),
+        (145, 334),
+        (146, 334),
+        (147, 334),
+        (148, 334),
+        (149, 334),
+        (150, 334),
+        (151, 335),
+    ];
+    for (major, count) in expected {
+        let mut fingerprint = crate::EdgeFingerprint::default();
+        fingerprint.navigator.user_agent = format!(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+        );
+        fingerprint.navigator.app_version = fingerprint
+            .navigator
+            .user_agent
+            .strip_prefix("Mozilla/")
+            .unwrap()
+            .to_owned();
+        let mut runtime = EdgeRuntime::with_fingerprint(fingerprint)
+            .unwrap_or_else(|error| panic!("Chromium {major} runtime: {error}"));
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const source = `postMessage([
+                Object.getOwnPropertyNames(globalThis).length,
+                Object.getOwnPropertyNames(WorkerNavigator.prototype).join(","),
+                (reflectKeys => {
+                  const keyName = key => typeof key === "symbol" ?
+                    "@@" + String(key.description || "") : key;
+                  const ownKeys = value => reflectKeys ?
+                    Reflect.ownKeys(value).map(keyName) :
+                    Object.getOwnPropertyNames(value);
+                  const records = [];
+                  const names = Object.getOwnPropertyNames(globalThis).sort();
+                  for (const owner of names) {
+                    const descriptor = Object.getOwnPropertyDescriptor(globalThis, owner);
+                    if (!descriptor || !("value" in descriptor)) continue;
+                    const value = descriptor.value;
+                    if (typeof value === "function") {
+                      if (value.prototype) records.push(
+                        "constructorPrototypes:" + owner + ":" +
+                        ownKeys(value.prototype).join("\\u001e")
+                      );
+                      records.push(
+                        "constructorStatics:" + owner + ":" +
+                        ownKeys(value).join("\\u001e")
+                      );
+                    } else if (value && typeof value === "object" && value !== globalThis) {
+                      const objectNames = Object.getOwnPropertyNames(value);
+                      if (objectNames.length) records.push(
+                        "globalObjects:" + owner + ":" + ownKeys(value).join("\\u001e")
+                      );
+                    }
+                  }
+                  records.sort();
+                  let hash = 2166136261;
+                  const input = records.join("\\u001f");
+                  for (let index = 0; index < input.length; index += 1) {
+                    hash = Math.imul(hash ^ input.charCodeAt(index), 16777619);
+                  }
+                  return String(hash >>> 0);
+                })(false),
+                (reflectKeys => {
+                  const keyName = key => typeof key === "symbol" ?
+                    "@@" + String(key.description || "") : key;
+                  const ownKeys = value => reflectKeys ?
+                    Reflect.ownKeys(value).map(keyName) :
+                    Object.getOwnPropertyNames(value);
+                  const records = [];
+                  for (const owner of Object.getOwnPropertyNames(globalThis).sort()) {
+                    const descriptor = Object.getOwnPropertyDescriptor(globalThis, owner);
+                    if (!descriptor || !("value" in descriptor)) continue;
+                    const value = descriptor.value;
+                    if (typeof value === "function") {
+                      if (value.prototype) records.push(
+                        "constructorPrototypes:" + owner + ":" + ownKeys(value.prototype).join("\\u001e")
+                      );
+                      records.push(
+                        "constructorStatics:" + owner + ":" + ownKeys(value).join("\\u001e")
+                      );
+                    } else if (value && typeof value === "object" && value !== globalThis) {
+                      if (Object.getOwnPropertyNames(value).length) records.push(
+                        "globalObjects:" + owner + ":" + ownKeys(value).join("\\u001e")
+                      );
+                    }
+                  }
+                  records.sort();
+                  let hash = 2166136261;
+                  const input = records.join("\\u001f");
+                  for (let index = 0; index < input.length; index += 1) {
+                    hash = Math.imul(hash ^ input.charCodeAt(index), 16777619);
+                  }
+                  return String(hash >>> 0);
+                })(true)
+              ].join("|"))`;
+              const worker = new Worker("data:text/javascript," + encodeURIComponent(source));
+              globalThis.versionWorkerSurface = "pending";
+              worker.onmessage = event => versionWorkerSurface = event.data;
+              return "scheduled";
+            })()
+            "#,
+        );
+        let observed = text(&mut runtime, "versionWorkerSurface");
+        let navigator = crate::browser_surface_data::worker_navigator_names(major).join(",");
+        let surface_hash =
+            crate::browser_surface_data::expected_worker_versioned_surface_hash(major);
+        let surface_keys_hash =
+            crate::browser_surface_data::expected_worker_versioned_surface_keys_hash(major);
+        assert_eq!(
+            observed,
+            format!("{count}|{navigator}|{surface_hash}|{surface_keys_hash}"),
+            "Chromium {major}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "developer diagnostic for generated worker surface allowlists"]
+fn diagnose_chromium_140_worker_surface_owners() {
+    let mut fingerprint = crate::EdgeFingerprint::default();
+    fingerprint.navigator.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+        .to_owned();
+    fingerprint.navigator.app_version = fingerprint
+        .navigator
+        .user_agent
+        .strip_prefix("Mozilla/")
+        .unwrap()
+        .to_owned();
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).unwrap();
+    text(
+        &mut runtime,
+        r#"
+        (() => {
+          const source = `
+            const keyName = key => typeof key === "symbol" ?
+              "@@" + String(key.description || "") : key;
+            const records = [];
+            for (const owner of Object.getOwnPropertyNames(globalThis).sort()) {
+              const descriptor = Object.getOwnPropertyDescriptor(globalThis, owner);
+              if (!descriptor || !("value" in descriptor)) continue;
+              const value = descriptor.value;
+              if (typeof value === "function") {
+                if (value.prototype) records.push([
+                  "constructorPrototypes", owner,
+                  Object.getOwnPropertyNames(value.prototype),
+                  Reflect.ownKeys(value.prototype).map(keyName)
+                ]);
+                records.push([
+                  "constructorStatics", owner,
+                  Object.getOwnPropertyNames(value), Reflect.ownKeys(value).map(keyName)
+                ]);
+              } else if (value && typeof value === "object" && value !== globalThis &&
+                         Object.getOwnPropertyNames(value).length) {
+                records.push([
+                  "globalObjects", owner,
+                  Object.getOwnPropertyNames(value), Reflect.ownKeys(value).map(keyName)
+                ]);
+              }
+            }
+            postMessage(JSON.stringify(records));
+          `;
+          const worker = new Worker("data:text/javascript," + encodeURIComponent(source));
+          globalThis.workerOwnerDiagnostic = "pending";
+          worker.onmessage = event => workerOwnerDiagnostic = event.data;
+        })()
+        "#,
+    );
+    let observed = text(&mut runtime, "workerOwnerDiagnostic");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("build/chromium-version-surfaces/sandbox-140-worker-owner-diagnostic.json");
+    std::fs::write(&path, observed).unwrap();
+    panic!("wrote {}", path.display());
+}
+
+#[test]
+fn android_dedicated_worker_surface_switches_with_chromium_140_through_151() {
+    let expected_counts = [321, 325, 325, 325, 326, 329, 329, 329, 329, 329, 327, 328];
+    for (offset, count) in expected_counts.into_iter().enumerate() {
+        let major = 140 + offset as u16;
+        let mut fingerprint = crate::EdgeFingerprint::default();
+        fingerprint.navigator.user_agent = format!(
+            "Mozilla/5.0 (Linux; Android 11; Pixel 4) AppleWebKit/537.36 \
+(KHTML, like Gecko) Chrome/{major}.0.0.0 Mobile Safari/537.36"
+        );
+        fingerprint.navigator.app_version = fingerprint
+            .navigator
+            .user_agent
+            .strip_prefix("Mozilla/")
+            .unwrap()
+            .to_owned();
+        let mut runtime = EdgeRuntime::with_fingerprint(fingerprint)
+            .unwrap_or_else(|error| panic!("Android Chromium {major} runtime: {error}"));
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const source = `postMessage([Object.getOwnPropertyNames(globalThis).length,
+                Object.getOwnPropertyNames(WorkerNavigator.prototype).join(","),
+                (reflectKeys => {
+                  const keyName = key => typeof key === "symbol" ?
+                    "@@" + String(key.description || "") : key;
+                  const ownKeys = value => (reflectKeys ? Reflect.ownKeys(value) :
+                    Object.getOwnPropertyNames(value)).map(keyName);
+                  const records = [];
+                  for (const owner of Object.getOwnPropertyNames(globalThis).sort()) {
+                    const descriptor = Object.getOwnPropertyDescriptor(globalThis, owner);
+                    if (!descriptor || !("value" in descriptor)) continue;
+                    const value = descriptor.value;
+                    if (typeof value === "function") {
+                      if (value.prototype) records.push("constructorPrototypes:" + owner + ":" +
+                        ownKeys(value.prototype).join("\\u001e"));
+                      records.push("constructorStatics:" + owner + ":" + ownKeys(value).join("\\u001e"));
+                    } else if (value && typeof value === "object" && value !== globalThis &&
+                               Object.getOwnPropertyNames(value).length) {
+                      records.push("globalObjects:" + owner + ":" + ownKeys(value).join("\\u001e"));
+                    }
+                  }
+                  records.sort();
+                  let hash = 2166136261;
+                  const input = records.join("\\u001f");
+                  for (let index = 0; index < input.length; index += 1) {
+                    hash = Math.imul(hash ^ input.charCodeAt(index), 16777619);
+                  }
+                  return String(hash >>> 0);
+                })(false),
+                (reflectKeys => {
+                  const keyName = key => typeof key === "symbol" ?
+                    "@@" + String(key.description || "") : key;
+                  const ownKeys = value => (reflectKeys ? Reflect.ownKeys(value) :
+                    Object.getOwnPropertyNames(value)).map(keyName);
+                  const records = [];
+                  for (const owner of Object.getOwnPropertyNames(globalThis).sort()) {
+                    const descriptor = Object.getOwnPropertyDescriptor(globalThis, owner);
+                    if (!descriptor || !("value" in descriptor)) continue;
+                    const value = descriptor.value;
+                    if (typeof value === "function") {
+                      if (value.prototype) records.push("constructorPrototypes:" + owner + ":" +
+                        ownKeys(value.prototype).join("\\u001e"));
+                      records.push("constructorStatics:" + owner + ":" + ownKeys(value).join("\\u001e"));
+                    } else if (value && typeof value === "object" && value !== globalThis &&
+                               Object.getOwnPropertyNames(value).length) {
+                      records.push("globalObjects:" + owner + ":" + ownKeys(value).join("\\u001e"));
+                    }
+                  }
+                  records.sort();
+                  let hash = 2166136261;
+                  const input = records.join("\\u001f");
+                  for (let index = 0; index < input.length; index += 1) {
+                    hash = Math.imul(hash ^ input.charCodeAt(index), 16777619);
+                  }
+                  return String(hash >>> 0);
+                })(true)].join("|"))`;
+              const worker = new Worker("data:text/javascript," + encodeURIComponent(source));
+              globalThis.androidWorkerSurface = "pending";
+              worker.onmessage = event => androidWorkerSurface = event.data;
+              return "scheduled";
+            })()
+            "#,
+        );
+        let observed = text(&mut runtime, "androidWorkerSurface");
+        let navigator =
+            crate::browser_android_surface_data::worker_navigator_names(major).join(",");
+        let surface =
+            crate::browser_android_surface_data::expected_worker_versioned_surface_hash(major);
+        let keys =
+            crate::browser_android_surface_data::expected_worker_versioned_surface_keys_hash(major);
+        assert_eq!(
+            observed,
+            format!("{count}|{navigator}|{surface}|{keys}"),
+            "Android Chromium {major} worker HTTPS surface",
+        );
+    }
+}
+
+#[test]
 fn dedicated_worker_sync_reader_and_rtc_transform_are_functional() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     text(
@@ -1261,7 +1547,7 @@ fn dedicated_worker_sync_reader_and_rtc_transform_are_functional() {
                 event.transformer.options.value,
                 event.transformer.readable instanceof ReadableStream,
                 event.transformer.writable instanceof WritableStream,
-                event.transformer.generateKeyFrame() instanceof Promise,
+                typeof event.transformer.generateKeyFrame === "undefined",
                 event.transformer.sendKeyFrameRequest() instanceof Promise
               ].join("|"));
             };
@@ -1289,7 +1575,7 @@ fn dedicated_worker_sync_reader_and_rtc_transform_are_functional() {
     let reader = text(&mut runtime, "syncReaderAnswer");
     assert_eq!(
         reader,
-        "ABC|ABC|3|data:text/plain;base64,QUJD|function|close,flush,getSize,read,truncate,write,constructor"
+        "ABC|ABC|3|data:text/plain;base64,QUJD|function|close,flush,getSize,read,truncate,write,mode,constructor"
     );
     let access = text(&mut runtime, "syncAccessAnswer");
     assert_eq!(access, "FS|true|function|true|5|5|5|FSAPI");

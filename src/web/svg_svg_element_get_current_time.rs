@@ -12,8 +12,8 @@ fn get_current_time(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Number::new(scope, record.current_time).into());
+    if let Some(value) = current_time(scope, arguments.this()) {
+        result.set(v8::Number::new(scope, value).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }

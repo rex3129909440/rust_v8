@@ -188,6 +188,35 @@ pub(crate) fn record(
         .cloned()
 }
 
+pub(crate) fn copy_clone_state(
+    scope: &mut v8::PinScope<'_, '_>,
+    source: v8::Local<'_, v8::Object>,
+    clone: v8::Local<'_, v8::Object>,
+) {
+    let Some(source) = record(scope, source) else {
+        return;
+    };
+    if let Some(target) = scope
+        .get_slot_mut::<HtmlTextAreaElementStore>()
+        .and_then(|store| store.records.get_mut(&clone.get_identity_hash().get()))
+    {
+        target.value = source.value;
+        target.value_dirty = source.value_dirty;
+    }
+}
+
+pub(crate) fn current_value(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<String> {
+    let record = record(scope, object)?;
+    Some(if record.value_dirty {
+        record.value
+    } else {
+        super::node::node_text(scope, object)
+    })
+}
+
 pub(crate) fn attribute_changed(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -489,7 +518,12 @@ pub(crate) fn get_text_length(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Integer::new_from_unsigned(scope, text_len(&record.value)).into());
+        let value = if record.value_dirty {
+            record.value
+        } else {
+            super::node::node_text(scope, arguments.this())
+        };
+        result.set(v8::Integer::new_from_unsigned(scope, text_len(&value)).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -685,7 +719,11 @@ pub(crate) fn check_validity(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Boolean::new(scope, !is_candidate(&record) || is_valid(&record)).into());
+        let valid = !is_candidate(&record) || is_valid(&record);
+        if !valid {
+            super::html_form_element::dispatch_invalid_event(scope, arguments.this());
+        }
+        result.set(v8::Boolean::new(scope, valid).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -749,6 +787,13 @@ pub(crate) fn set_selection_range(
     } else {
         crate::webidl::value_to_string(scope, arguments.get(2))
     };
+    let effective_length = record(scope, arguments.this()).map(|record| {
+        if record.value_dirty {
+            text_len(&record.value)
+        } else {
+            text_len(&super::node::node_text(scope, arguments.this()))
+        }
+    });
     if let Some(record) = scope
         .get_slot_mut::<HtmlTextAreaElementStore>()
         .and_then(|store| {
@@ -757,7 +802,7 @@ pub(crate) fn set_selection_range(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     {
-        let length = text_len(&record.value);
+        let length = effective_length.unwrap_or(0);
         record.selection_end = end.min(length);
         record.selection_start = start.min(record.selection_end);
         record.selection_direction = if direction == "forward" || direction == "backward" {

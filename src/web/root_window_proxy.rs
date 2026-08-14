@@ -1,3 +1,37 @@
+use std::collections::HashMap;
+
+#[derive(Default)]
+pub(crate) struct WindowNamedPropertyStore {
+    collections: HashMap<(i32, String), v8::Global<v8::Object>>,
+    targets: HashMap<i32, WindowNamedPropertyTarget>,
+}
+
+#[derive(Clone)]
+struct WindowNamedPropertyTarget {
+    context: v8::Global<v8::Context>,
+    window: v8::Global<v8::Object>,
+}
+
+pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
+    isolate.set_slot(WindowNamedPropertyStore::default());
+}
+
+pub(crate) fn register_window_properties(
+    scope: &mut v8::PinScope<'_, '_>,
+    properties: v8::Local<'_, v8::Object>,
+) -> Result<(), String> {
+    let target = WindowNamedPropertyTarget {
+        context: v8::Global::new(scope, scope.get_current_context()),
+        window: v8::Global::new(scope, scope.get_current_context().global(scope)),
+    };
+    scope
+        .get_slot_mut::<WindowNamedPropertyStore>()
+        .ok_or_else(|| "Window named-property state was not prepared".to_owned())?
+        .targets
+        .insert(properties.get_identity_hash().get(), target);
+    Ok(())
+}
+
 pub(crate) fn global_template<'s>(
     scope: &v8::PinScope<'s, '_, ()>,
 ) -> v8::Local<'s, v8::ObjectTemplate> {
@@ -99,6 +133,74 @@ fn named_setter(
     super::html_i_frame_element::throw_cross_origin_window_security_error(scope);
     result.set_bool(false);
     v8::Intercepted::kYes
+}
+
+pub(crate) fn document_named_value(
+    scope: &mut v8::PinScope<'_, '_>,
+    properties: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Option<v8::Global<v8::Value>> {
+    if name.is_empty() {
+        return None;
+    }
+    let target = scope
+        .get_slot::<WindowNamedPropertyStore>()?
+        .targets
+        .get(&properties.get_identity_hash().get())?
+        .clone();
+    let context = v8::Local::new(scope, &target.context);
+    let child_scope = &mut v8::ContextScope::new(scope, context);
+    let window = v8::Local::new(child_scope, &target.window);
+    let document = super::document_global::value(child_scope)?;
+    let matches = super::document::document_descendants(child_scope, document)
+        .into_iter()
+        .filter(|element| {
+            let Some(record) = super::element::record(child_scope, *element) else {
+                return false;
+            };
+            if super::element::attribute_value(child_scope, *element, "id").as_deref() == Some(name)
+            {
+                return true;
+            }
+            matches!(
+                record.tag_name.as_str(),
+                "EMBED" | "FORM" | "IMG" | "OBJECT"
+            ) && super::element::attribute_value(child_scope, *element, "name").as_deref()
+                == Some(name)
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => None,
+        [element] => Some(v8::Global::new(
+            child_scope,
+            v8::Local::<v8::Value>::from(*element),
+        )),
+        _ => {
+            let key = (window.get_identity_hash().get(), name.to_owned());
+            let existing = child_scope
+                .get_slot::<WindowNamedPropertyStore>()
+                .and_then(|store| store.collections.get(&key))
+                .cloned();
+            if let Some(existing) = existing {
+                let collection = v8::Local::new(child_scope, &existing);
+                super::html_collection::replace(child_scope, collection, matches);
+                return Some(v8::Global::new(
+                    child_scope,
+                    v8::Local::<v8::Value>::from(collection),
+                ));
+            }
+            let collection = super::html_collection::create(child_scope, matches).ok()?;
+            let stored = v8::Global::new(child_scope, collection);
+            child_scope
+                .get_slot_mut::<WindowNamedPropertyStore>()?
+                .collections
+                .insert(key, stored.clone());
+            Some(v8::Global::new(
+                child_scope,
+                v8::Local::<v8::Value>::from(collection),
+            ))
+        }
+    }
 }
 
 fn named_query(

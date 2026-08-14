@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub(crate) struct DomImplementationStore {
     constructor: crate::webidl::RealmConstructor,
-    instances: HashSet<i32>,
+    instances: HashMap<i32, v8::Global<v8::Object>>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -51,6 +51,7 @@ pub(crate) fn ensure_constructor<'s>(
 
 pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    document: v8::Local<'_, v8::Object>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
@@ -58,18 +59,34 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
         return Err("cannot create DOMImplementation".to_owned());
     }
+    let document = v8::Global::new(scope, document);
     scope
         .get_slot_mut::<DomImplementationStore>()
         .ok_or_else(|| "DOMImplementation state was not prepared".to_owned())?
         .instances
-        .insert(object.get_identity_hash().get());
+        .insert(object.get_identity_hash().get(), document);
     Ok(object)
 }
 
 pub(crate) fn is_instance(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
     scope
         .get_slot::<DomImplementationStore>()
-        .is_some_and(|store| store.instances.contains(&object.get_identity_hash().get()))
+        .is_some_and(|store| {
+            store
+                .instances
+                .contains_key(&object.get_identity_hash().get())
+        })
+}
+
+pub(crate) fn associated_document<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    scope
+        .get_slot::<DomImplementationStore>()?
+        .instances
+        .get(&object.get_identity_hash().get())
+        .map(|document| v8::Local::new(scope, document))
 }
 
 pub(crate) fn require_instance(

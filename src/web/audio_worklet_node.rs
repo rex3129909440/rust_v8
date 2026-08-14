@@ -82,19 +82,22 @@ fn construct(
         return;
     }
     let Ok(context) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(scope, "Audio context must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioWorkletNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     };
-    let name = crate::webidl::value_to_string(scope, a.get(1));
-    if name.is_empty() {
-        crate::webidl::throw_type_error(scope, "Processor name cannot be empty");
-        return;
-    }
     if !super::base_audio_context::is_context(scope, context) {
         crate::webidl::throw_type_error(
             scope,
-            "AudioWorkletNode context is not a BaseAudioContext",
+            "Failed to construct 'AudioWorkletNode': parameter 1 is not of type 'BaseAudioContext'.",
         );
+        return;
+    }
+    let name = crate::webidl::value_to_string(scope, a.get(1));
+    if name.is_empty() {
+        crate::webidl::throw_type_error(scope, "Processor name cannot be empty");
         return;
     }
     let Some(worklet) = super::base_audio_context::audio_worklet(scope, context) else {

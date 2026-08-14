@@ -33,8 +33,12 @@ fn set_disabled(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     {
+        if record.disabled == value {
+            return;
+        }
         record.disabled = value;
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
+    super::custom_element_registry::notify_disabled_subtree(scope, arguments.this(), value);
 }

@@ -357,6 +357,10 @@ fn update_character_bounds(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if a.length() < 2 {
         crate::webidl::throw_type_error(s, "2 arguments required");
         return;

@@ -84,7 +84,18 @@ fn create<'s>(
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let c = ensure_constructor(scope)?;
     let p = crate::webidl::prototype(scope, c)?;
-    let o = v8::Object::new(scope);
+    let template = v8::ObjectTemplate::new(scope);
+    template.set_named_property_handler(
+        v8::NamedPropertyHandlerConfiguration::new()
+            .getter(named_getter)
+            .setter(named_setter)
+            .query(named_query)
+            .deleter(named_deleter)
+            .enumerator(named_enumerator),
+    );
+    let o = template
+        .new_instance(scope)
+        .ok_or_else(|| "cannot create Storage exotic object".to_owned())?;
     if crate::webidl::set_platform_prototype(scope, o, p.into()) != Some(true) {
         return Err("cannot create Storage".to_owned());
     }
@@ -166,7 +177,9 @@ fn get_item(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let k = crate::webidl::value_to_string(scope, a.get(0));
+    let Some(k) = storage_string(scope, a.get(0), "getItem") else {
+        return;
+    };
     if let Some(value) = v.values.get(&k).and_then(|v| v8::String::new(scope, v)) {
         r.set(value.into())
     } else {
@@ -194,7 +207,9 @@ fn remove_item(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let k = crate::webidl::value_to_string(scope, a.get(0));
+    let Some(k) = storage_string(scope, a.get(0), "removeItem") else {
+        return;
+    };
     update(scope, a.this(), |v| {
         v.values.remove(&k);
         v.order.retain(|x| x != &k);
@@ -209,12 +224,139 @@ fn set_item(
         crate::webidl::throw_type_error(scope, "setItem requires 2 arguments");
         return;
     }
-    let k = crate::webidl::value_to_string(scope, a.get(0));
-    let value = crate::webidl::value_to_string(scope, a.get(1));
+    let Some(k) = storage_string(scope, a.get(0), "setItem") else {
+        return;
+    };
+    let Some(value) = storage_string(scope, a.get(1), "setItem") else {
+        return;
+    };
     update(scope, a.this(), |v| {
         if !v.values.contains_key(&k) {
-            v.order.push(k.clone());
+            v.order.insert(0, k.clone());
         }
         v.values.insert(k, value);
     })
+}
+
+fn storage_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    method: &str,
+) -> Option<String> {
+    if value.is_symbol() {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute '{method}' on 'Storage': Cannot convert a Symbol value to a string"
+            ),
+        );
+        None
+    } else {
+        Some(crate::webidl::value_to_string(scope, value))
+    }
+}
+
+fn property_name(scope: &mut v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>) -> Option<String> {
+    if key.is_symbol() {
+        None
+    } else {
+        key.to_string(scope)
+            .map(|key| key.to_rust_string_lossy(scope))
+    }
+}
+
+fn named_getter(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "get", key, None);
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(value) = record(scope, arguments.holder())
+        .and_then(|record| record.values.get(&name).cloned())
+        .and_then(|value| v8::String::new(scope, &value))
+    else {
+        return v8::Intercepted::kNo;
+    };
+    result.set(value.into());
+    v8::Intercepted::kYes
+}
+
+fn named_setter(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    value: v8::Local<'_, v8::Value>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "set", key, Some(value));
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    let value = crate::webidl::value_to_string(scope, value);
+    update(scope, arguments.holder(), |record| {
+        if !record.values.contains_key(&name) {
+            record.order.insert(0, name.clone());
+        }
+        record.values.insert(name, value);
+    });
+    result.set_bool(true);
+    v8::Intercepted::kYes
+}
+
+fn named_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "has", key, None);
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    if record(scope, arguments.holder()).is_some_and(|record| record.values.contains_key(&name)) {
+        result.set_int32(0);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
+    }
+}
+
+fn named_deleter(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Boolean>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "delete", key, None);
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    update(scope, arguments.holder(), |record| {
+        record.values.remove(&name);
+        record.order.retain(|candidate| candidate != &name);
+    });
+    result.set(v8::Boolean::new(scope, true));
+    v8::Intercepted::kYes
+}
+
+fn named_enumerator(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Array>,
+) {
+    crate::trace::record_native_enumeration(scope, &arguments);
+    let values = record(scope, arguments.holder())
+        .map(|record| {
+            record
+                .order
+                .iter()
+                .filter_map(|name| v8::String::new(scope, name).map(|name| name.into()))
+                .collect::<Vec<v8::Local<v8::Value>>>()
+        })
+        .unwrap_or_default();
+    result.set(v8::Array::new_with_elements(scope, &values));
 }

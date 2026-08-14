@@ -288,6 +288,12 @@ pub(crate) fn set_owner_document_recursive(
     for child in children(scope, object) {
         set_owner_document_recursive(scope, child, document);
     }
+    if let Some(shadow_root) = super::element::record(scope, object)
+        .and_then(|record| record.shadow_root)
+        .map(|root| v8::Local::new(scope, &root))
+    {
+        set_owner_document_recursive(scope, shadow_root, document);
+    }
     true
 }
 
@@ -422,11 +428,47 @@ pub(crate) fn insert_node(
                 ));
             }
         }
+        if fragment_children.is_empty() {
+            return Ok(());
+        }
+        let target_children = children(scope, parent);
+        let position = index.min(target_children.len());
+        let previous_sibling = position
+            .checked_sub(1)
+            .and_then(|index| target_children.get(index).copied());
+        let next_sibling = target_children.get(position).copied();
+        super::mutation_observer::suppress_child_list_for(scope, parent);
+        super::mutation_observer::suppress_child_list_for(scope, child);
         let mut insertion = index;
-        for fragment_child in fragment_children {
-            insert_node(scope, parent, fragment_child, insertion)?;
+        let mut failure = None;
+        for fragment_child in &fragment_children {
+            if let Err(error) = insert_node(scope, parent, *fragment_child, insertion) {
+                failure = Some(error);
+                break;
+            }
             insertion += 1;
         }
+        super::mutation_observer::unsuppress_child_list_for(scope, child);
+        super::mutation_observer::unsuppress_child_list_for(scope, parent);
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        super::mutation_observer::enqueue_child_list(
+            scope,
+            child,
+            Vec::new(),
+            fragment_children.clone(),
+            None,
+            None,
+        );
+        super::mutation_observer::enqueue_child_list(
+            scope,
+            parent,
+            fragment_children,
+            Vec::new(),
+            previous_sibling,
+            next_sibling,
+        );
         return Ok(());
     }
     if parent_record.node_type == DOCUMENT_NODE {
@@ -472,7 +514,7 @@ pub(crate) fn insert_node(
     });
     let adjusted_index = old_index
         .filter(|old_index| *old_index < index)
-        .map_or(index, |index| index.saturating_sub(1));
+        .map_or(index, |_| index.saturating_sub(1));
     if parent_record.node_type == DOCUMENT_NODE {
         let child_identity = child.get_identity_hash().get();
         let prospective = children(scope, parent)
@@ -554,12 +596,19 @@ pub(crate) fn insert_node(
     super::html_link_element::notify_connected_tree(scope, child);
     super::document_style_sheets_property::refresh_for_node(scope, parent);
     super::html_script_element::notify_connected_tree(scope, child);
+    if is_connected(scope, child) {
+        super::custom_element_registry::notify_connected_tree(scope, child);
+    }
+    super::custom_element_registry::refresh_all_form_owners(scope);
+    refresh_select_after_tree_change(scope, parent);
+    refresh_table_after_tree_change(scope, parent);
     super::resize_observer::notify_target_change(scope, child);
     super::intersection_observer::notify_target_change(scope, child);
     Ok(())
 }
 
 pub(crate) fn detach(scope: &mut v8::PinScope<'_, '_>, child: v8::Local<'_, v8::Object>) -> bool {
+    let was_connected = is_connected(scope, child);
     let old_parent = parent(scope, child);
     if let Some(parent) = old_parent {
         let siblings = children(scope, parent);
@@ -614,16 +663,68 @@ pub(crate) fn detach(scope: &mut v8::PinScope<'_, '_>, child: v8::Local<'_, v8::
     super::html_all_collection::refresh_all(scope);
     super::html_i_frame_element::notify_disconnected_tree(scope, child);
     super::html_style_element::notify_disconnected_tree(scope, child);
+    if was_connected {
+        super::custom_element_registry::notify_disconnected_tree(scope, child);
+    }
+    super::custom_element_registry::refresh_all_form_owners(scope);
     super::html_link_element::notify_disconnected_tree(scope, child);
     if let Some(parent) = old_parent {
         super::html_style_element::notify_tree_mutation(scope, parent);
         super::document_style_sheets_property::refresh_for_node(scope, parent);
+        refresh_select_after_tree_change(scope, parent);
+        refresh_table_after_tree_change(scope, parent);
     } else {
         super::document_style_sheets_property::refresh_for_node(scope, child);
     }
     super::resize_observer::notify_target_change(scope, child);
     super::intersection_observer::notify_target_change(scope, child);
     detached
+}
+
+fn refresh_select_after_tree_change(
+    scope: &mut v8::PinScope<'_, '_>,
+    parent: v8::Local<'_, v8::Object>,
+) {
+    if super::html_select_element::is_select(scope, parent) {
+        super::html_select_element::refresh(scope, parent);
+    } else if super::html_opt_group_element::is_opt_group(scope, parent)
+        && let Some(select) = super::node::parent(scope, parent)
+        && super::html_select_element::is_select(scope, select)
+    {
+        super::html_select_element::refresh(scope, select);
+    }
+}
+
+fn refresh_table_after_tree_change(
+    scope: &mut v8::PinScope<'_, '_>,
+    parent: v8::Local<'_, v8::Object>,
+) {
+    if super::html_table_element::is_table(scope, parent) {
+        super::html_table_element::refresh_collections(scope, parent);
+        return;
+    }
+    if super::html_table_section_element::is_section(scope, parent) {
+        super::html_table_section_element::refresh_rows(scope, parent);
+        if let Some(table) = super::node::parent(scope, parent)
+            && super::html_table_element::is_table(scope, table)
+        {
+            super::html_table_element::refresh_collections(scope, table);
+        }
+        return;
+    }
+    if super::html_table_row_element::is_row(scope, parent) {
+        super::html_table_row_element::refresh_cells(scope, parent);
+        if let Some(section_or_table) = super::node::parent(scope, parent) {
+            if super::html_table_element::is_table(scope, section_or_table) {
+                super::html_table_element::refresh_collections(scope, section_or_table);
+            } else if super::html_table_section_element::is_section(scope, section_or_table)
+                && let Some(table) = super::node::parent(scope, section_or_table)
+                && super::html_table_element::is_table(scope, table)
+            {
+                super::html_table_element::refresh_collections(scope, table);
+            }
+        }
+    }
 }
 
 fn illegal_constructor(
@@ -694,6 +795,27 @@ pub(crate) fn clone_object<'s>(
             scope,
             super::character_data::data_if_character(scope, source).unwrap_or_default(),
         )?,
+        DOCUMENT_NODE => {
+            let content_type = super::document::content_type_value(scope, source)
+                .unwrap_or_else(|| "application/xml".to_owned());
+            if super::xml_document::is_instance(scope, source) {
+                super::xml_document::create_with_type(scope, String::new(), &content_type)?
+            } else if super::html_document::is_instance(scope, source) {
+                super::html_document::create(scope)?
+            } else {
+                super::document::create_detached(scope, content_type)?
+            }
+        }
+        DOCUMENT_TYPE_NODE => {
+            let doctype = super::document_type::record(scope, source)
+                .ok_or_else(|| "DocumentType state missing".to_owned())?;
+            super::document_type::create(
+                scope,
+                &doctype.name,
+                &doctype.public_id,
+                &doctype.system_id,
+            )?
+        }
         DOCUMENT_FRAGMENT_NODE => super::document_fragment::create(scope)?,
         _ => {
             let constructor = ensure_constructor(scope)?;
@@ -720,6 +842,9 @@ pub(crate) fn clone_object<'s>(
     {
         set_owner_document(scope, clone, document);
     }
+    if record.node_type == ELEMENT_NODE {
+        super::custom_element_registry::try_upgrade(scope, clone, false);
+    }
     if deep {
         let source_children = effective_children(scope, source);
         let clone_parent = super::html_template_element::record(scope, clone)
@@ -732,7 +857,61 @@ pub(crate) fn clone_object<'s>(
                 .map_err(|(_, message)| message.to_owned())?;
         }
     }
+    clone_clonable_shadow_root(scope, source, clone)?;
     Ok(clone)
+}
+
+pub(crate) fn clone_object_without_custom_upgrade<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: v8::Local<'_, v8::Object>,
+    deep: bool,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    super::custom_element_registry::begin_suppress_upgrades(scope);
+    let result = clone_object(scope, source, deep);
+    super::custom_element_registry::end_suppress_upgrades(scope);
+    result
+}
+
+fn clone_clonable_shadow_root(
+    scope: &mut v8::PinScope<'_, '_>,
+    source: v8::Local<'_, v8::Object>,
+    clone: v8::Local<'_, v8::Object>,
+) -> Result<(), String> {
+    let Some(source_root) = super::element::record(scope, source)
+        .and_then(|record| record.shadow_root)
+        .map(|root| v8::Local::new(scope, &root))
+    else {
+        return Ok(());
+    };
+    let Some(record) = super::shadow_root::record(scope, source_root) else {
+        return Ok(());
+    };
+    if !record.clonable {
+        return Ok(());
+    }
+    let registry = record
+        .registry
+        .as_ref()
+        .map(|registry| v8::Local::new(scope, registry));
+    let clone_root = super::shadow_root::create(
+        scope,
+        clone,
+        record.mode,
+        record.delegates_focus,
+        record.slot_assignment,
+        record.serializable,
+        record.clonable,
+        registry,
+        record.registry_is_null,
+    )?;
+    super::element::set_shadow_root(scope, clone, clone_root);
+    for child in children(scope, source_root) {
+        let child_clone = clone_object(scope, child, true)?;
+        let index = children(scope, clone_root).len();
+        insert_node(scope, clone_root, child_clone, index)
+            .map_err(|(_, message)| message.to_owned())?;
+    }
+    Ok(())
 }
 
 fn effective_children<'s>(

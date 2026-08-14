@@ -56,12 +56,18 @@ pub(crate) fn construct(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'PictureInPictureEvent': 2 arguments required",
+            "Failed to construct 'PictureInPictureEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "PictureInPictureEventInit must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'PictureInPictureEvent': The provided value is not of type 'PictureInPictureEventInit'.",
+        );
         return;
     };
     let Some(key) = v8::String::new(scope, "pictureInPictureWindow") else {
@@ -70,14 +76,14 @@ pub(crate) fn construct(
     let Some(value) = init.get(scope, key.into()) else {
         crate::webidl::throw_type_error(
             scope,
-            "Required member 'pictureInPictureWindow' is undefined",
+            "Failed to construct 'PictureInPictureEvent': Failed to read the 'pictureInPictureWindow' property from 'PictureInPictureEventInit': Required member is undefined.",
         );
         return;
     };
     if value.is_undefined() {
         crate::webidl::throw_type_error(
             scope,
-            "Required member 'pictureInPictureWindow' is undefined",
+            "Failed to construct 'PictureInPictureEvent': Failed to read the 'pictureInPictureWindow' property from 'PictureInPictureEventInit': Required member is undefined.",
         );
         return;
     }
@@ -92,7 +98,7 @@ pub(crate) fn construct(
     super::event::attach(
         scope,
         arguments.this(),
-        crate::webidl::value_to_string(scope, arguments.get(0)),
+        event_type,
         super::event::boolean_property(scope, init, "bubbles"),
         super::event::boolean_property(scope, init, "cancelable"),
         super::event::boolean_property(scope, init, "composed"),

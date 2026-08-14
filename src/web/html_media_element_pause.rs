@@ -4,13 +4,13 @@ pub(crate) fn define(
     scope: &mut v8::PinScope<'_, '_>,
     prototype: v8::Local<'_, v8::Object>,
 ) -> Result<(), String> {
-    crate::webidl::define_method(scope, prototype, "pause", 0, pause)
+    crate::webidl::define_method(scope, prototype, "pause", 0, pause_method)
 }
 
-fn pause(
+fn pause_method(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    update(scope, arguments.this(), |record| record.paused = true);
+    super::html_media_element::pause(scope, arguments, result);
 }

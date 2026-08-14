@@ -77,9 +77,34 @@ fn construct(
         return;
     }
     let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "AudioBuffer options must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioBuffer': The provided value is not of type 'AudioBufferOptions'.",
+        );
         return;
     };
+    let length_key = v8::String::new(scope, "length").expect("length key");
+    if options
+        .get(scope, length_key.into())
+        .is_none_or(|value| value.is_undefined())
+    {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioBuffer': Failed to read the 'length' property from 'AudioBufferOptions': Required member is undefined.",
+        );
+        return;
+    }
+    let sample_rate_key = v8::String::new(scope, "sampleRate").expect("sampleRate key");
+    if options
+        .get(scope, sample_rate_key.into())
+        .is_none_or(|value| value.is_undefined())
+    {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioBuffer': Failed to read the 'sampleRate' property from 'AudioBufferOptions': Required member is undefined.",
+        );
+        return;
+    }
     let length = super::event::number_property(scope, options, "length", 0.0) as u32;
     let sample_rate = super::event::number_property(scope, options, "sampleRate", 0.0);
     let channels = super::event::number_property(scope, options, "numberOfChannels", 1.0) as u32;
@@ -347,6 +372,10 @@ fn copy_from_channel(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(destination) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "destination must be a Float32Array");
         return;
@@ -373,6 +402,10 @@ fn copy_to_channel(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(source) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "source must be a Float32Array");
         return;

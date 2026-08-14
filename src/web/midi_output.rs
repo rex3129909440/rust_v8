@@ -72,6 +72,14 @@ fn send(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<MidiOutputStore>()
+        .and_then(|store| store.sent.get(&arguments.this().get_identity_hash().get()))
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "MIDI data must be a Uint8Array");
         return;

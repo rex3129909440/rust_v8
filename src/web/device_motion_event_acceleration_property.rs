@@ -13,7 +13,10 @@ fn get_acceleration(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(x) = record(s, a.this()) {
-        r.set(v8::Local::new(s, &x.acceleration).into())
+        match x.acceleration {
+            Some(value) => r.set(v8::Local::new(s, &value).into()),
+            None => r.set(v8::null(s).into()),
+        }
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
     }

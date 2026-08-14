@@ -10,7 +10,7 @@ fn derive_bits(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if !super::subtle_crypto_support::require_receiver(scope, &arguments)
+    if !super::subtle_crypto_support::require_receiver(scope, &arguments, "deriveBits", &mut result)
         || !super::subtle_crypto_support::require_arguments(scope, &arguments, 2, "deriveBits")
     {
         return;

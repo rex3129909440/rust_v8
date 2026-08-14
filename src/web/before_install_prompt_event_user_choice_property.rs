@@ -15,6 +15,11 @@ fn get_user_choice(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.user_choice).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'userChoice' property from 'BeforeInstallPromptEvent': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }

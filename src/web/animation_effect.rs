@@ -117,6 +117,23 @@ fn record(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Op
         .cloned()
 }
 
+pub(crate) fn copy_timing(
+    scope: &mut v8::PinScope<'_, '_>,
+    source: v8::Local<'_, v8::Object>,
+    destination: v8::Local<'_, v8::Object>,
+) -> bool {
+    let Some(timing) = record(scope, source) else {
+        return false;
+    };
+    let Some(store) = scope.get_slot_mut::<AnimationEffectStore>() else {
+        return false;
+    };
+    store
+        .records
+        .insert(destination.get_identity_hash().get(), timing);
+    true
+}
+
 fn get_timing(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

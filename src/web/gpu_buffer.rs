@@ -205,7 +205,7 @@ fn map_async(
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "GPUBuffer", "mapAsync", result);
         return;
     };
     if record.destroyed {

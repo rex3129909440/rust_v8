@@ -16,6 +16,15 @@ fn request_pointer_lock(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if super::element::record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "Element",
+            "requestPointerLock",
+            result,
+        );
+        return;
+    }
     if !super::element_method_support::ensure(scope, arguments.this()) {
         return;
     }

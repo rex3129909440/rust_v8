@@ -144,7 +144,15 @@ fn make_xr_compatible(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        let message = v8::String::new(
+            scope,
+            "Failed to execute 'makeXRCompatible' on 'WebGL2RenderingContext': Illegal invocation",
+        )
+        .expect("static string");
+        let exception = v8::Exception::type_error(scope, message);
+        if let Ok(promise) = super::writable_stream::rejected_promise(scope, exception) {
+            result.set(promise.into());
+        }
         return;
     }
     let undefined = v8::undefined(scope);
@@ -1010,6 +1018,15 @@ fn record(
         .cloned()
 }
 
+fn require_context(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    if record(scope, object).is_some() {
+        true
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        false
+    }
+}
+
 fn update(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -1455,6 +1472,9 @@ fn delete_buffer(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.buffers.remove(&id);
@@ -1466,6 +1486,9 @@ fn delete_framebuffer(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.framebuffers.remove(&id);
@@ -1477,6 +1500,9 @@ fn delete_program(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.programs.remove(&id);
@@ -1488,6 +1514,9 @@ fn delete_renderbuffer(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.renderbuffers.remove(&id);
@@ -1499,6 +1528,9 @@ fn delete_shader(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.shaders.remove(&id);
@@ -1510,6 +1542,9 @@ fn delete_texture(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.textures.remove(&id);
@@ -1521,6 +1556,9 @@ fn delete_query(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.queries.remove(&id);
@@ -1533,6 +1571,9 @@ fn delete_sampler(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.samplers.remove(&id);
@@ -1545,6 +1586,9 @@ fn delete_sync(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.syncs.remove(&id);
@@ -1556,6 +1600,9 @@ fn delete_transform_feedback(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.transform_feedbacks.remove(&id);
@@ -1570,6 +1617,9 @@ fn delete_vertex_array(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     if let Some(id) = object_id(arguments.get(0)) {
         update(scope, arguments.this(), |record| {
             record.vertex_arrays.remove(&id);
@@ -1586,6 +1636,9 @@ fn membership(
     mut result: v8::ReturnValue<'_>,
     test: impl FnOnce(&ContextRecord, i32) -> bool,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     let id = object_id(arguments.get(0));
     let value = record(scope, arguments.this())
         .zip(id)
@@ -1721,6 +1774,9 @@ fn get_query(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     let target = arguments.get(0).uint32_value(scope).unwrap_or(0);
     let query = record(scope, arguments.this())
         .and_then(|record| record.active_queries.get(&target).copied())
@@ -1742,6 +1798,9 @@ fn get_query_parameter(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     let query = object_id(arguments.get(0));
     let parameter = arguments.get(1).uint32_value(scope).unwrap_or(0);
     let query = query.and_then(|id| record(scope, arguments.this())?.queries.get(&id).cloned());
@@ -1800,6 +1859,9 @@ fn get_sampler_parameter(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     let sampler = object_id(arguments.get(0));
     let parameter = arguments.get(1).uint32_value(scope).unwrap_or(0);
     let value = sampler.and_then(|id| {
@@ -1981,6 +2043,9 @@ fn client_wait_sync(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     let sync = object_id(arguments.get(0));
     let value = sync.and_then(|id| {
         let mut status = 0x911B;
@@ -2022,6 +2087,9 @@ fn get_sync_parameter(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !require_context(scope, arguments.this()) {
+        return;
+    }
     let sync = object_id(arguments.get(0));
     let parameter = arguments.get(1).uint32_value(scope).unwrap_or(0);
     let sync = sync.and_then(|id| record(scope, arguments.this())?.syncs.get(&id).cloned());

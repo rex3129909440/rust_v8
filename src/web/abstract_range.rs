@@ -240,7 +240,7 @@ pub(crate) fn adjust_for_character_data(
                 .saturating_sub(removed_count)
                 .saturating_add(inserted_count)
         } else if boundary > offset {
-            offset.saturating_add(inserted_count)
+            offset
         } else {
             boundary
         }
@@ -268,6 +268,12 @@ pub(crate) fn adjust_for_split_text(
 ) {
     let original_id = original.get_identity_hash().get();
     let new_text = v8::Global::new(scope, new_text);
+    let parent_and_offset = super::node::parent(scope, original).and_then(|parent| {
+        super::node::children(scope, parent)
+            .iter()
+            .position(|node| node.strict_equals(original.into()))
+            .map(|index| (parent.get_identity_hash().get(), index as u32 + 1))
+    });
     let updates = scope
         .get_slot::<AbstractRangeStore>()
         .map(|store| {
@@ -282,13 +288,19 @@ pub(crate) fn adjust_for_split_text(
                     let end_id = v8::Local::new(scope, &record.end_container)
                         .get_identity_hash()
                         .get();
-                    (*range_id, start_id == original_id, end_id == original_id)
+                    (
+                        *range_id,
+                        start_id == original_id,
+                        end_id == original_id,
+                        parent_and_offset.is_some_and(|(parent_id, _)| start_id == parent_id),
+                        parent_and_offset.is_some_and(|(parent_id, _)| end_id == parent_id),
+                    )
                 })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
     if let Some(store) = scope.get_slot_mut::<AbstractRangeStore>() {
-        for (range_id, start_matches, end_matches) in updates {
+        for (range_id, start_matches, end_matches, start_parent, end_parent) in updates {
             let Some(record) = store.records.get_mut(&range_id) else {
                 continue;
             };
@@ -299,6 +311,14 @@ pub(crate) fn adjust_for_split_text(
             if end_matches && record.end_offset > offset {
                 record.end_container = new_text.clone();
                 record.end_offset -= offset;
+            }
+            if let Some((_, split_offset)) = parent_and_offset {
+                if start_parent && record.start_offset == split_offset {
+                    record.start_offset = record.start_offset.saturating_add(1);
+                }
+                if end_parent && record.end_offset == split_offset {
+                    record.end_offset = record.end_offset.saturating_add(1);
+                }
             }
         }
     }
@@ -312,6 +332,12 @@ pub(crate) fn adjust_for_text_merge(
 ) {
     let removed_id = removed.get_identity_hash().get();
     let kept = v8::Global::new(scope, kept);
+    let parent_and_index = super::node::parent(scope, removed).and_then(|parent| {
+        super::node::children(scope, parent)
+            .iter()
+            .position(|node| node.strict_equals(removed.into()))
+            .map(|index| (v8::Global::new(scope, parent), index as u32))
+    });
     let updates = scope
         .get_slot::<AbstractRangeStore>()
         .map(|store| {
@@ -326,13 +352,22 @@ pub(crate) fn adjust_for_text_merge(
                     let end_id = v8::Local::new(scope, &record.end_container)
                         .get_identity_hash()
                         .get();
-                    (*range_id, start_id == removed_id, end_id == removed_id)
+                    let parent_id = parent_and_index
+                        .as_ref()
+                        .map(|(parent, _)| v8::Local::new(scope, parent).get_identity_hash().get());
+                    (
+                        *range_id,
+                        start_id == removed_id,
+                        end_id == removed_id,
+                        parent_id == Some(start_id),
+                        parent_id == Some(end_id),
+                    )
                 })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
     if let Some(store) = scope.get_slot_mut::<AbstractRangeStore>() {
-        for (range_id, start_matches, end_matches) in updates {
+        for (range_id, start_matches, end_matches, start_parent, end_parent) in updates {
             let Some(record) = store.records.get_mut(&range_id) else {
                 continue;
             };
@@ -343,6 +378,16 @@ pub(crate) fn adjust_for_text_merge(
             if end_matches {
                 record.end_container = kept.clone();
                 record.end_offset = kept_length.saturating_add(record.end_offset);
+            }
+            if let Some((_, removed_index)) = parent_and_index.as_ref() {
+                if start_parent && record.start_offset == *removed_index {
+                    record.start_container = kept.clone();
+                    record.start_offset = kept_length;
+                }
+                if end_parent && record.end_offset == *removed_index {
+                    record.end_container = kept.clone();
+                    record.end_offset = kept_length;
+                }
             }
         }
     }

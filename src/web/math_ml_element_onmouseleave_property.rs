@@ -13,7 +13,6 @@ fn get_value(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
     if let Some(handler) = record.handlers.get("onmouseleave") {
@@ -47,7 +46,6 @@ fn set_value(
             record.handlers.remove("onmouseleave");
         }
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
     super::event_target::set_attribute_handler(scope, arguments.this(), "mouseleave", present);

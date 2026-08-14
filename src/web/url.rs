@@ -102,9 +102,13 @@ fn construct(
         return;
     }
     let parsed = match parse_arguments(scope, &arguments) {
-        Ok(parsed) => parsed,
+        Ok(Some(parsed)) => parsed,
+        Ok(None) => return,
         Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
+            crate::webidl::throw_type_error(
+                scope,
+                &format!("Failed to construct 'URL': {message}"),
+            );
             return;
         }
     };
@@ -117,16 +121,24 @@ fn construct(
 }
 
 fn parse_arguments(
-    scope: &v8::PinScope<'_, '_>,
+    scope: &mut v8::PinScope<'_, '_>,
     arguments: &v8::FunctionCallbackArguments<'_>,
-) -> Result<url::Url, String> {
-    let input = crate::webidl::value_to_string(scope, arguments.get(0));
+) -> Result<Option<url::Url>, String> {
+    let Some(input) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return Ok(None);
+    };
     if arguments.length() > 1 && !arguments.get(1).is_undefined() {
-        let base = crate::webidl::value_to_string(scope, arguments.get(1));
+        let Some(base) = crate::webidl::dom_string(scope, arguments.get(1)) else {
+            return Ok(None);
+        };
         let base = url::Url::parse(&base).map_err(|_| "Invalid base URL".to_owned())?;
-        base.join(&input).map_err(|_| "Invalid URL".to_owned())
+        base.join(&input)
+            .map(Some)
+            .map_err(|_| "Invalid URL".to_owned())
     } else {
-        url::Url::parse(&input).map_err(|_| "Invalid URL".to_owned())
+        url::Url::parse(&input)
+            .map(Some)
+            .map_err(|_| "Invalid URL".to_owned())
     }
 }
 
@@ -180,7 +192,7 @@ fn update(
     if let Some((search_params_id, query)) = sync {
         super::url_search_params::replace_query(scope, search_params_id, &query);
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation: receiver is not a URL");
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
 }
 
@@ -481,6 +493,10 @@ fn set_href(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     let Ok(parsed) = url::Url::parse(&value) else {
         crate::webidl::throw_type_error(scope, "Invalid URL");
@@ -518,7 +534,12 @@ fn can_parse(
         crate::webidl::throw_type_error(scope, "URL.canParse requires 1 argument");
         return;
     }
-    result.set(v8::Boolean::new(scope, parse_arguments(scope, &arguments).is_ok()).into());
+    let value = match parse_arguments(scope, &arguments) {
+        Ok(Some(_)) => true,
+        Ok(None) => return,
+        Err(_) => false,
+    };
+    result.set(v8::Boolean::new(scope, value).into());
 }
 
 fn parse(
@@ -530,9 +551,13 @@ fn parse(
         crate::webidl::throw_type_error(scope, "URL.parse requires 1 argument");
         return;
     }
-    let Ok(parsed) = parse_arguments(scope, &arguments) else {
-        result.set(v8::null(scope).into());
-        return;
+    let parsed = match parse_arguments(scope, &arguments) {
+        Ok(Some(parsed)) => parsed,
+        Ok(None) => return,
+        Err(_) => {
+            result.set(v8::null(scope).into());
+            return;
+        }
     };
     let constructor = scope
         .get_slot::<UrlStore>()

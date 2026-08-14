@@ -13,7 +13,12 @@ fn set_sink_id(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "HTMLMediaElement",
+            "setSinkId",
+            result,
+        );
         return;
     }
     let sink_id = crate::webidl::value_to_string(scope, arguments.get(0));

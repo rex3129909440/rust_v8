@@ -144,11 +144,17 @@ fn construct(
         return;
     }
     let Ok(context) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AnalyserNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     };
     if !super::base_audio_context::is_context(scope, context) {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AnalyserNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     }
     let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
@@ -268,6 +274,10 @@ fn set_fft_size(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = arguments.get(0).uint32_value(scope).unwrap_or(0);
     if !valid_fft_size(value) {
         throw_index_size(

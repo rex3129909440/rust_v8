@@ -3,8 +3,9 @@ use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub(crate) struct PerformanceObserverStore {
     constructor: crate::webidl::RealmConstructor,
-    supported_entry_types: Option<v8::Global<v8::Array>>,
+    supported_entry_types: HashMap<i32, v8::Global<v8::Array>>,
     records: HashMap<i32, ObserverRecord>,
+    buffered_entries: HashMap<(i32, String), Vec<v8::Global<v8::Object>>>,
 }
 
 #[derive(Clone)]
@@ -78,7 +79,10 @@ fn construct(
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'Function'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'PerformanceObserver': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     let record = ObserverRecord {
@@ -104,31 +108,53 @@ fn get_supported_entry_types(
 ) {
     let existing = scope
         .get_slot::<PerformanceObserverStore>()
-        .and_then(|store| store.supported_entry_types.as_ref())
+        .and_then(|store| {
+            store
+                .supported_entry_types
+                .get(&crate::webidl::realm_id(scope))
+        })
         .cloned();
     if let Some(existing) = existing {
         result.set(v8::Local::new(scope, &existing).into());
         return;
     }
-    let values = v8::Array::new(scope, 13);
+    let chromium_151 = crate::browser_surface::current_version(scope).major() >= 151;
+    let values = v8::Array::new(scope, if chromium_151 { 15 } else { 13 });
     set_string_index(scope, values, 0, "element");
     set_string_index(scope, values, 1, "event");
     set_string_index(scope, values, 2, "first-input");
-    set_string_index(scope, values, 3, "largest-contentful-paint");
-    set_string_index(scope, values, 4, "layout-shift");
-    set_string_index(scope, values, 5, "long-animation-frame");
-    set_string_index(scope, values, 6, "longtask");
-    set_string_index(scope, values, 7, "mark");
-    set_string_index(scope, values, 8, "measure");
-    set_string_index(scope, values, 9, "navigation");
-    set_string_index(scope, values, 10, "paint");
-    set_string_index(scope, values, 11, "resource");
-    set_string_index(scope, values, 12, "visibility-state");
+    if chromium_151 {
+        set_string_index(scope, values, 3, "interaction-contentful-paint");
+        set_string_index(scope, values, 4, "largest-contentful-paint");
+        set_string_index(scope, values, 5, "layout-shift");
+        set_string_index(scope, values, 6, "long-animation-frame");
+        set_string_index(scope, values, 7, "longtask");
+        set_string_index(scope, values, 8, "mark");
+        set_string_index(scope, values, 9, "measure");
+        set_string_index(scope, values, 10, "navigation");
+        set_string_index(scope, values, 11, "paint");
+        set_string_index(scope, values, 12, "resource");
+        set_string_index(scope, values, 13, "soft-navigation");
+        set_string_index(scope, values, 14, "visibility-state");
+    } else {
+        set_string_index(scope, values, 3, "largest-contentful-paint");
+        set_string_index(scope, values, 4, "layout-shift");
+        set_string_index(scope, values, 5, "long-animation-frame");
+        set_string_index(scope, values, 6, "longtask");
+        set_string_index(scope, values, 7, "mark");
+        set_string_index(scope, values, 8, "measure");
+        set_string_index(scope, values, 9, "navigation");
+        set_string_index(scope, values, 10, "paint");
+        set_string_index(scope, values, 11, "resource");
+        set_string_index(scope, values, 12, "visibility-state");
+    }
     let global = v8::Global::new(scope, values);
+    let realm_id = crate::webidl::realm_id(scope);
     scope
         .get_slot_mut::<PerformanceObserverStore>()
         .expect("PerformanceObserver state")
-        .supported_entry_types = Some(global);
+        .supported_entry_types
+        .insert(realm_id, global);
     result.set(values.into());
 }
 
@@ -209,7 +235,7 @@ fn observe(
         }
     }
     if let Some(entry_type) = buffered_type {
-        let entries = super::performance::buffered_entries(scope, &entry_type);
+        let entries = observer_buffered_entries(scope, &entry_type);
         queue_entries_for_observer(scope, identity, entries);
     }
 }
@@ -297,13 +323,23 @@ fn take_records(
     result.set(output.into());
 }
 
-#[allow(dead_code)]
 pub(crate) fn queue_entry(
     scope: &mut v8::PinScope<'_, '_>,
     entry: v8::Local<'_, v8::Object>,
     entry_type: &str,
 ) {
     let realm_id = crate::webidl::realm_id(scope);
+    let entry_global = v8::Global::new(scope, entry);
+    if let Some(store) = scope.get_slot_mut::<PerformanceObserverStore>() {
+        let buffer = store
+            .buffered_entries
+            .entry((realm_id, entry_type.to_owned()))
+            .or_default();
+        let maximum = maximum_buffer_size(entry_type);
+        if buffer.len() < maximum {
+            buffer.push(entry_global.clone());
+        }
+    }
     let observer_ids = scope
         .get_slot::<PerformanceObserverStore>()
         .map(|store| {
@@ -318,8 +354,91 @@ pub(crate) fn queue_entry(
         })
         .unwrap_or_default();
     for observer_id in observer_ids {
-        queue_entries_for_observer(scope, observer_id, vec![v8::Global::new(scope, entry)]);
+        queue_entries_for_observer(scope, observer_id, vec![entry_global.clone()]);
     }
+}
+
+fn maximum_buffer_size(entry_type: &str) -> usize {
+    match entry_type {
+        "first-input" => 1,
+        "paint" => 2,
+        "resource" => 250,
+        "longtask" | "long-animation-frame" => 200,
+        "element" | "event" | "largest-contentful-paint" | "layout-shift" => 150,
+        _ => usize::MAX,
+    }
+}
+
+fn observer_buffered_entries(
+    scope: &v8::PinScope<'_, '_>,
+    entry_type: &str,
+) -> Vec<v8::Global<v8::Object>> {
+    let realm_id = crate::webidl::realm_id(scope);
+    scope
+        .get_slot::<PerformanceObserverStore>()
+        .and_then(|store| {
+            store
+                .buffered_entries
+                .get(&(realm_id, entry_type.to_owned()))
+        })
+        .cloned()
+        .unwrap_or_default()
+}
+
+pub(crate) fn task_start(scope: &v8::PinScope<'_, '_>) -> f64 {
+    super::performance::now_for_current_realm(scope).unwrap_or(0.0)
+}
+
+pub(crate) fn record_completed_task(
+    scope: &mut v8::PinScope<'_, '_>,
+    start_time: f64,
+    include_animation_frame: bool,
+) -> bool {
+    let end_time = super::performance::now_for_current_realm(scope).unwrap_or(start_time);
+    let duration = (end_time - start_time).max(0.0);
+    if duration < 50.0 {
+        return false;
+    }
+
+    let attribution = super::task_attribution_timing::create(
+        scope,
+        "window".to_owned(),
+        String::new(),
+        String::new(),
+        String::new(),
+    )
+    .ok()
+    .map(|entry| vec![v8::Global::new(scope, entry)])
+    .unwrap_or_default();
+    if let Ok(entry) = super::performance_long_task_timing::create(
+        scope,
+        "self".to_owned(),
+        start_time,
+        duration,
+        attribution,
+    ) {
+        queue_entry(scope, entry, "longtask");
+    }
+
+    if include_animation_frame {
+        let scripts = super::performance_script_timing::create(
+            scope,
+            "script".to_owned(),
+            start_time,
+            duration,
+            String::new(),
+            String::new(),
+        )
+        .ok()
+        .map(|entry| vec![v8::Global::new(scope, entry)])
+        .unwrap_or_default();
+        if let Ok(entry) = super::performance_long_animation_frame_timing::create(
+            scope, start_time, duration, scripts,
+        ) {
+            super::performance::add_entry_for_current_realm(scope, entry, "long-animation-frame");
+        }
+    }
+    true
 }
 
 fn queue_entries_for_observer(
@@ -409,8 +528,12 @@ fn deliver_entries(
 pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {
     if let Some(store) = scope.get_slot_mut::<PerformanceObserverStore>() {
         store.constructor.remove(realm_id);
+        store.supported_entry_types.remove(&realm_id);
         store
             .records
             .retain(|_, record| record.realm_id != realm_id);
+        store
+            .buffered_entries
+            .retain(|(entry_realm_id, _), _| *entry_realm_id != realm_id);
     }
 }

@@ -147,6 +147,20 @@ pub(crate) fn snapshot(
         .cloned()
 }
 
+pub(crate) fn increment(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    event_type: &str,
+) {
+    if let Some(values) = scope
+        .get_slot_mut::<EventCountsStore>()
+        .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
+        && let Some((_, count)) = values.iter_mut().find(|(name, _)| name == event_type)
+    {
+        *count = count.saturating_add(1);
+    }
+}
+
 pub(crate) fn get_size(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
@@ -261,12 +275,12 @@ pub(crate) fn for_each(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "The callback must be a function");
-        return;
-    };
     let Some(values) = snapshot(s, a.this()) else {
         crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    let Ok(callback) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
+        crate::webidl::throw_type_error(s, "The callback must be a function");
         return;
     };
     for (key, value) in values {

@@ -86,16 +86,25 @@ pub(crate) fn construct(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'NavigateEvent': 2 arguments required",
+            "Failed to construct 'NavigateEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "The event initializer is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'NavigateEvent': The provided value is not of type 'NavigateEventInit'.",
+        );
         return;
     };
     let Some(destination) = object_property(scope, init, "destination") else {
-        crate::webidl::throw_type_error(scope, "destination must be a NavigationDestination");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'NavigateEvent': Failed to read the 'destination' property from 'NavigateEventInit': Required member is undefined.",
+        );
         return;
     };
     if !super::navigation_destination::is_destination(scope, destination) {
@@ -110,7 +119,6 @@ pub(crate) fn construct(
         crate::webidl::throw_type_error(scope, "signal must be an AbortSignal");
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
     let navigation_type =
         string_property(scope, init, "navigationType").unwrap_or_else(|| "push".to_owned());
     let can_intercept = boolean_property(scope, init, "canIntercept");

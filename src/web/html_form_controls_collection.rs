@@ -1,6 +1,7 @@
 #[derive(Default)]
 pub(crate) struct HtmlFormControlsCollectionStore {
     constructor: crate::webidl::RealmConstructor,
+    named_cache: std::collections::HashMap<(i32, String), v8::Global<v8::Object>>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -67,6 +68,21 @@ pub(crate) fn replace(
     super::html_collection::replace(scope, collection, items)
 }
 
+pub(crate) fn is_form_controls_collection(
+    scope: &mut v8::PinScope<'_, '_>,
+    collection: v8::Local<'_, v8::Object>,
+) -> bool {
+    let Ok(constructor) = ensure_constructor(scope) else {
+        return false;
+    };
+    let Ok(prototype) = crate::webidl::prototype(scope, constructor) else {
+        return false;
+    };
+    collection
+        .get_prototype(scope)
+        .is_some_and(|current| current.strict_equals(prototype.into()))
+}
+
 fn illegal_constructor(
     scope: &mut v8::PinScope<'_, '_>,
     _: v8::FunctionCallbackArguments<'_>,
@@ -84,14 +100,36 @@ fn named_item(
     mut result: v8::ReturnValue<'_>,
 ) {
     super::html_collection::refresh_live(scope, arguments.this());
-    let name = crate::webidl::value_to_string(scope, arguments.get(0));
     let Some(items) = super::html_collection::items(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'namedItem' on 'HTMLFormControlsCollection': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let name = crate::webidl::value_to_string(scope, arguments.get(0));
     if name.is_empty() {
         result.set(v8::null(scope).into());
         return;
+    }
+    match named_value(scope, arguments.this(), items, &name) {
+        Some(value) => result.set(value.into()),
+        None => result.set(v8::null(scope).into()),
+    }
+}
+
+pub(crate) fn named_value<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    collection: v8::Local<'_, v8::Object>,
+    items: Vec<v8::Global<v8::Object>>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    if name.is_empty() {
+        return None;
     }
     let mut matches = Vec::new();
     for item in items {
@@ -110,11 +148,26 @@ fn named_item(
         }
     }
     match matches.len() {
-        0 => result.set(v8::null(scope).into()),
-        1 => result.set(matches[0].into()),
-        _ => match super::radio_node_list::create(scope, matches) {
-            Ok(list) => result.set(list.into()),
-            Err(message) => crate::webidl::throw_type_error(scope, &message),
-        },
+        0 => None,
+        1 => Some(matches[0]),
+        _ => {
+            let key = (collection.get_identity_hash().get(), name.to_owned());
+            let cached = scope
+                .get_slot::<HtmlFormControlsCollectionStore>()
+                .and_then(|store| store.named_cache.get(&key))
+                .cloned();
+            if let Some(cached) = cached {
+                let cached = v8::Local::new(scope, &cached);
+                let _ = super::node_list::replace_snapshot(scope, cached, matches);
+                return Some(cached);
+            }
+            let list = super::radio_node_list::create(scope, matches).ok()?;
+            let global = v8::Global::new(scope, list);
+            scope
+                .get_slot_mut::<HtmlFormControlsCollectionStore>()?
+                .named_cache
+                .insert(key, global);
+            Some(list)
+        }
     }
 }

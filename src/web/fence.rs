@@ -143,6 +143,18 @@ fn update_dictionary(
     arguments: v8::FunctionCallbackArguments<'_>,
     automatic: bool,
 ) {
+    if scope
+        .get_slot::<FenceStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(scope, "Fence reporting requires one event data argument.");
         return;

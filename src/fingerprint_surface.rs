@@ -246,13 +246,13 @@ impl Default for CanvasFingerprint {
             text_width_scale: 1.0,
             actual_bounding_box_left: 0.0,
             actual_bounding_box_right_scale: 1.0,
-            font_bounding_box_ascent: 12.0,
-            font_bounding_box_descent: 3.0,
-            actual_bounding_box_ascent: 8.0,
-            actual_bounding_box_descent: 1.0,
-            hanging_baseline: 9.600_000_381_469_727,
+            font_bounding_box_ascent: 9.0,
+            font_bounding_box_descent: 2.0,
+            actual_bounding_box_ascent: 7.0,
+            actual_bounding_box_descent: 2.0,
+            hanging_baseline: 7.199_999_809_265_137,
             alphabetic_baseline: 0.0,
-            ideographic_baseline: -1.199_996_948_242_187_5,
+            ideographic_baseline: -2.0,
         }
     }
 }
@@ -433,7 +433,7 @@ impl Default for WebGpuFingerprint {
 impl Default for AudioFingerprint {
     fn default() -> Self {
         Self {
-            sample_rate: 44_100.0,
+            sample_rate: 48_000.0,
             max_channel_count: 2,
             base_latency: 0.01,
             output_latency: 0.0,

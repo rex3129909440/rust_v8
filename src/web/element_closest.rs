@@ -14,7 +14,20 @@ fn call(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let selector = crate::webidl::value_to_string(scope, arguments.get(0));
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'closest' on 'Element': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(selector) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'closest' on 'Element'",
+    ) else {
+        return;
+    };
     let mut candidate = Some(arguments.this());
     while let Some(element) = candidate {
         match super::dom_selector::matches_selector(scope, element, &selector, element) {
@@ -23,8 +36,8 @@ fn call(
                 return;
             }
             Ok(false) => {}
-            Err(message) => {
-                super::element::throw_selector_error(scope, message);
+            Err(_) => {
+                super::dom_selector::throw_api_error(scope, "closest", "Element", &selector);
                 return;
             }
         }

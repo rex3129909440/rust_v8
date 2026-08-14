@@ -32,11 +32,17 @@ fn set_current_node(
         return;
     }
     let Ok(node) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "currentNode must be a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to set the 'currentNode' property on 'TreeWalker': Failed to convert value to 'Node'.",
+        );
         return;
     };
     if super::node::record(scope, node).is_none() {
-        crate::webidl::throw_type_error(scope, "currentNode must be a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to set the 'currentNode' property on 'TreeWalker': Failed to convert value to 'Node'.",
+        );
         return;
     }
     super::tree_walker::set_current(scope, arguments.this(), node);

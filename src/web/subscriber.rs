@@ -139,6 +139,10 @@ fn add_teardown(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(f) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "addTeardown requires a function");
         return;

@@ -3,6 +3,7 @@ use std::hash::{BuildHasher, Hasher};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US: i64 = 100;
+const EDGE_ISOLATED_CLOCK_RESOLUTION_US: i64 = 5;
 const TIME_CLAMPER_LOWER_DIGITS_MOD: i64 = 10_000_000_000;
 const MAX_CLOCK_SLEEP_SLICE: Duration = Duration::from_millis(5);
 
@@ -10,6 +11,7 @@ pub(crate) struct DeterminismState {
     configuration: crate::DeterministicExecution,
     elapsed_ms: u64,
     started_at: Instant,
+    platform_monotonic_origin_ms: f64,
     epoch_origin_ms: f64,
     epoch_origin_ns: i128,
     time_clamper_secret: u64,
@@ -28,10 +30,16 @@ pub(crate) fn prepare(
     let time_clamper_secret =
         deterministic_time_clamper_secret(&configuration).unwrap_or_else(fresh_time_clamper_secret);
     let epoch_origin_ns = system_epoch_nanoseconds();
+    let platform_monotonic_origin_ms = if configuration.clock_epoch_ms.is_some() {
+        0.0
+    } else {
+        platform_monotonic_milliseconds()
+    };
     isolate.set_slot(DeterminismState {
         configuration,
         elapsed_ms: 0,
         started_at: Instant::now(),
+        platform_monotonic_origin_ms,
         epoch_origin_ms: epoch_origin_ns as f64 / 1_000_000.0,
         epoch_origin_ns,
         time_clamper_secret,
@@ -122,7 +130,12 @@ pub(crate) fn high_resolution_milliseconds(scope: &v8::PinScope<'_, '_>, value: 
         .get_slot::<DeterminismState>()
         .map(|state| state.time_clamper_secret)
         .unwrap_or(0);
-    clamp_time_resolution_milliseconds(value, secret, EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US)
+    let resolution = if crate::web::cross_origin_isolated::value(scope) {
+        EDGE_ISOLATED_CLOCK_RESOLUTION_US
+    } else {
+        EDGE_NON_ISOLATED_CLOCK_RESOLUTION_US
+    };
+    clamp_time_resolution_milliseconds(value, secret, resolution)
 }
 
 pub(crate) fn relative_high_resolution_milliseconds(
@@ -130,8 +143,16 @@ pub(crate) fn relative_high_resolution_milliseconds(
     monotonic_time_ms: f64,
     monotonic_origin_ms: f64,
 ) -> f64 {
-    let current = high_resolution_milliseconds(scope, monotonic_time_ms);
-    let origin = high_resolution_milliseconds(scope, monotonic_origin_ms);
+    // Chromium derives DOMHighResTimeStamp values from an absolute platform
+    // monotonic clock and only then subtracts the realm origin. Keeping that
+    // absolute magnitude preserves the small floating-point residuals visible
+    // in Edge instead of producing an unrealistically ideal decimal grid.
+    let platform_origin = scope
+        .get_slot::<DeterminismState>()
+        .map(|state| state.platform_monotonic_origin_ms)
+        .unwrap_or(0.0);
+    let current = high_resolution_milliseconds(scope, platform_origin + monotonic_time_ms);
+    let origin = high_resolution_milliseconds(scope, platform_origin + monotonic_origin_ms);
     (current - origin).max(0.0)
 }
 
@@ -164,6 +185,36 @@ fn elapsed_milliseconds_from_state(state: &DeterminismState) -> f64 {
     } else {
         state.started_at.elapsed().as_secs_f64() * 1_000.0
     }
+}
+
+#[cfg(target_os = "windows")]
+fn platform_monotonic_milliseconds() -> f64 {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetTickCount64() -> u64;
+    }
+    // SAFETY: GetTickCount64 takes no pointers and has no preconditions.
+    unsafe { GetTickCount64() as f64 }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_monotonic_milliseconds() -> f64 {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `time` is a valid writable timespec and CLOCK_MONOTONIC does not
+    // require any additional lifetime or ownership guarantees.
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } == 0 {
+        time.tv_sec as f64 * 1_000.0 + time.tv_nsec as f64 / 1_000_000.0
+    } else {
+        0.0
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+fn platform_monotonic_milliseconds() -> f64 {
+    0.0
 }
 
 pub(crate) fn fill_random(scope: &mut v8::PinScope<'_, '_>, bytes: &mut [u8]) -> bool {

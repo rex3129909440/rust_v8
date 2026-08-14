@@ -9,15 +9,10 @@ fn values(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    let Some(values) = super::dom_token_list::list(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, values.len() as i32);
-    for (index, value) in values.iter().enumerate() {
-        if let Some(value) = v8::String::new(scope, value) {
-            let _ = array.set_index(scope, index as u32, value.into());
-        }
-    }
-    super::dom_token_list::iterator_from_array(scope, array, "values", result)
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        result,
+    )
 }

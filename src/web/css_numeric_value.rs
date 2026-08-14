@@ -65,30 +65,43 @@ fn illegal_constructor(
 }
 
 pub(crate) fn is_numeric(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
-    super::css_unit_value::record(scope, object).is_some()
-        || super::css_math_value::is_math(scope, object)
+    super::structured_clone::inherits_platform_interface(scope, object, "CSSNumericValue")
+}
+
+pub(crate) enum NumberishError {
+    Exception,
+    Message(String),
 }
 
 pub(crate) fn numberish(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
-) -> Result<v8::Global<v8::Object>, String> {
+) -> Result<v8::Global<v8::Object>, NumberishError> {
     if let Ok(object) = v8::Local::<v8::Object>::try_from(value)
         && is_numeric(scope, object)
     {
         return Ok(v8::Global::new(scope, object));
     }
-    if value.is_number() {
-        let number = value
-            .number_value(scope)
-            .ok_or_else(|| "CSS numeric value must be finite".to_owned())?;
-        if !number.is_finite() {
-            return Err("CSS numeric value must be finite".to_owned());
-        }
-        let object = super::css_unit_value::create(scope, number, "number")?;
-        return Ok(v8::Global::new(scope, object));
+    if let Some(message) = crate::webidl::number_conversion_error(value) {
+        return Err(NumberishError::Message(message));
     }
-    Err("Value is not a CSS numeric value".to_owned())
+    let Some(number) = value.number_value(scope) else {
+        return Err(NumberishError::Exception);
+    };
+    if !number.is_finite() {
+        return Err(NumberishError::Message(
+            crate::trace::current_constructor_name()
+                .map(|name| {
+                    format!(
+                        "Failed to construct '{name}': The provided double value is non-finite."
+                    )
+                })
+                .unwrap_or_else(|| "The provided double value is non-finite.".to_owned()),
+        ));
+    }
+    let object =
+        super::css_unit_value::create(scope, number, "number").map_err(NumberishError::Message)?;
+    Ok(v8::Global::new(scope, object))
 }
 
 fn unit_dimension(unit: &str) -> &str {
@@ -273,6 +286,10 @@ fn add(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !is_numeric(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if let Some((left, right)) = same_unit(scope, &arguments) {
         return_unit(scope, left.value + right.value, &left.unit, result);
     } else {
@@ -285,6 +302,10 @@ fn sub(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !is_numeric(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if let Some((left, right)) = same_unit(scope, &arguments) {
         return_unit(scope, left.value - right.value, &left.unit, result);
     } else {
@@ -331,6 +352,10 @@ fn min(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !is_numeric(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if let Some((left, right)) = same_unit(scope, &arguments) {
         return_unit(scope, left.value.min(right.value), &left.unit, result);
     } else {
@@ -343,6 +368,10 @@ fn max(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !is_numeric(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if let Some((left, right)) = same_unit(scope, &arguments) {
         return_unit(scope, left.value.max(right.value), &left.unit, result);
     } else {
@@ -355,6 +384,10 @@ fn equals(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !is_numeric(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let equal = operands(scope, &arguments)
         .is_some_and(|(left, right)| left.unit == right.unit && left.value == right.value);
     result.set(v8::Boolean::new(scope, equal).into());
@@ -370,11 +403,50 @@ fn convert(
         return;
     };
     let unit = crate::webidl::value_to_string(scope, arguments.get(0)).to_ascii_lowercase();
-    if unit == value.unit {
-        return_unit(scope, value.value, &unit, result);
+    let unit = if unit == "%" {
+        "percent".to_owned()
     } else {
-        crate::webidl::throw_type_error(scope, "Unit conversion is not available");
+        unit
+    };
+    let converted = conversion_factor(&value.unit)
+        .zip(conversion_factor(&unit))
+        .and_then(
+            |((source_kind, source_factor), (target_kind, target_factor))| {
+                (source_kind == target_kind).then_some(value.value * source_factor / target_factor)
+            },
+        );
+    if let Some(converted) = converted {
+        return_unit(scope, converted, &unit, result);
+        return;
     }
+    crate::webidl::throw_type_error(scope, "Unit conversion is not available");
+}
+
+fn conversion_factor(unit: &str) -> Option<(&'static str, f64)> {
+    Some(match unit {
+        "number" => ("number", 1.0),
+        "percent" => ("percent", 1.0),
+        "px" => ("length", 1.0),
+        "in" => ("length", 96.0),
+        "cm" => ("length", 96.0 / 2.54),
+        "mm" => ("length", 96.0 / 25.4),
+        "q" => ("length", 96.0 / 101.6),
+        "pt" => ("length", 96.0 / 72.0),
+        "pc" => ("length", 16.0),
+        "deg" => ("angle", 1.0),
+        "grad" => ("angle", 0.9),
+        "rad" => ("angle", 180.0 / std::f64::consts::PI),
+        "turn" => ("angle", 360.0),
+        "ms" => ("time", 1.0),
+        "s" => ("time", 1_000.0),
+        "hz" => ("frequency", 1.0),
+        "khz" => ("frequency", 1_000.0),
+        "dppx" => ("resolution", 1.0),
+        "dpi" => ("resolution", 1.0 / 96.0),
+        "dpcm" => ("resolution", 2.54 / 96.0),
+        "fr" => ("flex", 1.0),
+        _ => return None,
+    })
 }
 
 fn to_sum(

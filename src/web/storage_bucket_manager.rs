@@ -78,7 +78,7 @@ fn delete(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucketManager", "delete", r);
         return;
     }
     let name = crate::webidl::value_to_string(s, a.get(0));
@@ -95,7 +95,7 @@ fn keys(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucketManager", "keys", r);
         return;
     }
     let names = s
@@ -119,7 +119,7 @@ fn open(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageBucketManager", "open", r);
         return;
     }
     let name = crate::webidl::value_to_string(s, a.get(0));

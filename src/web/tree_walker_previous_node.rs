@@ -13,23 +13,9 @@ fn previous_node(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let root = v8::Local::new(scope, &record.root);
-    let current = v8::Local::new(scope, &record.current);
-    if current.strict_equals(root.into()) {
-        result.set(v8::null(scope).into());
-        return;
-    }
-    let mut traversal = vec![(v8::Global::new(scope, root), true)];
-    if super::tree_walker::traversable_preorder(scope, &record, root, &mut traversal).is_err() {
-        return;
-    }
-    let position = traversal
-        .iter()
-        .position(|(node, _)| v8::Local::new(scope, node).strict_equals(current.into()))
-        .unwrap_or(traversal.len());
-    let candidate = traversal[..position]
-        .iter()
-        .rev()
-        .find_map(|(node, accepted)| accepted.then(|| v8::Local::new(scope, node)));
+    let candidate = match super::tree_walker::traverse_previous(scope, &record, "previousNode") {
+        Ok(candidate) => candidate.map(|value| v8::Local::new(scope, &value)),
+        Err(()) => return,
+    };
     super::tree_walker::return_candidate(scope, arguments.this(), candidate, result);
 }

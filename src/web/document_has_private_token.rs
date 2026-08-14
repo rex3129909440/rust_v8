@@ -11,7 +11,12 @@ fn call(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !super::document::is_document(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "Document",
+            "hasPrivateToken",
+            result,
+        );
         return;
     }
     let issuer = crate::webidl::value_to_string(scope, arguments.get(0));

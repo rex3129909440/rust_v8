@@ -263,6 +263,10 @@ fn abort(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "WritableStream", "abort", result);
+        return;
+    }
     if record(scope, arguments.this()).is_some_and(|record| record.locked) {
         let message = string_value(scope, "Cannot abort a locked stream");
         if let Ok(promise) = rejected_promise(scope, message) {
@@ -281,6 +285,10 @@ fn close(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "WritableStream", "close", result);
+        return;
+    }
     if record(scope, arguments.this()).is_some_and(|record| record.locked) {
         let message = string_value(scope, "Cannot close a locked stream");
         if let Ok(promise) = rejected_promise(scope, message) {
@@ -299,6 +307,10 @@ fn get_writer(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     match super::writable_stream_default_writer::create(scope, arguments.this()) {
         Ok(writer) => result.set(writer.into()),
         Err(message) => crate::webidl::throw_type_error(scope, &message),

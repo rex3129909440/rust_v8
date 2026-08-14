@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+// Keep allocation failure in the Web API error channel. Chromium rejects
+// dimensions outside its supported backing-store range instead of allowing an
+// allocator abort to terminate the renderer process. The sandbox worker has a
+// smaller fixed memory envelope, so it applies that limit before allocation.
+const MAX_IMAGE_DATA_BYTES: usize = 512 * 1024 * 1024;
+
 #[derive(Default)]
 pub(crate) struct ImageDataStore {
     constructor: crate::webidl::RealmConstructor,
@@ -71,10 +77,19 @@ fn construct(
         );
         return;
     }
+    if let Some(message) = crate::webidl::number_conversion_error(arguments.get(0)) {
+        crate::webidl::throw_type_error(scope, &message);
+        return;
+    }
     if let Ok(array) = v8::Local::<v8::Uint8ClampedArray>::try_from(arguments.get(0)) {
-        let width = arguments.get(1).uint32_value(scope).unwrap_or(0);
+        let Some(width) = arguments.get(1).uint32_value(scope) else {
+            return;
+        };
         if width == 0 {
-            throw_index_size(scope, "The source width is zero or not a number.");
+            throw_index_size(
+                scope,
+                "Failed to construct 'ImageData': The source width is zero or not a number.",
+            );
             return;
         }
         let length = array.length();
@@ -89,10 +104,17 @@ fn construct(
             }
             (length / row_length) as u32
         } else {
-            arguments.get(2).uint32_value(scope).unwrap_or(0)
+            let Some(height) = arguments.get(2).uint32_value(scope) else {
+                return;
+            };
+            height
         };
         if height == 0 {
             throw_index_size(scope, "The source height is zero or not a number.");
+            return;
+        }
+        if supported_byte_length(width, height).is_none() {
+            throw_supported_range(scope);
             return;
         }
         if length != width as usize * height as usize * 4 {
@@ -132,16 +154,27 @@ fn construct(
         }
         return;
     }
-    let width = arguments.get(0).uint32_value(scope).unwrap_or(0);
-    let height = arguments.get(1).uint32_value(scope).unwrap_or(0);
+    let Some(width) = arguments.get(0).uint32_value(scope) else {
+        return;
+    };
+    let Some(height) = arguments.get(1).uint32_value(scope) else {
+        return;
+    };
     if width == 0 {
-        throw_index_size(scope, "The source width is zero or not a number.");
+        throw_index_size(
+            scope,
+            "Failed to construct 'ImageData': The source width is zero or not a number.",
+        );
         return;
     }
     if height == 0 {
         throw_index_size(scope, "The source height is zero or not a number.");
         return;
     }
+    let Some(byte_length) = supported_byte_length(width, height) else {
+        throw_supported_range(scope);
+        return;
+    };
     let settings = v8::Local::<v8::Object>::try_from(arguments.get(2)).ok();
     let Some(color_space) = validated_setting(scope, settings, "colorSpace", "srgb") else {
         return;
@@ -157,11 +190,31 @@ fn construct(
         );
         return;
     }
-    let bytes = vec![0_u8; width.saturating_mul(height).saturating_mul(4) as usize];
+    let mut bytes = Vec::new();
+    if bytes.try_reserve_exact(byte_length).is_err() {
+        throw_supported_range(scope);
+        return;
+    }
+    bytes.resize(byte_length, 0);
     match attach(scope, arguments.this(), width, height, bytes, color_space) {
         Ok(()) => result.set(arguments.this().into()),
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }
+}
+
+fn supported_byte_length(width: u32, height: u32) -> Option<usize> {
+    let bytes = usize::try_from(width)
+        .ok()?
+        .checked_mul(usize::try_from(height).ok()?)?
+        .checked_mul(4)?;
+    (bytes <= MAX_IMAGE_DATA_BYTES).then_some(bytes)
+}
+
+fn throw_supported_range(scope: &mut v8::PinScope<'_, '_>) {
+    throw_index_size(
+        scope,
+        "Failed to construct 'ImageData': The requested image size exceeds the supported range.",
+    );
 }
 
 pub(crate) fn create<'s>(

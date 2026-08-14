@@ -80,13 +80,26 @@ fn construct(
         return;
     }
     let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "FederatedCredential requires options");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'FederatedCredential': The provided value is not of type 'FederatedCredentialInit'.",
+        );
         return;
     };
+    if member(scope, options, "id").is_none_or(|value| value.is_undefined()) {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'FederatedCredential': Failed to read the 'id' property from 'CredentialData': Required member is undefined.",
+        );
+        return;
+    }
     let id = text(scope, options, "id");
     let provider = text(scope, options, "provider");
-    if id.is_empty() || provider.is_empty() {
-        crate::webidl::throw_type_error(scope, "id and provider are required");
+    if member(scope, options, "provider").is_none_or(|value| value.is_undefined()) {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'FederatedCredential': Failed to read the 'provider' property from 'FederatedCredentialInit': Required member is undefined.",
+        );
         return;
     }
     super::credential::attach(scope, arguments.this(), id, "federated".to_owned());
@@ -126,7 +139,11 @@ fn return_text(
     mut result: v8::ReturnValue<'_>,
     value: impl FnOnce(FederatedCredentialRecord) -> Option<String>,
 ) {
-    let Some(value) = record(scope, arguments.this()).and_then(value) else {
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Some(value) = value(record) else {
         result.set(v8::null(scope).into());
         return;
     };

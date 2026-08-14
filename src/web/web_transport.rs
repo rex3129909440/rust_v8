@@ -66,9 +66,17 @@ fn construct(
         crate::webidl::throw_type_error(s, "WebTransport requires a URL");
         return;
     }
-    let url = crate::webidl::value_to_string(s, a.get(0));
+    let Some(url) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
     if !url.starts_with("https://") {
-        crate::webidl::throw_type_error(s, "WebTransport URL must use https");
+        if let Ok(exception) = super::dom_exception::create(
+            s,
+            format!("Failed to construct 'WebTransport': The URL '{url}' is invalid."),
+            "SyntaxError".to_owned(),
+        ) {
+            s.throw_exception(exception.into());
+        }
         return;
     }
     let incoming_uni = match super::readable_stream::create_empty(s) {
@@ -130,12 +138,18 @@ fn promise(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
+    property_name: &str,
     pick: impl FnOnce(Transport) -> v8::Global<v8::Promise>,
 ) {
     if let Some(v) = record(s, a.this()) {
         r.set(v8::Local::new(s, &pick(v)).into())
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        let message = format!(
+            "Failed to read the '{property_name}' property from 'WebTransport': Illegal invocation"
+        );
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(s, &message) {
+            r.set(promise.into())
+        }
     }
 }
 fn incoming_uni(
@@ -164,14 +178,14 @@ fn ready(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    promise(s, a, r, |v| v.ready)
+    promise(s, a, r, "ready", |v| v.ready)
 }
 fn closed(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    promise(s, a, r, |v| v.closed)
+    promise(s, a, r, "closed", |v| v.closed)
 }
 fn protocol(
     s: &mut v8::PinScope<'_, '_>,
@@ -191,6 +205,15 @@ fn create_bidi(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "WebTransport",
+            "createBidirectionalStream",
+            r,
+        );
+        return;
+    }
     if !record(s, a.this()).is_some_and(|v| v.active) {
         crate::webidl::throw_type_error(s, "WebTransport is closed");
         return;
@@ -206,6 +229,15 @@ fn create_uni(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "WebTransport",
+            "createUnidirectionalStream",
+            r,
+        );
+        return;
+    }
     if !record(s, a.this()).is_some_and(|v| v.active) {
         crate::webidl::throw_type_error(s, "WebTransport is closed");
         return;

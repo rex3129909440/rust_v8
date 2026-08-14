@@ -37,6 +37,7 @@ fn ensure_constructor<'s>(
     crate::webidl::define_accessor(scope, prototype, "width", get_width, set_width)?;
     crate::webidl::define_accessor(scope, prototype, "height", get_height, set_height)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(scope, constructor.into(), "fromRect", 0, from_rect)?;
     let parent = super::dom_rect_read_only::ensure_constructor(scope)?;
     crate::webidl::inherit(scope, constructor, parent)?;
     let realm_constructor = v8::Global::new(scope, constructor);
@@ -46,6 +47,18 @@ fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(constructor)
+}
+
+fn from_rect(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let rect = super::dom_rect_read_only::from_value(scope, arguments.get(0));
+    match create(scope, rect) {
+        Ok(rect) => result.set(rect.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
 }
 
 fn construct(

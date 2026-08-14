@@ -76,7 +76,7 @@ fn query(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "LockManager", "query", r);
         return;
     }
     let o = v8::Object::new(s);
@@ -96,7 +96,7 @@ fn request(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "LockManager", "request", r);
         return;
     }
     let name = crate::webidl::value_to_string(s, a.get(0));

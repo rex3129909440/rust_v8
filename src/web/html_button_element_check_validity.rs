@@ -12,9 +12,5 @@ fn check_validity(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(scope, a.this()) {
-        r.set(v8::Boolean::new(scope, !is_candidate(&x) || x.custom_validity.is_empty()).into())
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    super::html_button_element::check_validity(scope, a, r);
 }

@@ -110,6 +110,25 @@ pub(crate) fn create_with_constructor<'s>(
     Ok(list)
 }
 
+pub(crate) fn replace_snapshot(
+    scope: &mut v8::PinScope<'_, '_>,
+    list: v8::Local<'_, v8::Object>,
+    items: Vec<v8::Local<'_, v8::Object>>,
+) -> bool {
+    let values = items
+        .into_iter()
+        .map(|item| v8::Global::new(scope, item))
+        .collect();
+    let Some(record) = scope
+        .get_slot_mut::<NodeListStore>()
+        .and_then(|store| store.records.get_mut(&list.get_identity_hash().get()))
+    else {
+        return false;
+    };
+    *record = NodeListRecord::Snapshot(values);
+    true
+}
+
 pub(crate) fn create_live_child_nodes<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     owner: v8::Local<'_, v8::Object>,

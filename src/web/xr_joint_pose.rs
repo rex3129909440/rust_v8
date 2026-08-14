@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrJointPoseStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrJointPoseStore::default());
@@ -47,9 +50,12 @@ fn illegal(
 }
 fn radius(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Number::new(s, 0.01).into())
 }
 
@@ -62,5 +68,21 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(s, o, p.into()) != Some(true) {
         return Err("cannot create XRJointPose".to_owned());
     }
+    super::xr_pose::attach(s, o);
+    s.get_slot_mut::<XrJointPoseStore>()
+        .expect("XRJointPose state")
+        .instances
+        .insert(o.get_identity_hash().get());
     Ok(o)
+}
+fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = s.get_slot::<XrJointPoseStore>().is_some_and(|store| {
+        store
+            .instances
+            .contains(&a.this().get_identity_hash().get())
+    });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }

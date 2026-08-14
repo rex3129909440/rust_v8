@@ -9,11 +9,11 @@ fn remove_range(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(range) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        return;
-    };
     let Some(current) = super::selection::record(scope, a.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Ok(range) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         return;
     };
     let found = current
@@ -24,7 +24,7 @@ fn remove_range(
         super::node::throw_dom_exception(
             scope,
             "NotFoundError",
-            "The Range is not in this Selection",
+            "Failed to execute 'removeRange' on 'Selection': Range not found.",
         );
         return;
     }

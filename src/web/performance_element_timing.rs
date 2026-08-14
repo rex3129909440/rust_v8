@@ -94,13 +94,22 @@ fn illegal_constructor(
     );
 }
 
-#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     name: String,
     start_time: f64,
+    render_time: f64,
+    load_time: f64,
+    intersection_rect: super::dom_rect_read_only::RectRecord,
+    identifier: String,
+    natural_width: i32,
+    natural_height: i32,
+    id: String,
     element: Option<v8::Local<'_, v8::Value>>,
     url: String,
+    paint_time: f64,
+    presentation_time: f64,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
@@ -116,11 +125,7 @@ pub(crate) fn create<'s>(
         start_time,
         0.0,
     );
-    let rect = v8::Object::new(scope);
-    define_number(scope, rect, "x", 0.0);
-    define_number(scope, rect, "y", 0.0);
-    define_number(scope, rect, "width", 0.0);
-    define_number(scope, rect, "height", 0.0);
+    let rect = super::dom_rect_read_only::create(scope, intersection_rect)?;
     let element = element.map(|value| v8::Global::new(scope, value));
     let intersection_rect = v8::Global::new(scope, rect);
     scope
@@ -130,17 +135,21 @@ pub(crate) fn create<'s>(
         .insert(
             timing.get_identity_hash().get(),
             ElementTimingRecord {
-                render_time: start_time,
-                load_time: start_time,
+                render_time,
+                load_time,
                 intersection_rect,
-                identifier: name.clone(),
-                natural_width: 0,
-                natural_height: 0,
-                id: name,
+                identifier,
+                natural_width,
+                natural_height,
+                id,
                 element,
-                url,
-                paint_time: 0.0,
-                presentation_time: 0.0,
+                // Chromium limits the exposed Element Timing URL to the
+                // first 100 characters.  This is observable for data URLs
+                // and long resource names even though the element's own
+                // currentSrc remains complete.
+                url: url.chars().take(100).collect(),
+                paint_time,
+                presentation_time,
             },
         );
     Ok(timing)

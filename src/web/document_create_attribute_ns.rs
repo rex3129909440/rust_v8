@@ -20,19 +20,49 @@ fn create_attribute_ns(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let namespace = if arguments.get(0).is_null() {
-        None
-    } else {
-        let namespace = crate::webidl::value_to_string(scope, arguments.get(0));
-        (!namespace.is_empty()).then_some(namespace)
-    };
-    let qualified_name = crate::webidl::value_to_string(scope, arguments.get(1));
-    if let Err((name, message)) =
-        super::document::validate_qualified_name(namespace.as_deref(), &qualified_name, true)
-    {
-        super::node::throw_dom_exception(scope, name, message);
+    if arguments.length() < 2 {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'createAttributeNS' on 'Document': 2 arguments required, but only {} present.",
+                arguments.length()
+            ),
+        );
         return;
     }
+    let namespace = if arguments.get(0).is_null_or_undefined() {
+        None
+    } else {
+        let Some(namespace) = crate::webidl::dom_string_with_context(
+            scope,
+            arguments.get(0),
+            "Failed to execute 'createAttributeNS' on 'Document'",
+        ) else {
+            return;
+        };
+        (!namespace.is_empty()).then_some(namespace)
+    };
+    let Some(qualified_name) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(1),
+        "Failed to execute 'createAttributeNS' on 'Document'",
+    ) else {
+        return;
+    };
+    if let Err((name, _)) =
+        super::document::validate_qualified_name(namespace.as_deref(), &qualified_name, true)
+    {
+        let message = super::document::qualified_name_error_message(
+            "createAttributeNS",
+            "Document",
+            name,
+            namespace.as_deref(),
+            &qualified_name,
+        );
+        super::node::throw_dom_exception(scope, name, &message);
+        return;
+    }
+    let qualified_name = super::document::canonical_qualified_name(&qualified_name);
     match super::attr::create(scope, qualified_name, String::new(), namespace, None) {
         Ok(attribute) => {
             super::node::set_owner_document(scope, attribute, arguments.this());

@@ -148,7 +148,7 @@ fn databases(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !branded(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "IDBFactory", "databases", result);
         return;
     }
     let mut entries = scope

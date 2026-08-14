@@ -62,9 +62,14 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSVariableReferenceValue requires a variable");
         return;
     }
-    let variable = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(variable) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     if !variable.starts_with("--") {
-        crate::webidl::throw_type_error(scope, "Variable names must start with '--'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSVariableReferenceValue': Invalid custom property name",
+        );
         return;
     }
     let fallback = if arguments.get(1).is_null_or_undefined() {
@@ -115,6 +120,10 @@ fn set_variable(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let variable = crate::webidl::value_to_string(scope, arguments.get(0));
     if !variable.starts_with("--") {
         crate::webidl::throw_type_error(scope, "Variable names must start with '--'");

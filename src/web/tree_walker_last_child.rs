@@ -13,10 +13,10 @@ fn last_child(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let current = v8::Local::new(scope, &record.current);
-    let Ok(children) = super::tree_walker::visible_children(scope, &record, current) else {
-        return;
+    let candidate = match super::tree_walker::traverse_children(scope, &record, false, "lastChild")
+    {
+        Ok(candidate) => candidate.map(|value| v8::Local::new(scope, &value)),
+        Err(()) => return,
     };
-    let candidate = children.last().map(|value| v8::Local::new(scope, value));
     super::tree_walker::return_candidate(scope, arguments.this(), candidate, result);
 }

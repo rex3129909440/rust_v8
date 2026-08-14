@@ -204,13 +204,7 @@ pub(crate) fn attach(
 }
 
 pub(crate) fn is_context(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
-    scope
-        .get_slot::<BaseAudioContextStore>()
-        .is_some_and(|store| {
-            store
-                .records
-                .contains_key(&object.get_identity_hash().get())
-        })
+    super::structured_clone::inherits_platform_interface(scope, object, "BaseAudioContext")
 }
 
 pub(crate) fn sample_rate(
@@ -866,7 +860,13 @@ fn decode_audio_data(
     mut result: v8::ReturnValue<'_>,
 ) {
     let context = arguments.this();
-    if !context_or_throw(scope, context) {
+    if !is_context(scope, context) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BaseAudioContext",
+            "decodeAudioData",
+            result,
+        );
         return;
     }
     let sample_rate = record(scope, context)

@@ -153,12 +153,18 @@ fn return_promise(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
+    property_name: &str,
     select: impl FnOnce(&ViewTransitionRecord) -> v8::Global<v8::Promise>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &select(&record)).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        let message = format!(
+            "Failed to read the '{property_name}' property from 'ViewTransition': Illegal invocation"
+        );
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(scope, &message) {
+            result.set(promise.into());
+        }
     }
 }
 
@@ -167,21 +173,23 @@ fn get_finished(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_promise(s, a, r, |record| record.finished.clone())
+    return_promise(s, a, r, "finished", |record| record.finished.clone())
 }
 fn get_ready(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_promise(s, a, r, |record| record.ready.clone())
+    return_promise(s, a, r, "ready", |record| record.ready.clone())
 }
 fn get_update_callback_done(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_promise(s, a, r, |record| record.update_callback_done.clone())
+    return_promise(s, a, r, "updateCallbackDone", |record| {
+        record.update_callback_done.clone()
+    })
 }
 
 fn get_types(
@@ -225,6 +233,10 @@ fn wait_until(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(promise) = v8::Local::<v8::Promise>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "waitUntil requires a Promise");
         return;

@@ -11,7 +11,9 @@ fn remove(
 ) {
     let mut tokens = Vec::new();
     for index in 0..arguments.length() {
-        let Some(token) = super::dom_token_list::validate_token(scope, arguments.get(index)) else {
+        let Some(token) =
+            super::dom_token_list::validate_token(scope, arguments.get(index), "remove")
+        else {
             return;
         };
         tokens.push(token)

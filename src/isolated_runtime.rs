@@ -56,6 +56,12 @@ enum WorkerCommand {
         source: String,
         source_url: Option<String>,
     },
+    DispatchHostClick(crate::HostClickInput),
+    DispatchHostKeyboard(crate::HostKeyboardInput),
+    DispatchHostWheel(crate::HostWheelInput),
+    DispatchHostDrag(crate::HostDragInput),
+    DispatchHostTouch(crate::HostTouchInput),
+    DispatchHostPen(crate::HostPenInput),
     EnableProxyTrace,
     DisableProxyTrace,
     ClearProxyTrace,
@@ -73,6 +79,7 @@ enum WorkerCommand {
 enum WorkerResponse {
     Initialized(Result<(), String>),
     Evaluation(Result<crate::Evaluation, String>),
+    HostInput(Result<bool, String>),
     Unit(Result<(), String>),
     Trace(Result<Vec<crate::TraceEntry>, String>),
     NetworkRequests(Result<Vec<crate::CapturedNetworkRequest>, String>),
@@ -206,6 +213,120 @@ impl IsolatedEdgeRuntime {
         )? {
             WorkerResponse::Evaluation(result) => result,
             _ => Err(self.protocol_failure("evaluation")),
+        }
+    }
+
+    pub fn dispatch_host_click(&self, input: &crate::HostClickInput) -> Result<bool, String> {
+        input.validate()?;
+        let mut state = self.lock_state()?;
+        let deadline = state
+            .options
+            .limits
+            .timeout
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_add(EVALUATION_GRACE);
+        match self.request_locked(
+            &mut state,
+            WorkerCommand::DispatchHostClick(input.clone()),
+            deadline,
+        )? {
+            WorkerResponse::HostInput(result) => result,
+            _ => Err(self.protocol_failure("host click dispatch")),
+        }
+    }
+
+    pub fn dispatch_host_keyboard(&self, input: &crate::HostKeyboardInput) -> Result<bool, String> {
+        input.validate()?;
+        let mut state = self.lock_state()?;
+        let deadline = state
+            .options
+            .limits
+            .timeout
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_add(EVALUATION_GRACE);
+        match self.request_locked(
+            &mut state,
+            WorkerCommand::DispatchHostKeyboard(input.clone()),
+            deadline,
+        )? {
+            WorkerResponse::HostInput(result) => result,
+            _ => Err(self.protocol_failure("host keyboard dispatch")),
+        }
+    }
+
+    pub fn dispatch_host_wheel(&self, input: &crate::HostWheelInput) -> Result<bool, String> {
+        input.validate()?;
+        let mut state = self.lock_state()?;
+        let deadline = state
+            .options
+            .limits
+            .timeout
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_add(EVALUATION_GRACE);
+        match self.request_locked(
+            &mut state,
+            WorkerCommand::DispatchHostWheel(input.clone()),
+            deadline,
+        )? {
+            WorkerResponse::HostInput(result) => result,
+            _ => Err(self.protocol_failure("host wheel dispatch")),
+        }
+    }
+
+    pub fn dispatch_host_drag(&self, input: &crate::HostDragInput) -> Result<bool, String> {
+        input.validate()?;
+        let mut state = self.lock_state()?;
+        let deadline = state
+            .options
+            .limits
+            .timeout
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_add(EVALUATION_GRACE);
+        match self.request_locked(
+            &mut state,
+            WorkerCommand::DispatchHostDrag(input.clone()),
+            deadline,
+        )? {
+            WorkerResponse::HostInput(result) => result,
+            _ => Err(self.protocol_failure("host drag dispatch")),
+        }
+    }
+
+    pub fn dispatch_host_touch(&self, input: &crate::HostTouchInput) -> Result<bool, String> {
+        input.validate()?;
+        let mut state = self.lock_state()?;
+        let deadline = state
+            .options
+            .limits
+            .timeout
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_add(EVALUATION_GRACE);
+        match self.request_locked(
+            &mut state,
+            WorkerCommand::DispatchHostTouch(input.clone()),
+            deadline,
+        )? {
+            WorkerResponse::HostInput(result) => result,
+            _ => Err(self.protocol_failure("host touch dispatch")),
+        }
+    }
+
+    pub fn dispatch_host_pen(&self, input: &crate::HostPenInput) -> Result<bool, String> {
+        input.validate()?;
+        let mut state = self.lock_state()?;
+        let deadline = state
+            .options
+            .limits
+            .timeout
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_add(EVALUATION_GRACE);
+        match self.request_locked(
+            &mut state,
+            WorkerCommand::DispatchHostPen(input.clone()),
+            deadline,
+        )? {
+            WorkerResponse::HostInput(result) => result,
+            _ => Err(self.protocol_failure("host pen dispatch")),
         }
     }
 
@@ -1237,6 +1358,30 @@ fn execute_worker_command(
                 Some(source_url) => runtime.evaluate_with_source_url(&source, &source_url),
                 None => runtime.evaluate(&source),
             }),
+            false,
+        ),
+        WorkerCommand::DispatchHostClick(input) => (
+            WorkerResponse::HostInput(runtime.dispatch_host_click(&input)),
+            false,
+        ),
+        WorkerCommand::DispatchHostKeyboard(input) => (
+            WorkerResponse::HostInput(runtime.dispatch_host_keyboard(&input)),
+            false,
+        ),
+        WorkerCommand::DispatchHostWheel(input) => (
+            WorkerResponse::HostInput(runtime.dispatch_host_wheel(&input)),
+            false,
+        ),
+        WorkerCommand::DispatchHostDrag(input) => (
+            WorkerResponse::HostInput(runtime.dispatch_host_drag(&input)),
+            false,
+        ),
+        WorkerCommand::DispatchHostTouch(input) => (
+            WorkerResponse::HostInput(runtime.dispatch_host_touch(&input)),
+            false,
+        ),
+        WorkerCommand::DispatchHostPen(input) => (
+            WorkerResponse::HostInput(runtime.dispatch_host_pen(&input)),
             false,
         ),
         WorkerCommand::EnableProxyTrace => {

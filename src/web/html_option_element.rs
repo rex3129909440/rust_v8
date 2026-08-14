@@ -83,6 +83,7 @@ pub(crate) fn create<'s>(
     }
     super::html_element::attach(scope, object, "OPTION");
 
+    let text_content = text.clone();
     let record = OptionRecord {
         text,
         value,
@@ -97,6 +98,15 @@ pub(crate) fn create<'s>(
         .expect("HTMLOptionElement state")
         .records
         .insert(object.get_identity_hash().get(), record);
+    if !text_content.is_empty() {
+        let text = super::text::create(scope, text_content)?;
+        if let Some(document) = super::node::owner_document(scope, object) {
+            super::node::set_owner_document(scope, text, document);
+        }
+        if !super::node::insert_child(scope, object, text, 0) {
+            return Err("cannot attach HTMLOptionElement text".to_owned());
+        }
+    }
     Ok(object)
 }
 
@@ -129,8 +139,12 @@ pub(crate) fn option_value(
     record(scope, object)?;
     Some(
         super::element::attribute_value(scope, object, "value")
-            .unwrap_or_else(|| super::node::node_text(scope, object)),
+            .unwrap_or_else(|| normalize_option_text(&super::node::node_text(scope, object))),
     )
+}
+
+pub(crate) fn normalize_option_text(value: &str) -> String {
+    value.split_ascii_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub(crate) fn option_selected(
@@ -262,7 +276,9 @@ pub(crate) fn get_label(
 ) {
     if record(scope, arguments.this()).is_some() {
         let value = super::element::attribute_value(scope, arguments.this(), "label")
-            .unwrap_or_else(|| super::node::node_text(scope, arguments.this()));
+            .unwrap_or_else(|| {
+                normalize_option_text(&super::node::node_text(scope, arguments.this()))
+            });
         if let Some(value) = v8::String::new(scope, &value) {
             result.set(value.into());
         }
@@ -369,9 +385,8 @@ pub(crate) fn get_text(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_some() {
-        if let Some(value) =
-            v8::String::new(scope, &super::node::node_text(scope, arguments.this()))
-        {
+        let value = normalize_option_text(&super::node::node_text(scope, arguments.this()));
+        if let Some(value) = v8::String::new(scope, &value) {
             result.set(value.into());
         }
     } else {

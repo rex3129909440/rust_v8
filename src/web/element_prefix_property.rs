@@ -14,7 +14,10 @@ fn get(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    match record.tag_name.split_once(':') {
+    match record
+        .namespace_uri
+        .and_then(|_| record.tag_name.split_once(':'))
+    {
         Some((prefix, _)) => {
             if let Some(prefix) = v8::String::new(scope, prefix) {
                 result.set(prefix.into());

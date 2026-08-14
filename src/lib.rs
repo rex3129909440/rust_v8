@@ -1,3 +1,9 @@
+#[rustfmt::skip]
+mod browser_android_surface_data;
+mod browser_surface;
+#[rustfmt::skip]
+mod browser_surface_data;
+mod browser_version;
 mod console_capture;
 mod content_encoding;
 #[cfg(test)]
@@ -19,6 +25,10 @@ mod fingerprint_environment_tests;
 mod fingerprint_full_tests;
 mod fingerprint_performance;
 mod fingerprint_surface;
+mod font_shaping;
+#[cfg(test)]
+mod font_shaping_tests;
+mod host_input;
 mod iframe_hook;
 #[cfg(test)]
 mod iframe_hook_tests;
@@ -49,6 +59,8 @@ mod realm_matrix_tests;
 pub mod runtime;
 mod runtime_options;
 mod trace;
+#[cfg(test)]
+mod user_activation_tests;
 #[allow(
     clippy::all,
     dead_code,
@@ -72,18 +84,22 @@ pub use fingerprint::{
 };
 pub use fingerprint_environment::{
     BatteryFingerprint, BluetoothDeviceFingerprint, CssFingerprint, DocumentFingerprint,
-    FontFingerprint, FontMetricFingerprint, GamepadFingerprint, GeolocationFingerprint,
-    HardwareDevicesFingerprint, HidDeviceFingerprint, KeyboardLayoutEntryFingerprint,
-    LocalFontFingerprint, MediaDeviceFingerprint, MediaFingerprint, MediaPreferencesFingerprint,
-    MemoryFingerprint, MidiPortFingerprint, MimeTypeFingerprint, PermissionsFingerprint,
-    PluginFingerprint, PluginListFingerprint, RtcCodecFingerprint, RtcHeaderExtensionFingerprint,
-    SensorsFingerprint, SerialPortFingerprint, TimingFingerprint, UsbDeviceFingerprint,
-    XrFingerprint,
+    FontBinarySourceFingerprint, FontFingerprint, FontMetricFingerprint, GamepadFingerprint,
+    GeolocationFingerprint, HardwareDevicesFingerprint, HidDeviceFingerprint,
+    KeyboardLayoutEntryFingerprint, LocalFontFingerprint, MediaDeviceFingerprint, MediaFingerprint,
+    MediaPreferencesFingerprint, MemoryFingerprint, MidiPortFingerprint, MimeTypeFingerprint,
+    PermissionsFingerprint, PluginFingerprint, PluginListFingerprint, RtcCodecFingerprint,
+    RtcHeaderExtensionFingerprint, SensorsFingerprint, SerialPortFingerprint, TimingFingerprint,
+    UsbDeviceFingerprint, XrFingerprint,
 };
 pub use fingerprint_performance::{PerformanceEntryFingerprint, PerformanceFingerprint};
 pub use fingerprint_surface::{
     AudioFingerprint, CanvasFingerprint, LocaleFingerprint, RenderingFingerprint,
     ScreenFingerprint, StorageFingerprint, WebGlFingerprint, WebGpuFingerprint,
+};
+pub use host_input::{
+    HostClickInput, HostDragInput, HostDragPoint, HostKeyboardInput, HostPenInput, HostPenPhase,
+    HostTouchInput, HostTouchPhase, HostWheelInput,
 };
 pub use iframe_hook::IframeHook;
 pub use isolated_runtime::{IsolatedEdgeRuntime, run_isolated_worker};

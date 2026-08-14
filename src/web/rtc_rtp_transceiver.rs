@@ -259,6 +259,10 @@ fn set_direction(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     if !matches!(
         value.as_str(),
@@ -349,6 +353,10 @@ fn set_codec_preferences(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(values) = array_objects(scope, arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "Codec preferences must be a sequence");
         return;
@@ -365,6 +373,10 @@ fn set_header_extensions_to_negotiate(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(values) = array_objects(scope, arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "Header extensions must be a sequence");
         return;

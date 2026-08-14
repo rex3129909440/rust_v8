@@ -154,7 +154,10 @@ fn other(
     a: &v8::FunctionCallbackArguments<'_>,
     method: &str,
 ) -> Option<(OriginRecord, OriginRecord)> {
-    let this = record(s, a.this())?;
+    let Some(this) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return None;
+    };
     let Ok(o) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(s, &format!("{method} requires an Origin"));
         return None;

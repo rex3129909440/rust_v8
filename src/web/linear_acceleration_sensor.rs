@@ -30,6 +30,7 @@ fn ensure_constructor<'s>(
     crate::webidl::inherit(scope, constructor, parent)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
     crate::webidl::define_to_string_tag(scope, prototype, "LinearAccelerationSensor")?;
+    crate::webidl::lock_constructor_prototype(scope, constructor)?;
     let persistent = v8::Global::new(scope, constructor);
     let realm_id = crate::webidl::realm_id(scope);
     scope

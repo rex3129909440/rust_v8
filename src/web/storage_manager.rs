@@ -77,7 +77,7 @@ fn estimate(
     r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageManager", "estimate", r);
         return;
     }
     let o = v8::Object::new(s);
@@ -105,7 +105,7 @@ fn persisted(
         let persisted = crate::fingerprint::edge(s).storage.persisted;
         resolve(s, v8::Boolean::new(s, persisted).into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageManager", "persisted", r)
     }
 }
 fn persist(
@@ -116,7 +116,7 @@ fn persist(
     if valid(s, a.this()) {
         resolve(s, v8::Boolean::new(s, true).into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageManager", "persist", r)
     }
 }
 fn get_directory(
@@ -130,7 +130,7 @@ fn get_directory(
             Err(message) => crate::webidl::throw_type_error(s, &message),
         }
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "StorageManager", "getDirectory", r)
     }
 }
 

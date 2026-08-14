@@ -30,6 +30,7 @@ class ProfileField(IntEnum):
     UA_PLATFORM_VERSION = 34
     UA_FULL_VERSION = 35
     NETWORK_EFFECTIVE_TYPE = 40
+    NETWORK_CONNECTION_TYPE = 41
 
     CANVAS_DATA_URL_SALT = 50
     WEBGL_VENDOR = 60
@@ -236,6 +237,7 @@ class ProfileField(IntEnum):
 
     DEVICE_MEMORY_GB = 500
     NETWORK_DOWNLINK = 501
+    NETWORK_DOWNLINK_MAX = 564
     SCREEN_VIEWPORT_WIDTH = 502
     SCREEN_VIEWPORT_HEIGHT = 503
     SCREEN_OUTER_WIDTH = 504
@@ -341,6 +343,7 @@ class ProfileField(IntEnum):
     NAVIGATOR_USER_ACTIVATION_IS_ACTIVE = 731
     DOCUMENT_HAS_FOCUS = 732
     DOCUMENT_IS_POPUP = 733
+    FONT_USE_SYSTEM_FONTS = 734
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,6 +380,8 @@ class NetworkProfile:
     rtt: int | None = None
     downlink: float | None = None
     save_data: bool | None = None
+    connection_type: str | None = None
+    downlink_max: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -584,7 +589,7 @@ class WebGpuProfile:
 
 @dataclass(frozen=True, slots=True)
 class WebAudioProfile:
-    sample_rate: float = 44_100.0
+    sample_rate: float = 48_000.0
     max_channel_count: int = 2
     base_latency: float = 0.01
     output_latency: float = 0.0
@@ -631,11 +636,26 @@ class FontMetricProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class FontBinarySourceProfile:
+    """Native OpenType source used for HarfBuzz-compatible text shaping.
+
+    ``face_index`` selects a member of a TTC/OTC collection. TTF and OTF
+    sources normally use index zero.
+    """
+
+    family: str
+    path: str
+    face_index: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class FontProfile:
     families: tuple[str, ...] | None = None
     allow_unknown_families: bool | None = None
     local_fonts: tuple[LocalFontProfile, ...] | None = None
     metrics: tuple[FontMetricProfile, ...] | None = None
+    use_system_fonts: bool | None = None
+    binary_sources: tuple[FontBinarySourceProfile, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

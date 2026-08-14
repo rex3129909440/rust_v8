@@ -768,6 +768,10 @@ fn multiply_self(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if matrix_snapshot(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let right = match matrix_from_value(s, a.get(0)) {
         Ok(value) => value,
         Err(message) => {
@@ -785,6 +789,10 @@ fn pre_multiply_self(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if matrix_snapshot(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let left = match matrix_from_value(s, a.get(0)) {
         Ok(value) => value,
         Err(message) => {
@@ -798,8 +806,13 @@ fn pre_multiply_self(
 }
 
 pub(crate) fn rotation_z(degrees: f64) -> [f64; 16] {
+    if degrees.is_finite() && degrees.rem_euclid(360.0) == 0.0 {
+        return identity();
+    }
     let angle = degrees.to_radians();
     let (sin, cos) = angle.sin_cos();
+    let sin = snap_trigonometric_zero(sin);
+    let cos = snap_trigonometric_zero(cos);
     let mut matrix = identity();
     matrix[0] = cos;
     matrix[1] = sin;
@@ -808,11 +821,18 @@ pub(crate) fn rotation_z(degrees: f64) -> [f64; 16] {
     matrix
 }
 
+pub(crate) fn snap_trigonometric_zero(value: f64) -> f64 {
+    if value.abs() < 1e-15 { 0.0 } else { value }
+}
+
 fn rotate_axis_angle_self(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !with_matrix_mut(s, a.this(), |_| {}) {
+        return;
+    }
     let x = optional_number(s, &a, 0, 0.0);
     let y = optional_number(s, &a, 1, 0.0);
     let z = optional_number(s, &a, 2, 0.0);
@@ -973,6 +993,10 @@ fn set_matrix_value(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if matrix_snapshot(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(s, a.get(0));
     let matrix = match parse_css_matrix(&value) {
         Ok(matrix) => matrix,
@@ -1011,12 +1035,62 @@ fn return_created_matrix(
     r.set(object.into());
 }
 
+fn matrix_from_typed_array(
+    s: &mut v8::PinScope<'_, '_>,
+    array: v8::Local<'_, v8::Object>,
+    length: usize,
+    method: &str,
+) -> Result<[f64; 16], String> {
+    if length != 6 && length != 16 {
+        return Err(format!(
+            "Failed to execute '{method}' on 'DOMMatrix': The sequence must contain 6 elements for a 2D matrix or 16 elements for a 3D matrix."
+        ));
+    }
+    let mut values = Vec::with_capacity(length);
+    for index in 0..length {
+        values.push(
+            array
+                .get_index(s, index as u32)
+                .and_then(|value| value.number_value(s))
+                .unwrap_or(f64::NAN),
+        );
+    }
+    if length == 6 {
+        let mut matrix = identity();
+        matrix[0] = values[0];
+        matrix[1] = values[1];
+        matrix[4] = values[2];
+        matrix[5] = values[3];
+        matrix[12] = values[4];
+        matrix[13] = values[5];
+        Ok(matrix)
+    } else {
+        values
+            .try_into()
+            .map_err(|_| "DOMMatrix sequence length is invalid".to_owned())
+    }
+}
+
 fn from_float_32_array(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    match matrix_from_value(s, a.get(0)) {
+    if a.length() < 1 {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'fromFloat32Array' on 'DOMMatrix': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Ok(array) = v8::Local::<v8::Float32Array>::try_from(a.get(0)) else {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'fromFloat32Array' on 'DOMMatrix': parameter 1 is not of type 'Float32Array'.",
+        );
+        return;
+    };
+    match matrix_from_typed_array(s, array.into(), array.length(), "fromFloat32Array") {
         Ok(matrix) => return_created_matrix(s, matrix, r),
         Err(message) => crate::webidl::throw_type_error(s, &message),
     }
@@ -1026,7 +1100,21 @@ fn from_float_64_array(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    match matrix_from_value(s, a.get(0)) {
+    if a.length() < 1 {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'fromFloat64Array' on 'DOMMatrix': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Ok(array) = v8::Local::<v8::Float64Array>::try_from(a.get(0)) else {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to execute 'fromFloat64Array' on 'DOMMatrix': parameter 1 is not of type 'Float64Array'.",
+        );
+        return;
+    };
+    match matrix_from_typed_array(s, array.into(), array.length(), "fromFloat64Array") {
         Ok(matrix) => return_created_matrix(s, matrix, r),
         Err(message) => crate::webidl::throw_type_error(s, &message),
     }

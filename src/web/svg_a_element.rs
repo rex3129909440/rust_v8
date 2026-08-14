@@ -78,7 +78,11 @@ pub(crate) fn create<'s>(
     let object =
         super::svg_graphics_element::create_with_constructor(scope, constructor, "a", owner)?;
     let target = super::svg_animated_string::create(scope, "")?;
-    let rel_list = super::dom_token_list::create(scope, "")?;
+    let rel_list = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::HyperlinkRel,
+    )?;
     let href = super::svg_animated_string::create(scope, "")?;
     let record = Record {
         target: v8::Global::new(scope, target),

@@ -69,7 +69,10 @@ fn construct(
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "ReportingObserver callback must be a function");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ReportingObserver': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     let record = ObserverRecord {

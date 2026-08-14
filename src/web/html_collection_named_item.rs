@@ -10,23 +10,28 @@ fn named_item(
     mut result: v8::ReturnValue<'_>,
 ) {
     super::html_collection::refresh_live(scope, arguments.this());
-    let name = crate::webidl::value_to_string(scope, arguments.get(0));
     let Some(record) = super::html_collection::record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    for item in record {
-        let item = v8::Local::new(scope, item);
-        let matched = super::element::record(scope, item).is_some_and(|element| {
-            element.attributes.iter().any(|(attribute, value)| {
-                (attribute.eq_ignore_ascii_case("id") || attribute.eq_ignore_ascii_case("name"))
-                    && value == &name
-            })
-        });
-        if matched {
-            result.set(item.into());
-            return;
-        }
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'namedItem' on 'HTMLCollection': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    if arguments.get(0).is_symbol() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'namedItem' on 'HTMLCollection': Cannot convert a Symbol value to a string",
+        );
+        return;
+    }
+    let name = crate::webidl::value_to_string(scope, arguments.get(0));
+    if let Some(item) = super::html_collection::named_match(scope, record, &name) {
+        result.set(item.into());
+        return;
     }
     result.set(v8::null(scope).into());
 }

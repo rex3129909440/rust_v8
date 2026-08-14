@@ -146,6 +146,15 @@ fn get_characteristic<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTService",
+            "getCharacteristic",
+            r,
+        );
+        return;
+    }
     match characteristic(s, a) {
         Ok(v) => resolve(s, v.into(), r),
         Err(e) => crate::webidl::throw_type_error(s, &e),
@@ -156,6 +165,15 @@ fn get_characteristics<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTService",
+            "getCharacteristics",
+            r,
+        );
+        return;
+    }
     match characteristic(s, a) {
         Ok(v) => {
             let array = v8::Array::new(s, 1);

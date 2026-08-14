@@ -14,17 +14,31 @@ fn substring_data(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if !super::character_data::require_arguments(scope, &arguments, "substringData", 2) {
+        return;
+    }
     let units: Vec<u16> = data.encode_utf16().collect();
-    let offset = arguments.get(0).uint32_value(scope).unwrap_or(0) as usize;
+    let Some(offset) =
+        super::character_data::unsigned_long_argument(scope, arguments.get(0), "substringData")
+    else {
+        return;
+    };
+    let offset = offset as usize;
     if offset > units.len() {
-        super::node::throw_dom_exception(
+        super::character_data::throw_offset_error(
             scope,
-            "IndexSizeError",
-            "The offset is larger than the data length",
+            arguments.this(),
+            "substringData",
+            offset as u32,
         );
         return;
     }
-    let count = arguments.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    let Some(count) =
+        super::character_data::unsigned_long_argument(scope, arguments.get(1), "substringData")
+    else {
+        return;
+    };
+    let count = count as usize;
     let end = offset.saturating_add(count).min(units.len());
     let value = String::from_utf16_lossy(&units[offset..end]);
     if let Some(value) = v8::String::new(scope, &value) {

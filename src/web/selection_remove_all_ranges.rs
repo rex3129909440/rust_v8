@@ -12,6 +12,8 @@ fn remove_all_ranges(
     super::selection::update(scope, arguments.this(), |selection| {
         selection.anchor = None;
         selection.focus = None;
+        selection.anchor_offset = 0;
+        selection.focus_offset = 0;
         selection.ranges.clear();
         selection.direction = "none".to_owned();
     });

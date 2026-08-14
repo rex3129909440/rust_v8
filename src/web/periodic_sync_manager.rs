@@ -77,7 +77,7 @@ fn get_tags(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PeriodicSyncManager", "getTags", r);
         return;
     }
     let tags = s
@@ -100,7 +100,7 @@ fn register(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PeriodicSyncManager", "register", r);
         return;
     }
     if a.length() < 1 {
@@ -122,7 +122,7 @@ fn unregister(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PeriodicSyncManager", "unregister", r);
         return;
     }
     let tag = crate::webidl::value_to_string(s, a.get(0));

@@ -16,6 +16,7 @@ struct MediaSourceRecord {
     onsourceended: Option<v8::Global<v8::Value>>,
     onsourceclose: Option<v8::Global<v8::Value>>,
     live_seekable_range: Option<(f64, f64)>,
+    handle: Option<v8::Global<v8::Object>>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -169,9 +170,41 @@ fn construct(
                 onsourceended: None,
                 onsourceclose: None,
                 live_seekable_range: None,
+                handle: None,
             },
         );
     result.set(arguments.this().into());
+}
+
+pub(crate) fn handle(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Result<v8::Global<v8::Object>, String> {
+    let id = object.get_identity_hash().get();
+    let existing = scope
+        .get_slot::<MediaSourceStore>()
+        .and_then(|store| store.records.get(&id))
+        .and_then(|record| record.handle.clone());
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
+    if scope
+        .get_slot::<MediaSourceStore>()
+        .and_then(|store| store.records.get(&id))
+        .is_none()
+    {
+        return Err("Illegal invocation".to_owned());
+    }
+    let handle = super::media_source_handle::create(scope)?;
+    let saved = v8::Global::new(scope, handle);
+    scope
+        .get_slot_mut::<MediaSourceStore>()
+        .ok_or_else(|| "MediaSource state was not prepared".to_owned())?
+        .records
+        .get_mut(&id)
+        .ok_or_else(|| "Illegal invocation".to_owned())?
+        .handle = Some(saved);
+    Ok(v8::Global::new(scope, handle))
 }
 
 fn record(
@@ -357,6 +390,10 @@ fn add_source_buffer(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(scope, "1 argument required");
         return;
@@ -375,10 +412,6 @@ fn add_source_buffer(
         );
         return;
     }
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
     if record.ready_state != "open" {
         throw_dom_exception(
             scope,

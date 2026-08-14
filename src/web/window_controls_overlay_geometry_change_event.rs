@@ -80,15 +80,27 @@ pub(crate) fn construct(
     if arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'WindowControlsOverlayGeometryChangeEvent': 2 arguments required",
+            "Failed to construct 'WindowControlsOverlayGeometryChangeEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
-    let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "The event initializer must be an object");
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
         return;
     };
+    let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'WindowControlsOverlayGeometryChangeEvent': The provided value is not of type 'WindowControlsOverlayGeometryChangeEventInit'.",
+        );
+        return;
+    };
+    if object_property(scope, init, "titlebarAreaRect").is_none() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'WindowControlsOverlayGeometryChangeEvent': Failed to read the 'titlebarAreaRect' property from 'WindowControlsOverlayGeometryChangeEventInit': Required member is undefined.",
+        );
+        return;
+    }
     let visible = super::event::boolean_property(scope, init, "visible");
     let titlebar_area_rect = object_property(scope, init, "titlebarAreaRect")
         .map(|rect| v8::Global::new(scope, copy_rect(scope, rect)));

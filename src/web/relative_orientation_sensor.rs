@@ -28,6 +28,7 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
     crate::webidl::inherit(s, c, p)?;
     let prototype = crate::webidl::prototype(s, c)?;
     crate::webidl::define_to_string_tag(s, prototype, "RelativeOrientationSensor")?;
+    crate::webidl::lock_constructor_prototype(s, c)?;
     let g = v8::Global::new(s, c);
     let realm_id = crate::webidl::realm_id(s);
     s.get_slot_mut::<RelativeOrientationSensorStore>()

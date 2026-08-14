@@ -102,22 +102,22 @@ fn get_connect(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.on_connect),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.on_connect, r)
 }
 fn get_disconnect(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.on_disconnect),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.on_disconnect, r)
 }
 fn set_connect(
     s: &mut v8::PinScope<'_, '_>,
@@ -169,7 +169,7 @@ fn get_devices(
         let array = devices_array(s, &v.devices);
         resolve(s, array.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "HID", "getDevices", r)
     }
 }
 fn request_device(
@@ -178,7 +178,7 @@ fn request_device(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "HID", "requestDevice", r);
         return;
     }
     let profile = crate::fingerprint::edge(s)

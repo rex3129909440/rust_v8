@@ -65,6 +65,23 @@ fn set_status(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if a.length() < 1 || a.get(0).is_null_or_undefined() {
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            s,
+            "Failed to execute 'setStatus' on 'NavigatorLogin': Overload resolution failed.",
+        ) {
+            r.set(promise.into());
+        }
+        return;
+    }
+    if s.get_slot::<NavigatorLoginStore>().is_none_or(|store| {
+        !store
+            .status
+            .contains_key(&a.this().get_identity_hash().get())
+    }) {
+        crate::webidl::reject_illegal_invocation_promise(s, "NavigatorLogin", "setStatus", r);
+        return;
+    }
     let status = crate::webidl::value_to_string(s, a.get(0));
     if let Some(v) = s
         .get_slot_mut::<NavigatorLoginStore>()
@@ -75,7 +92,5 @@ fn set_status(
         if let Ok(p) = super::writable_stream::resolved_promise(s, x.into()) {
             r.set(p.into())
         }
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }

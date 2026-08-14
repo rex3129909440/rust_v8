@@ -13,7 +13,11 @@ fn get_html(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let html = super::dom_html::serialize_children(scope, arguments.this());
+    let Some(options) = super::dom_html::get_html_options(scope, arguments.get(0), "ShadowRoot")
+    else {
+        return;
+    };
+    let html = super::dom_html::serialize_children_for_get_html(scope, arguments.this(), &options);
     if let Some(value) = v8::String::new(scope, &html) {
         result.set(value.into());
     }

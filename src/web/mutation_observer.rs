@@ -4,6 +4,8 @@ use std::collections::HashMap;
 pub(crate) struct MutationObserverStore {
     pub(crate) constructor: crate::webidl::RealmConstructor,
     pub(crate) observers: HashMap<i32, ObserverRecord>,
+    pub(crate) next_registration_order: u64,
+    pub(crate) suppressed_child_list_targets: std::collections::HashSet<i32>,
 }
 
 #[derive(Clone)]
@@ -13,6 +15,8 @@ pub(crate) struct ObserverRecord {
     pub(crate) observed_targets: Vec<ObservedTarget>,
     pub(crate) pending: Vec<v8::Global<v8::Object>>,
     pub(crate) microtask_scheduled: bool,
+    pub(crate) registration_order: u64,
+    pub(crate) transient_observed_targets: Vec<TransientObservedTarget>,
 }
 
 #[derive(Clone)]
@@ -25,6 +29,13 @@ pub(crate) struct ObservedTarget {
     pub(crate) attribute_old_value: bool,
     pub(crate) character_data_old_value: bool,
     pub(crate) attribute_filter: Option<Vec<String>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct TransientObservedTarget {
+    pub(crate) root_id: i32,
+    pub(crate) root: v8::Global<v8::Object>,
+    pub(crate) observed: ObservedTarget,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -89,26 +100,32 @@ pub(crate) fn construct(
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "MutationObserver callback is not callable");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'MutationObserver': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     let observer = arguments.this();
     let callback = v8::Global::new(scope, callback);
     let observer_global = v8::Global::new(scope, observer);
-    scope
+    let store = scope
         .get_slot_mut::<MutationObserverStore>()
-        .expect("MutationObserver state")
-        .observers
-        .insert(
-            observer.get_identity_hash().get(),
-            ObserverRecord {
-                callback,
-                observer: observer_global,
-                observed_targets: Vec::new(),
-                pending: Vec::new(),
-                microtask_scheduled: false,
-            },
-        );
+        .expect("MutationObserver state");
+    let registration_order = store.next_registration_order;
+    store.next_registration_order = store.next_registration_order.saturating_add(1);
+    store.observers.insert(
+        observer.get_identity_hash().get(),
+        ObserverRecord {
+            callback,
+            observer: observer_global,
+            observed_targets: Vec::new(),
+            pending: Vec::new(),
+            microtask_scheduled: false,
+            registration_order,
+            transient_observed_targets: Vec::new(),
+        },
+    );
     result.set(observer.into());
 }
 
@@ -152,8 +169,42 @@ pub(crate) fn enqueue_child_list(
     previous_sibling: Option<v8::Local<'_, v8::Object>>,
     next_sibling: Option<v8::Local<'_, v8::Object>>,
 ) {
+    if scope
+        .get_slot::<MutationObserverStore>()
+        .is_some_and(|store| {
+            store
+                .suppressed_child_list_targets
+                .contains(&target.get_identity_hash().get())
+        })
+    {
+        return;
+    }
     let observers = observer_ids_for(scope, target, |observed| observed.child_list);
-    for (observer_id, _) in observers {
+    for (observer_id, observed) in observers {
+        if observed.subtree && !removed_nodes.is_empty() {
+            let roots = removed_nodes
+                .iter()
+                .map(|root| TransientObservedTarget {
+                    root_id: root.get_identity_hash().get(),
+                    root: v8::Global::new(scope, *root),
+                    observed: observed.clone(),
+                })
+                .collect::<Vec<_>>();
+            if let Some(observer) = scope
+                .get_slot_mut::<MutationObserverStore>()
+                .and_then(|store| store.observers.get_mut(&observer_id))
+            {
+                for root in roots {
+                    if !observer
+                        .transient_observed_targets
+                        .iter()
+                        .any(|existing| existing.root_id == root.root_id)
+                    {
+                        observer.transient_observed_targets.push(root);
+                    }
+                }
+            }
+        }
         let Ok(record) = super::mutation_record::create(
             scope,
             "childList",
@@ -217,9 +268,36 @@ pub(crate) fn observer_ids_for(
             .find(|observed| enabled(observed) && observed_matches(scope, observed, target))
         {
             matches.push((*observer_id, observed.clone()));
+        } else if let Some(transient) = observer.transient_observed_targets.iter().find(|entry| {
+            enabled(&entry.observed) && inclusive_descendant_of(scope, target, &entry.root)
+        }) {
+            matches.push((*observer_id, transient.observed.clone()));
         }
     }
+    matches.sort_by_key(|(observer_id, _)| {
+        store
+            .observers
+            .get(observer_id)
+            .map(|observer| observer.registration_order)
+            .unwrap_or(u64::MAX)
+    });
     matches
+}
+
+fn inclusive_descendant_of(
+    scope: &v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+    root: &v8::Global<v8::Object>,
+) -> bool {
+    let root = v8::Local::new(scope, root);
+    let mut cursor = Some(target);
+    while let Some(node) = cursor {
+        if node.strict_equals(root.into()) {
+            return true;
+        }
+        cursor = super::node::parent(scope, node);
+    }
+    false
 }
 
 pub(crate) fn observed_matches(
@@ -289,6 +367,7 @@ pub(crate) fn deliver_records(
         .and_then(|store| store.observers.get_mut(&observer_id))
         .and_then(|observer| {
             observer.microtask_scheduled = false;
+            observer.transient_observed_targets.clear();
             if observer.pending.is_empty() {
                 return None;
             }
@@ -304,11 +383,29 @@ pub(crate) fn deliver_records(
     let callback = v8::Local::new(scope, &callback);
     let observer = v8::Local::new(scope, &observer);
     let list = records_array(scope, &records);
-    let _ = callback.call(
-        scope,
-        v8::undefined(scope).into(),
-        &[list.into(), observer.into()],
-    );
+    let _ = callback.call(scope, observer.into(), &[list.into(), observer.into()]);
+}
+
+pub(crate) fn suppress_child_list_for(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+) {
+    if let Some(store) = scope.get_slot_mut::<MutationObserverStore>() {
+        store
+            .suppressed_child_list_targets
+            .insert(target.get_identity_hash().get());
+    }
+}
+
+pub(crate) fn unsuppress_child_list_for(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+) {
+    if let Some(store) = scope.get_slot_mut::<MutationObserverStore>() {
+        store
+            .suppressed_child_list_targets
+            .remove(&target.get_identity_hash().get());
+    }
 }
 
 pub(crate) fn records_array<'s>(
@@ -350,7 +447,7 @@ pub(crate) fn optional_boolean_property(
 }
 
 pub(crate) fn string_sequence_property(
-    scope: &v8::PinScope<'_, '_>,
+    scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
     name: &str,
 ) -> Option<Vec<String>> {
@@ -358,12 +455,14 @@ pub(crate) fn string_sequence_property(
     if value.is_undefined() {
         return None;
     }
-    let array = v8::Local::<v8::Array>::try_from(value).ok()?;
-    let mut values = Vec::new();
-    for index in 0..array.length() {
-        if let Some(value) = array.get_index(scope, index) {
-            values.push(crate::webidl::value_to_string(scope, value));
-        }
-    }
-    Some(values)
+    let sequence = crate::webidl::sequence_values(scope, value).ok()?;
+    Some(
+        sequence
+            .iter()
+            .map(|value| {
+                let value = v8::Local::new(scope, value);
+                crate::webidl::value_to_string(scope, value)
+            })
+            .collect(),
+    )
 }

@@ -13,15 +13,9 @@ fn parent_node(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let current = v8::Local::new(scope, &record.current);
-    let root = v8::Local::new(scope, &record.root);
-    let candidate = if current.strict_equals(root.into()) {
-        None
-    } else {
-        match super::tree_walker::visible_parent(scope, &record, current) {
-            Ok(value) => value.map(|value| v8::Local::new(scope, &value)),
-            Err(()) => return,
-        }
+    let candidate = match super::tree_walker::traverse_parent(scope, &record, "parentNode") {
+        Ok(candidate) => candidate.map(|value| v8::Local::new(scope, &value)),
+        Err(()) => return,
     };
     super::tree_walker::return_candidate(scope, arguments.this(), candidate, result);
 }

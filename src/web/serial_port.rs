@@ -109,27 +109,37 @@ fn promise(s: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>, mut r: v8:
         r.set(p.into())
     }
 }
+fn reject_illegal_invocation(
+    s: &mut v8::PinScope<'_, '_>,
+    method: &str,
+    mut r: v8::ReturnValue<'_>,
+) {
+    let message = format!("Failed to execute '{method}' on 'SerialPort': Illegal invocation");
+    if let Some(promise) = crate::webidl::rejected_type_error_promise(s, &message) {
+        r.set(promise.into());
+    }
+}
 fn get_connect(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.on_connect),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.on_connect, r)
 }
 fn get_disconnect(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.on_disconnect),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.on_disconnect, r)
 }
 fn set_connect(
     s: &mut v8::PinScope<'_, '_>,
@@ -142,6 +152,8 @@ fn set_connect(
         .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
     {
         v.on_connect = h
+    } else {
+        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn set_disconnect(
@@ -155,6 +167,8 @@ fn set_disconnect(
         .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
     {
         v.on_disconnect = h
+    } else {
+        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn readable(
@@ -195,6 +209,7 @@ fn set_open(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
     value: bool,
+    method: &str,
 ) {
     if let Some(v) = s
         .get_slot_mut::<SerialPortStore>()
@@ -204,7 +219,7 @@ fn set_open(
         let x = v8::undefined(s);
         promise(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        reject_illegal_invocation(s, method, r)
     }
 }
 fn open(
@@ -212,19 +227,19 @@ fn open(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_open(s, a, r, true)
+    set_open(s, a, r, true, "open")
 }
 fn close(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_open(s, a, r, false)
+    set_open(s, a, r, false, "close")
 }
 fn forget(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(v) = s
         .get_slot_mut::<SerialPortStore>()
@@ -233,6 +248,8 @@ fn forget(
         v.connected = false;
         let x = v8::undefined(s);
         promise(s, x.into(), r)
+    } else {
+        reject_illegal_invocation(s, "forget", r)
     }
 }
 fn get_info(
@@ -267,7 +284,7 @@ fn get_signals(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        reject_illegal_invocation(s, "getSignals", r);
         return;
     }
     let o = v8::Object::new(s);
@@ -279,7 +296,7 @@ fn set_signals(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        reject_illegal_invocation(s, "setSignals", r);
         return;
     }
     let x = v8::undefined(s);

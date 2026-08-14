@@ -112,7 +112,12 @@ fn create_media_keys(
     mut r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "MediaKeySystemAccess",
+            "createMediaKeys",
+            r,
+        );
         return;
     }
     if let Ok(keys) = super::media_keys::create(s)

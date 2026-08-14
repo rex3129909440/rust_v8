@@ -9,7 +9,15 @@ fn toggle(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(token) = super::dom_token_list::validate_token(scope, arguments.get(0)) else {
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'toggle' on 'DOMTokenList': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(token) = super::dom_token_list::validate_token(scope, arguments.get(0), "toggle")
+    else {
         return;
     };
     let force = if arguments.length() > 1 {

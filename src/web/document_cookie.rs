@@ -55,12 +55,16 @@ fn get_cookie(
         .map(|store| {
             let cookies = store.jars.entry(identity).or_default();
             cookies.retain(|cookie| cookie.expires.is_none_or(|expires| expires > now));
-            cookies
+            let mut visible = cookies
                 .iter()
                 .filter(|cookie| {
                     domain_matches(&host, &cookie.domain, cookie.host_only)
                         && path_matches(&request_path, &cookie.path)
                 })
+                .collect::<Vec<_>>();
+            visible.sort_by_key(|cookie| std::cmp::Reverse(cookie.path.len()));
+            visible
+                .into_iter()
                 .map(|cookie| format!("{}={}", cookie.name, cookie.value))
                 .collect::<Vec<_>>()
                 .join("; ")

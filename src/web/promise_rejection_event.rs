@@ -63,20 +63,32 @@ pub(crate) fn construct(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'PromiseRejectionEvent': 2 arguments required",
+            "Failed to construct 'PromiseRejectionEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "PromiseRejectionEventInit must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'PromiseRejectionEvent': The provided value is not of type 'PromiseRejectionEventInit'.",
+        );
         return;
     };
     let Some(promise_value) = property(scope, init, "promise") else {
-        crate::webidl::throw_type_error(scope, "Required member 'promise' is undefined");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'PromiseRejectionEvent': Failed to read the 'promise' property from 'PromiseRejectionEventInit': Required member is undefined.",
+        );
         return;
     };
     if promise_value.is_undefined() {
-        crate::webidl::throw_type_error(scope, "Required member 'promise' is undefined");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'PromiseRejectionEvent': Failed to read the 'promise' property from 'PromiseRejectionEventInit': Required member is undefined.",
+        );
         return;
     }
     let Ok(promise) = v8::Local::<v8::Promise>::try_from(promise_value) else {
@@ -87,7 +99,7 @@ pub(crate) fn construct(
     super::event::attach(
         scope,
         arguments.this(),
-        crate::webidl::value_to_string(scope, arguments.get(0)),
+        event_type,
         super::event::boolean_property(scope, init, "bubbles"),
         super::event::boolean_property(scope, init, "cancelable"),
         super::event::boolean_property(scope, init, "composed"),

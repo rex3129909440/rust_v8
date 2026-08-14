@@ -59,8 +59,8 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
         set_option_handler,
     )?;
     crate::webidl::define_method(s, p, "abort", 0, abort)?;
-    crate::webidl::define_method(s, p, "canMakePayment", 0, true_promise)?;
-    crate::webidl::define_method(s, p, "hasEnrolledInstrument", 0, true_promise)?;
+    crate::webidl::define_method(s, p, "canMakePayment", 0, can_make_payment)?;
+    crate::webidl::define_method(s, p, "hasEnrolledInstrument", 0, has_enrolled_instrument)?;
     crate::webidl::define_method(s, p, "show", 0, show)?;
     crate::webidl::define_accessor(
         s,
@@ -102,6 +102,40 @@ fn construct(
     if !a.is_construct_call() || a.length() < 1 {
         crate::webidl::throw_type_error(s, "method data required");
         return;
+    }
+    if !a.get(0).is_object() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PaymentRequest': The provided value cannot be converted to a sequence.",
+        );
+        return;
+    }
+    let method_data = match crate::webidl::sequence_values(s, a.get(0)) {
+        Ok(method_data) => method_data,
+        Err(_) => {
+            crate::webidl::throw_type_error(
+                s,
+                "Failed to construct 'PaymentRequest': The object must have a callable @@iterator property.",
+            );
+            return;
+        }
+    };
+    if method_data.is_empty() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PaymentRequest': At least one payment method is required",
+        );
+        return;
+    }
+    for method in &method_data {
+        let method = v8::Local::new(s, method);
+        if !method.is_object() {
+            crate::webidl::throw_type_error(
+                s,
+                "Failed to construct 'PaymentRequest': The provided value is not of type 'PaymentMethodData'.",
+            );
+            return;
+        }
     }
     super::event_target::attach(s, a.this());
     let address = match super::payment_address::create(s, Default::default()) {
@@ -207,11 +241,15 @@ fn handler(
     r: v8::ReturnValue<'_>,
     which: u8,
 ) {
-    let h = record(s, a.this()).and_then(|v| match which {
-        0 => v.address_handler,
-        1 => v.option_handler,
-        _ => v.method_handler,
-    });
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    let h = match which {
+        0 => record.address_handler,
+        1 => record.option_handler,
+        _ => record.method_handler,
+    };
     super::window_event_handler_support::return_handler(s, h, r)
 }
 fn get_address_handler(
@@ -284,20 +322,35 @@ fn abort(
         let x = v8::undefined(s);
         promise(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "PaymentRequest", "abort", r)
     }
 }
 fn true_promise(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
+    method_name: &str,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PaymentRequest", method_name, r);
         return;
     }
     let x = v8::Boolean::new(s, true);
     promise(s, x.into(), r)
+}
+fn can_make_payment(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    true_promise(s, a, r, "canMakePayment")
+}
+fn has_enrolled_instrument(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    true_promise(s, a, r, "hasEnrolledInstrument")
 }
 fn show(
     s: &mut v8::PinScope<'_, '_>,
@@ -305,7 +358,7 @@ fn show(
     r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PaymentRequest", "show", r);
         return;
     };
     match super::payment_response::create(s, v.id) {

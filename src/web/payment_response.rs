@@ -154,11 +154,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.handler),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.handler, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -193,7 +193,7 @@ fn complete(
         v.completed = true;
         void(s, r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "PaymentResponse", "complete", r)
     }
 }
 fn retry(
@@ -204,7 +204,7 @@ fn retry(
     if record(s, a.this()).is_some() {
         void(s, r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "PaymentResponse", "retry", r)
     }
 }
 fn to_json(

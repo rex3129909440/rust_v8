@@ -89,9 +89,22 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "ImageDecoder init must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ImageDecoder': The provided value is not of type 'ImageDecoderInit'.",
+        );
         return;
     };
+    let data_missing = v8::String::new(scope, "data")
+        .and_then(|key| init.get(scope, key.into()))
+        .is_none_or(|value| value.is_undefined());
+    if data_missing {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ImageDecoder': Failed to read the 'data' property from 'ImageDecoderInit': Required member is undefined.",
+        );
+        return;
+    }
     let media_type = crate::webidl::value_to_string(scope, member(scope, init, "type"));
     if media_type.is_empty() {
         crate::webidl::throw_type_error(scope, "ImageDecoder type is required");
@@ -165,7 +178,12 @@ fn get_completed(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.completed).into())
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'completed' property from 'ImageDecoder': Illegal invocation",
+        ) {
+            result.set(promise.into())
+        }
     }
 }
 fn get_tracks(
@@ -219,7 +237,7 @@ fn decode(
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "ImageDecoder", "decode", result);
         return;
     };
     if record.closed {

@@ -134,7 +134,7 @@ fn evaluate(runtime: *mut edge_sandbox::ffi::EdgeSandboxHandle, source: &str) ->
 
 #[test]
 fn complete_typed_profile_crosses_native_and_worker_boundaries() {
-    assert_eq!(edge_sandbox_profile_schema_version(), 11);
+    assert_eq!(edge_sandbox_profile_schema_version(), 13);
     let mut error = EdgeSandboxBuffer::default();
     let profile = edge_sandbox_profile_create(&mut error);
     assert!(!profile.is_null(), "{}", take_buffer(&mut error));

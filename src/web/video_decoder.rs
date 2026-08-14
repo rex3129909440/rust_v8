@@ -75,12 +75,24 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "init must be an object");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'VideoDecoder': The provided value is not of type 'VideoDecoderInit'.",
+        );
         return;
     };
-    let (Some(output), Some(error)) = (callback(s, init, "output"), callback(s, init, "error"))
-    else {
-        crate::webidl::throw_type_error(s, "output and error callbacks are required");
+    let Some(error) = callback(s, init, "error") else {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'VideoDecoder': Failed to read the 'error' property from 'VideoDecoderInit': Required member is undefined.",
+        );
+        return;
+    };
+    let Some(output) = callback(s, init, "output") else {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'VideoDecoder': Failed to read the 'output' property from 'VideoDecoderInit': Required member is undefined.",
+        );
         return;
     };
     super::event_target::attach(s, a.this());
@@ -136,11 +148,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.handler),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.handler, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -162,6 +174,10 @@ fn configure(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let configuration = super::webcodecs_config_support::dictionary(s, a.get(0));
     if super::webcodecs_config_support::string_member(s, configuration, "codec").is_none() {
         crate::webidl::throw_type_error(s, "VideoDecoder configuration requires codec");
@@ -298,7 +314,7 @@ fn flush(
     mut r: v8::ReturnValue<'_>,
 ) {
     let Some(current) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "VideoDecoder", "flush", r);
         return;
     };
     if current.state != "configured" {

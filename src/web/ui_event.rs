@@ -152,6 +152,21 @@ pub(crate) fn record(
         .cloned()
 }
 
+pub(crate) fn set_source_capabilities(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    capabilities: Option<v8::Local<'_, v8::Object>>,
+) {
+    let capabilities =
+        capabilities.map(|value| v8::Global::new(scope, v8::Local::<v8::Value>::from(value)));
+    if let Some(record) = scope
+        .get_slot_mut::<UiEventStore>()
+        .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
+    {
+        record.source_capabilities = capabilities;
+    }
+}
+
 pub(crate) fn get_view(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
@@ -201,7 +216,9 @@ pub(crate) fn get_which(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if record(scope, arguments.this()).is_some() {
+    if let Some(keyboard) = super::keyboard_event::record(scope, arguments.this()) {
+        result.set(v8::Integer::new_from_unsigned(scope, keyboard.which).into());
+    } else if record(scope, arguments.this()).is_some() {
         result.set(v8::Integer::new(scope, 0).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");

@@ -47,7 +47,42 @@ fn construct(
         crate::webidl::throw_type_error(s, "use new");
         return;
     }
-    let array = v8::Local::<v8::Array>::try_from(a.get(0)).unwrap_or_else(|_| v8::Array::new(s, 0));
+    if !a.get(0).is_object() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'USBIsochronousOutTransferResult': The provided value cannot be converted to a sequence.",
+        );
+        return;
+    }
+    let values = match crate::webidl::sequence_values(s, a.get(0)) {
+        Ok(values) => values,
+        Err(_) => {
+            crate::webidl::throw_type_error(
+                s,
+                "Failed to construct 'USBIsochronousOutTransferResult': The object must have a callable @@iterator property.",
+            );
+            return;
+        }
+    };
+    let array = v8::Array::new(s, values.len() as i32);
+    for (index, value) in values.into_iter().enumerate() {
+        let value = v8::Local::new(s, &value);
+        let Ok(packet) = v8::Local::<v8::Object>::try_from(value) else {
+            crate::webidl::throw_type_error(
+                s,
+                "Failed to construct 'USBIsochronousOutTransferResult': Failed to convert value to 'USBIsochronousOutTransferPacket'.",
+            );
+            return;
+        };
+        if !super::usb_isochronous_out_transfer_packet::is_instance(s, packet) {
+            crate::webidl::throw_type_error(
+                s,
+                "Failed to construct 'USBIsochronousOutTransferResult': Failed to convert value to 'USBIsochronousOutTransferPacket'.",
+            );
+            return;
+        }
+        let _ = array.set_index(s, index as u32, packet.into());
+    }
     let array = v8::Global::new(s, array);
     s.get_slot_mut::<UsbIsochronousOutTransferResultStore>()
         .unwrap()

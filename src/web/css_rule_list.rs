@@ -84,7 +84,7 @@ pub(crate) fn create<'s>(
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
-    let object = v8::Object::new(scope);
+    let object = new_exotic_list(scope)?;
     if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
         return Err("cannot create CSSRuleList".to_owned());
     }
@@ -115,16 +115,104 @@ fn record(
         .cloned()
 }
 
-fn refresh(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, old_length: usize) {
-    for index in 0..old_length {
-        let _ = object.delete_index(scope, index as u32);
+fn new_exotic_list<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let template = v8::ObjectTemplate::new(scope);
+    template.set_indexed_property_handler(
+        v8::IndexedPropertyHandlerConfiguration::new()
+            .getter(indexed_getter)
+            .setter(indexed_setter)
+            .query(indexed_query)
+            .deleter(indexed_deleter)
+            .enumerator(indexed_enumerator),
+    );
+    template
+        .new_instance(scope)
+        .ok_or_else(|| "cannot create CSSRuleList exotic object".to_owned())
+}
+
+fn refresh(
+    _scope: &mut v8::PinScope<'_, '_>,
+    _object: v8::Local<'_, v8::Object>,
+    _old_length: usize,
+) {
+}
+
+fn indexed_getter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "get", index, None);
+    let Some(rule) = record(scope, arguments.holder())
+        .and_then(|record| record.rules.get(index as usize).cloned())
+    else {
+        return v8::Intercepted::kNo;
+    };
+    result.set(v8::Local::new(scope, &rule).into());
+    v8::Intercepted::kYes
+}
+
+fn indexed_setter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    value: v8::Local<'_, v8::Value>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "set", index, Some(value));
+    if record(scope, arguments.holder()).is_none_or(|record| (index as usize) >= record.rules.len())
+    {
+        return v8::Intercepted::kNo;
     }
-    if let Some(record) = record(scope, object) {
-        for (index, rule) in record.rules.iter().enumerate() {
-            let rule = v8::Local::new(scope, rule);
-            let _ = object.set_index(scope, index as u32, rule.into());
-        }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn indexed_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "has", index, None);
+    if record(scope, arguments.holder()).is_some_and(|record| (index as usize) < record.rules.len())
+    {
+        result.set_int32(1);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
     }
+}
+
+fn indexed_deleter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Boolean>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "delete", index, None);
+    if record(scope, arguments.holder()).is_none_or(|record| (index as usize) >= record.rules.len())
+    {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn indexed_enumerator(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Array>,
+) {
+    crate::trace::record_native_enumeration(scope, &arguments);
+    let length = record(scope, arguments.holder()).map_or(0, |record| record.rules.len());
+    let indices = (0..length)
+        .map(|index| v8::Integer::new_from_unsigned(scope, index as u32).into())
+        .collect::<Vec<v8::Local<v8::Value>>>();
+    result.set(v8::Array::new_with_elements(scope, &indices));
 }
 
 pub(crate) fn rules(
@@ -232,24 +320,12 @@ fn item(
 fn iterator(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    mut result: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, record.rules.len() as i32);
-    for (index, rule) in record.rules.iter().enumerate() {
-        let rule = v8::Local::new(scope, rule);
-        let _ = array.set_index(scope, index as u32, rule.into());
-    }
-    let key = v8::Symbol::get_iterator(scope);
-    let function = array
-        .get(scope, key.into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
-    if let Some(function) = function
-        && let Some(iterator) = function.call(scope, array.into(), &[])
-    {
-        result.set(iterator);
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        result,
+    );
 }

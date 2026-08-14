@@ -146,6 +146,87 @@ pub(crate) enum EditError {
     IllegalInvocation,
     IndexSize,
 }
+
+pub(crate) fn require_arguments(
+    scope: &v8::PinScope<'_, '_>,
+    arguments: &v8::FunctionCallbackArguments<'_>,
+    method: &str,
+    required: i32,
+) -> bool {
+    if arguments.length() >= required {
+        return true;
+    }
+    let noun = if required == 1 {
+        "argument"
+    } else {
+        "arguments"
+    };
+    crate::webidl::throw_type_error(
+        scope,
+        &format!(
+            "Failed to execute '{method}' on 'CharacterData': {required} {noun} required, but only {} present.",
+            arguments.length()
+        ),
+    );
+    false
+}
+
+pub(crate) fn unsigned_long_argument(
+    scope: &v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    method: &str,
+) -> Option<u32> {
+    if value.is_symbol() || value.is_big_int() {
+        let kind = if value.is_symbol() {
+            "Symbol"
+        } else {
+            "BigInt"
+        };
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute '{method}' on 'CharacterData': Cannot convert a {kind} value to a number"
+            ),
+        );
+        return None;
+    }
+    value.uint32_value(scope)
+}
+
+pub(crate) fn string_argument(
+    scope: &v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    context: &str,
+) -> Option<String> {
+    if value.is_symbol() {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!("{context}: Cannot convert a Symbol value to a string"),
+        );
+        return None;
+    }
+    value
+        .to_string(scope)
+        .map(|value| value.to_rust_string_lossy(scope))
+}
+
+pub(crate) fn throw_offset_error(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    method: &str,
+    offset: u32,
+) {
+    let length = data_if_character(scope, object)
+        .map(|value| value.encode_utf16().count())
+        .unwrap_or(0);
+    super::node::throw_dom_exception(
+        scope,
+        "IndexSizeError",
+        &format!(
+            "Failed to execute '{method}' on 'CharacterData': The offset {offset} is greater than the node's length ({length})."
+        ),
+    );
+}
 pub(crate) fn replace_data_units(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,

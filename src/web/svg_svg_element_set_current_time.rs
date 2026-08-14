@@ -13,7 +13,11 @@ fn set_current_time(
     _: v8::ReturnValue<'_>,
 ) {
     let value = arguments.get(0).number_value(scope).unwrap_or(0.0);
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
     update(scope, arguments.this(), |record| {
-        record.current_time = value.max(0.0)
+        record.current_time = value.max(0.0);
+        if !record.animations_paused {
+            record.timeline_started_ms = Some(now);
+        }
     });
 }

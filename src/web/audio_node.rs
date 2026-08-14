@@ -332,6 +332,10 @@ fn set_channel_count(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = arguments.get(0).uint32_value(scope).unwrap_or(0);
     if value == 0 {
         crate::webidl::throw_type_error(scope, "channelCount must be greater than zero");
@@ -377,6 +381,10 @@ fn set_channel_count_mode(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     if value != "max" && value != "clamped-max" && value != "explicit" {
         crate::webidl::throw_type_error(scope, "Invalid channelCountMode");
@@ -392,6 +400,10 @@ fn set_channel_interpretation(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     if value != "speakers" && value != "discrete" {
         crate::webidl::throw_type_error(scope, "Invalid channelInterpretation");

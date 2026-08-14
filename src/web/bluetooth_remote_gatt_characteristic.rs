@@ -50,11 +50,17 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
     crate::webidl::define_method(s, p, "getDescriptor", 1, get_descriptor)?;
     crate::webidl::define_method(s, p, "getDescriptors", 0, get_descriptors)?;
     crate::webidl::define_method(s, p, "readValue", 0, read_value)?;
-    crate::webidl::define_method(s, p, "startNotifications", 0, self_promise)?;
-    crate::webidl::define_method(s, p, "stopNotifications", 0, self_promise)?;
+    crate::webidl::define_method(s, p, "startNotifications", 0, start_notifications)?;
+    crate::webidl::define_method(s, p, "stopNotifications", 0, stop_notifications)?;
     crate::webidl::define_method(s, p, "writeValue", 1, write_value)?;
-    crate::webidl::define_method(s, p, "writeValueWithResponse", 1, write_value)?;
-    crate::webidl::define_method(s, p, "writeValueWithoutResponse", 1, write_value)?;
+    crate::webidl::define_method(s, p, "writeValueWithResponse", 1, write_value_with_response)?;
+    crate::webidl::define_method(
+        s,
+        p,
+        "writeValueWithoutResponse",
+        1,
+        write_value_without_response,
+    )?;
     crate::webidl::finish_constructor(s, p, c)?;
     let parent = super::event_target::ensure_constructor(s)?;
     crate::webidl::inherit(s, c, parent)?;
@@ -178,11 +184,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.handler),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.handler, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -218,6 +224,15 @@ fn get_descriptor<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTCharacteristic",
+            "getDescriptor",
+            r,
+        );
+        return;
+    }
     match descriptor(s, a) {
         Ok(v) => resolve(s, v.into(), r),
         Err(e) => crate::webidl::throw_type_error(s, &e),
@@ -228,6 +243,15 @@ fn get_descriptors<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTCharacteristic",
+            "getDescriptors",
+            r,
+        );
+        return;
+    }
     match descriptor(s, a) {
         Ok(v) => {
             let array = v8::Array::new(s, 1);
@@ -246,25 +270,67 @@ fn read_value(
         let x = data_view(s, v.bytes);
         resolve(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTCharacteristic",
+            "readValue",
+            r,
+        )
     }
 }
 fn self_promise(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
+    method: &str,
 ) {
     if record(s, a.this()).is_some() {
         resolve(s, a.this().into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTCharacteristic",
+            method,
+            r,
+        )
     }
+}
+fn start_notifications(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    self_promise(s, a, r, "startNotifications")
+}
+fn stop_notifications(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    self_promise(s, a, r, "stopNotifications")
 }
 fn write_value(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    write_value_operation(s, a, r, "writeValue")
+}
+fn write_value_operation(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+    method: &str,
+) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTCharacteristic",
+            method,
+            r,
+        );
+        return;
+    }
     let bytes = crate::webidl::value_to_string(s, a.get(0)).into_bytes();
     if let Some(v) = s
         .get_slot_mut::<BluetoothRemoteGattCharacteristicStore>()
@@ -274,6 +340,25 @@ fn write_value(
         let x = v8::undefined(s);
         resolve(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTCharacteristic",
+            method,
+            r,
+        )
     }
+}
+fn write_value_with_response(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    write_value_operation(s, a, r, "writeValueWithResponse")
+}
+fn write_value_without_response(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    write_value_operation(s, a, r, "writeValueWithoutResponse")
 }

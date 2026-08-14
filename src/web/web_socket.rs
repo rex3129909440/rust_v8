@@ -135,9 +135,9 @@ fn construct(
         return;
     }
     let raw_url = crate::webidl::value_to_string(scope, arguments.get(0));
-    let parsed = match url::Url::parse(&raw_url) {
-        Ok(parsed) if parsed.scheme() == "ws" || parsed.scheme() == "wss" => parsed,
-        _ => {
+    let parsed = match normalize_url(scope, &raw_url) {
+        Some(parsed) => parsed,
+        None => {
             crate::webidl::throw_type_error(scope, "The WebSocket URL is invalid");
             return;
         }
@@ -165,6 +165,18 @@ fn construct(
             },
         );
     result.set(object.into());
+}
+
+fn normalize_url(scope: &mut v8::PinScope<'_, '_>, input: &str) -> Option<url::Url> {
+    let resolved = super::fetch_global::resolve_request_url(scope, input).ok()?;
+    let mut parsed = url::Url::parse(&resolved).ok()?;
+    match parsed.scheme() {
+        "http" => parsed.set_scheme("ws").ok()?,
+        "https" => parsed.set_scheme("wss").ok()?,
+        "ws" | "wss" => {}
+        _ => return None,
+    }
+    Some(parsed)
 }
 
 fn record(
@@ -272,6 +284,10 @@ fn set_binary_type(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     if value != "blob" && value != "arraybuffer" {
         return;
@@ -409,6 +425,11 @@ fn close(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let target = arguments.this();
+    let Some(snapshot) = record(scope, target) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
     let code = if arguments.get(0).is_undefined() {
         1000
     } else {
@@ -418,11 +439,6 @@ fn close(
         crate::webidl::throw_type_error(scope, "Invalid WebSocket close code");
         return;
     }
-    let target = arguments.this();
-    let Some(snapshot) = record(scope, target) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
     if snapshot.ready_state == CLOSED {
         return;
     }

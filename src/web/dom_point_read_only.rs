@@ -50,6 +50,7 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "matrixTransform", 0, matrix_transform)?;
     crate::webidl::define_method(scope, prototype, "toJSON", 0, to_json)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(scope, constructor.into(), "fromPoint", 0, from_point)?;
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
         .get_slot_mut::<DomPointReadOnlyStore>()
@@ -57,6 +58,32 @@ pub(crate) fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(constructor)
+}
+
+pub(crate) fn create<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    point: PointRecord,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let object = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
+        return Err("cannot create DOMPointReadOnly".to_owned());
+    }
+    attach(scope, object, point);
+    Ok(object)
+}
+
+fn from_point(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let point = from_value(scope, arguments.get(0));
+    match create(scope, point) {
+        Ok(point) => result.set(point.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
 }
 
 fn construct(

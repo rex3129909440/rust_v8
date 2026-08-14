@@ -223,6 +223,7 @@ pub mod profile_field {
     pub const UA_PLATFORM_VERSION: u32 = 34;
     pub const UA_FULL_VERSION: u32 = 35;
     pub const NETWORK_EFFECTIVE_TYPE: u32 = 40;
+    pub const NETWORK_CONNECTION_TYPE: u32 = 41;
 
     pub const CANVAS_DATA_URL_SALT: u32 = 50;
     pub const WEBGL_VENDOR: u32 = 60;
@@ -429,6 +430,7 @@ pub mod profile_field {
 
     pub const DEVICE_MEMORY_GB: u32 = 500;
     pub const NETWORK_DOWNLINK: u32 = 501;
+    pub const NETWORK_DOWNLINK_MAX: u32 = 564;
     pub const SCREEN_VIEWPORT_WIDTH: u32 = 502;
     pub const SCREEN_VIEWPORT_HEIGHT: u32 = 503;
     pub const SCREEN_OUTER_WIDTH: u32 = 504;
@@ -534,6 +536,7 @@ pub mod profile_field {
     pub const NAVIGATOR_USER_ACTIVATION_IS_ACTIVE: u32 = 731;
     pub const DOCUMENT_HAS_FOCUS: u32 = 732;
     pub const DOCUMENT_IS_POPUP: u32 = 733;
+    pub const FONT_USE_SYSTEM_FONTS: u32 = 734;
 }
 
 pub struct EdgeSandboxHandle {
@@ -703,7 +706,7 @@ unsafe fn options_ref<'a>(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_profile_schema_version() -> u32 {
-    11
+    13
 }
 
 fn performance_profile_string(value: EdgeSandboxStringView, name: &str) -> Result<String, String> {
@@ -897,6 +900,7 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_string(
                 fingerprint.navigator.app_version =
                     value.strip_prefix("Mozilla/").unwrap_or(&value).to_owned();
                 fingerprint.navigator.user_agent = value;
+                fingerprint.synchronize_default_browser_version();
             }
             profile_field::NAVIGATOR_APP_VERSION => {
                 fingerprint.navigator.app_version = value;
@@ -939,6 +943,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_string(
             }
             profile_field::NETWORK_EFFECTIVE_TYPE => {
                 fingerprint.navigator.network.effective_type = value;
+            }
+            profile_field::NETWORK_CONNECTION_TYPE => {
+                fingerprint.navigator.network.connection_type = value;
             }
             profile_field::CANVAS_DATA_URL_SALT => {
                 fingerprint.rendering.canvas.data_url_salt = value;
@@ -1733,6 +1740,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_f64(
         match field {
             profile_field::DEVICE_MEMORY_GB => fingerprint.navigator.device_memory_gb = value,
             profile_field::NETWORK_DOWNLINK => fingerprint.navigator.network.downlink = value,
+            profile_field::NETWORK_DOWNLINK_MAX => {
+                fingerprint.navigator.network.downlink_max = value
+            }
             profile_field::SCREEN_VIEWPORT_WIDTH => fingerprint.screen.viewport_width = value,
             profile_field::SCREEN_VIEWPORT_HEIGHT => fingerprint.screen.viewport_height = value,
             profile_field::SCREEN_OUTER_WIDTH => fingerprint.screen.outer_width = value,
@@ -1946,6 +1956,9 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_bool(
             profile_field::STORAGE_PERSISTED => fingerprint.storage.persisted = value,
             profile_field::FONT_ALLOW_UNKNOWN_FAMILIES => {
                 fingerprint.fonts.allow_unknown_families = value;
+            }
+            profile_field::FONT_USE_SYSTEM_FONTS => {
+                fingerprint.fonts.use_system_fonts = value;
             }
             profile_field::BATTERY_CHARGING => fingerprint.battery.charging = value,
             profile_field::MEDIA_PREFERENCE_REDUCED_MOTION => {
@@ -2259,6 +2272,60 @@ pub unsafe extern "C" fn edge_sandbox_profile_append_font_metric(
                 family,
                 width_scale,
                 monospace,
+            });
+        Ok(())
+    })
+}
+
+/// Clears explicit native OpenType font sources.
+///
+/// # Safety
+///
+/// `profile` must be live and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_profile_clear_font_binary_sources(
+    profile: *mut EdgeSandboxProfile,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    profile_operation(error_out, || {
+        // SAFETY: guaranteed by this function's FFI contract.
+        unsafe { profile_mut(profile)? }
+            .fingerprint
+            .fonts
+            .binary_sources
+            .clear();
+        Ok(())
+    })
+}
+
+/// Appends one explicit TTF/OTF/TTC/OTC file used by native text shaping.
+///
+/// # Safety
+///
+/// Both string pointers must address their matching readable byte lengths,
+/// `profile` must be live, and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_profile_append_font_binary_source(
+    profile: *mut EdgeSandboxProfile,
+    family: *const u8,
+    family_len: usize,
+    path: *const u8,
+    path_len: usize,
+    face_index: u32,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    profile_operation(error_out, || {
+        let family = input_string(family, family_len, "font binary family")?;
+        let path = input_string(path, path_len, "font binary path")?;
+        // SAFETY: guaranteed by this function's FFI contract.
+        unsafe { profile_mut(profile)? }
+            .fingerprint
+            .fonts
+            .binary_sources
+            .push(crate::FontBinarySourceFingerprint {
+                family,
+                path,
+                face_index,
             });
         Ok(())
     })
@@ -3053,7 +3120,7 @@ pub unsafe extern "C" fn edge_sandbox_profile_validate(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_options_schema_version() -> u32 {
-    2
+    3
 }
 
 /// Allocates a complete runtime-options builder using the Chrome 150 defaults.
@@ -3159,6 +3226,25 @@ pub unsafe extern "C" fn edge_sandbox_options_clear_page(
     profile_operation(error_out, || {
         // SAFETY: guaranteed by this function's FFI contract.
         unsafe { options_mut(options)? }.options.page = None;
+        Ok(())
+    })
+}
+
+/// Configures whether the root page has cross-origin isolated capability.
+///
+/// This corresponds to a successfully enforced COOP/COEP response policy and
+/// controls both the exposed capability and high-resolution clock coarsening.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_options_set_cross_origin_isolated(
+    options: *mut EdgeSandboxOptions,
+    isolated: bool,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    profile_operation(error_out, || {
+        // SAFETY: guaranteed by this function's FFI contract.
+        unsafe { options_mut(options)? }
+            .options
+            .cross_origin_isolated = isolated;
         Ok(())
     })
 }
@@ -3892,6 +3978,490 @@ pub unsafe extern "C" fn edge_sandbox_evaluate_with_source_url(
     }
 }
 
+/// Dispatches a host-authoritative pointer click at viewport coordinates.
+/// JavaScript-created and redispatched events remain untrusted.
+///
+/// # Safety
+///
+/// `handle` must be live, `dispatched_out` must be writable, and `error_out`
+/// must be null or point to a writable buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_dispatch_host_click(
+    handle: *mut EdgeSandboxHandle,
+    client_x: f64,
+    client_y: f64,
+    button: i16,
+    ctrl_key: u8,
+    shift_key: u8,
+    alt_key: u8,
+    meta_key: u8,
+    dispatched_out: *mut u8,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if dispatched_out.is_null() {
+            return Err("host click dispatched output pointer is null".to_owned());
+        }
+        for (name, value) in [
+            ("ctrl_key", ctrl_key),
+            ("shift_key", shift_key),
+            ("alt_key", alt_key),
+            ("meta_key", meta_key),
+        ] {
+            if value > 1 {
+                return Err(format!("host click {name} must be 0 or 1"));
+            }
+        }
+        let input = crate::HostClickInput {
+            client_x,
+            client_y,
+            button,
+            ctrl_key: ctrl_key != 0,
+            shift_key: shift_key != 0,
+            alt_key: alt_key != 0,
+            meta_key: meta_key != 0,
+        };
+        let dispatched = handle.runtime.dispatch_host_click(&input)?;
+        // SAFETY: non-null writable output is guaranteed by the contract.
+        unsafe { *dispatched_out = u8::from(dispatched) };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Dispatches a host-authoritative keyboard press sequence to activeElement.
+///
+/// # Safety
+///
+/// String pointers must address their declared byte lengths. `dispatched_out`
+/// must be writable, and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_dispatch_host_keyboard(
+    handle: *mut EdgeSandboxHandle,
+    key: *const u8,
+    key_len: usize,
+    code: *const u8,
+    code_len: usize,
+    text: *const u8,
+    text_len: usize,
+    text_present: u8,
+    location: u32,
+    repeat: u8,
+    ctrl_key: u8,
+    shift_key: u8,
+    alt_key: u8,
+    meta_key: u8,
+    dispatched_out: *mut u8,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if dispatched_out.is_null() {
+            return Err("host keyboard dispatched output pointer is null".to_owned());
+        }
+        for (name, value) in [
+            ("text_present", text_present),
+            ("repeat", repeat),
+            ("ctrl_key", ctrl_key),
+            ("shift_key", shift_key),
+            ("alt_key", alt_key),
+            ("meta_key", meta_key),
+        ] {
+            if value > 1 {
+                return Err(format!("host keyboard {name} must be 0 or 1"));
+            }
+        }
+        let input = crate::HostKeyboardInput {
+            key: input_string(key, key_len, "host keyboard key")?,
+            code: input_string(code, code_len, "host keyboard code")?,
+            text: if text_present != 0 {
+                Some(input_string(text, text_len, "host keyboard text")?)
+            } else {
+                None
+            },
+            location,
+            repeat: repeat != 0,
+            ctrl_key: ctrl_key != 0,
+            shift_key: shift_key != 0,
+            alt_key: alt_key != 0,
+            meta_key: meta_key != 0,
+        };
+        let dispatched = handle.runtime.dispatch_host_keyboard(&input)?;
+        // SAFETY: non-null writable output is guaranteed by the contract.
+        unsafe { *dispatched_out = u8::from(dispatched) };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Dispatches host-authoritative wheel input at viewport coordinates.
+///
+/// # Safety
+///
+/// `dispatched_out` must be writable and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_dispatch_host_wheel(
+    handle: *mut EdgeSandboxHandle,
+    client_x: f64,
+    client_y: f64,
+    delta_x: f64,
+    delta_y: f64,
+    delta_z: f64,
+    delta_mode: u32,
+    ctrl_key: u8,
+    shift_key: u8,
+    alt_key: u8,
+    meta_key: u8,
+    dispatched_out: *mut u8,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if dispatched_out.is_null() {
+            return Err("host wheel dispatched output pointer is null".to_owned());
+        }
+        for (name, value) in [
+            ("ctrl_key", ctrl_key),
+            ("shift_key", shift_key),
+            ("alt_key", alt_key),
+            ("meta_key", meta_key),
+        ] {
+            if value > 1 {
+                return Err(format!("host wheel {name} must be 0 or 1"));
+            }
+        }
+        let input = crate::HostWheelInput {
+            client_x,
+            client_y,
+            delta_x,
+            delta_y,
+            delta_z,
+            delta_mode,
+            ctrl_key: ctrl_key != 0,
+            shift_key: shift_key != 0,
+            alt_key: alt_key != 0,
+            meta_key: meta_key != 0,
+        };
+        let dispatched = handle.runtime.dispatch_host_wheel(&input)?;
+        // SAFETY: non-null writable output is guaranteed by the contract.
+        unsafe { *dispatched_out = u8::from(dispatched) };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Dispatches one host-authoritative HTML drag-and-drop gesture.
+///
+/// `client_x` and `client_y` are parallel arrays describing the viewport
+/// points traversed by the pointer. At least two and at most 4096 points are
+/// accepted. No JSON or JavaScript-side transport is involved.
+///
+/// # Safety
+///
+/// Both coordinate pointers must address `point_count` readable `f64`
+/// values. `dispatched_out` must be writable and `error_out` must be null or
+/// writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_dispatch_host_drag(
+    handle: *mut EdgeSandboxHandle,
+    client_x: *const f64,
+    client_y: *const f64,
+    point_count: usize,
+    ctrl_key: u8,
+    shift_key: u8,
+    alt_key: u8,
+    meta_key: u8,
+    dispatched_out: *mut u8,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if dispatched_out.is_null() {
+            return Err("host drag dispatched output pointer is null".to_owned());
+        }
+        for (name, value) in [
+            ("ctrl_key", ctrl_key),
+            ("shift_key", shift_key),
+            ("alt_key", alt_key),
+            ("meta_key", meta_key),
+        ] {
+            if value > 1 {
+                return Err(format!("host drag {name} must be 0 or 1"));
+            }
+        }
+        if !(2..=4096).contains(&point_count) {
+            return Err("host drag requires between 2 and 4096 points".to_owned());
+        }
+        // SAFETY: guaranteed by this function's FFI contract and bounded
+        // above before either slice is constructed.
+        let client_x = unsafe { input_f64_values(client_x, point_count, "host drag client_x")? };
+        // SAFETY: same contract as the parallel x-coordinate array.
+        let client_y = unsafe { input_f64_values(client_y, point_count, "host drag client_y")? };
+        let points = client_x
+            .into_iter()
+            .zip(client_y)
+            .map(|(client_x, client_y)| crate::HostDragPoint { client_x, client_y })
+            .collect();
+        let input = crate::HostDragInput {
+            points,
+            ctrl_key: ctrl_key != 0,
+            shift_key: shift_key != 0,
+            alt_key: alt_key != 0,
+            meta_key: meta_key != 0,
+        };
+        let dispatched = handle.runtime.dispatch_host_drag(&input)?;
+        // SAFETY: non-null writable output is guaranteed by the contract.
+        unsafe { *dispatched_out = u8::from(dispatched) };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Dispatches one host-authoritative touch phase.
+///
+/// Phase values are 0=Start, 1=Move, 2=End and 3=Cancel. Calls sharing an
+/// identifier form one touch stream and may be interleaved for multi-touch.
+///
+/// # Safety
+///
+/// `dispatched_out` must be writable and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn edge_sandbox_dispatch_host_touch(
+    handle: *mut EdgeSandboxHandle,
+    phase: u32,
+    identifier: i32,
+    client_x: f64,
+    client_y: f64,
+    radius_x: f64,
+    radius_y: f64,
+    rotation_angle: f64,
+    force: f64,
+    ctrl_key: u8,
+    shift_key: u8,
+    alt_key: u8,
+    meta_key: u8,
+    dispatched_out: *mut u8,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if dispatched_out.is_null() {
+            return Err("host touch dispatched output pointer is null".to_owned());
+        }
+        for (name, value) in [
+            ("ctrl_key", ctrl_key),
+            ("shift_key", shift_key),
+            ("alt_key", alt_key),
+            ("meta_key", meta_key),
+        ] {
+            if value > 1 {
+                return Err(format!("host touch {name} must be 0 or 1"));
+            }
+        }
+        let phase = match phase {
+            0 => crate::HostTouchPhase::Start,
+            1 => crate::HostTouchPhase::Move,
+            2 => crate::HostTouchPhase::End,
+            3 => crate::HostTouchPhase::Cancel,
+            _ => return Err("host touch phase must be between 0 and 3".to_owned()),
+        };
+        let input = crate::HostTouchInput {
+            phase,
+            identifier,
+            client_x,
+            client_y,
+            radius_x,
+            radius_y,
+            rotation_angle,
+            force,
+            ctrl_key: ctrl_key != 0,
+            shift_key: shift_key != 0,
+            alt_key: alt_key != 0,
+            meta_key: meta_key != 0,
+        };
+        let dispatched = handle.runtime.dispatch_host_touch(&input)?;
+        // SAFETY: non-null writable output is guaranteed by the contract.
+        unsafe { *dispatched_out = u8::from(dispatched) };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Dispatches one host-authoritative pen phase.
+///
+/// Phase values are 0=Hover, 1=Down, 2=Move, 3=Up and 4=Cancel.
+///
+/// # Safety
+///
+/// `dispatched_out` must be writable and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn edge_sandbox_dispatch_host_pen(
+    handle: *mut EdgeSandboxHandle,
+    phase: u32,
+    client_x: f64,
+    client_y: f64,
+    width: f64,
+    height: f64,
+    pressure: f64,
+    tangential_pressure: f64,
+    tilt_x: i32,
+    tilt_y: i32,
+    twist: u32,
+    button: i16,
+    ctrl_key: u8,
+    shift_key: u8,
+    alt_key: u8,
+    meta_key: u8,
+    dispatched_out: *mut u8,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if dispatched_out.is_null() {
+            return Err("host pen dispatched output pointer is null".to_owned());
+        }
+        for (name, value) in [
+            ("ctrl_key", ctrl_key),
+            ("shift_key", shift_key),
+            ("alt_key", alt_key),
+            ("meta_key", meta_key),
+        ] {
+            if value > 1 {
+                return Err(format!("host pen {name} must be 0 or 1"));
+            }
+        }
+        let phase = match phase {
+            0 => crate::HostPenPhase::Hover,
+            1 => crate::HostPenPhase::Down,
+            2 => crate::HostPenPhase::Move,
+            3 => crate::HostPenPhase::Up,
+            4 => crate::HostPenPhase::Cancel,
+            _ => return Err("host pen phase must be between 0 and 4".to_owned()),
+        };
+        let input = crate::HostPenInput {
+            phase,
+            client_x,
+            client_y,
+            width,
+            height,
+            pressure,
+            tangential_pressure,
+            tilt_x,
+            tilt_y,
+            twist,
+            button,
+            ctrl_key: ctrl_key != 0,
+            shift_key: shift_key != 0,
+            alt_key: alt_key != 0,
+            meta_key: meta_key != 0,
+        };
+        let dispatched = handle.runtime.dispatch_host_pen(&input)?;
+        // SAFETY: non-null writable output is guaranteed by the contract.
+        unsafe { *dispatched_out = u8::from(dispatched) };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
 /// Enables V8-native API tracing for subsequent evaluations.
 ///
 /// # Safety
@@ -4296,7 +4866,7 @@ pub unsafe extern "C" fn edge_sandbox_buffer_free(buffer: *mut EdgeSandboxBuffer
 /// Returns the stable ABI version exposed by this library.
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_abi_version() -> u32 {
-    1
+    2
 }
 
 // Keep the opaque handle ABI visibly pointer-sized in generated bindings.
@@ -4306,6 +4876,55 @@ const _: () =
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn font_binary_sources_cross_the_typed_ffi() {
+        let mut profile = EdgeSandboxProfile {
+            fingerprint: crate::EdgeFingerprint::default(),
+        };
+        let profile_ptr = &mut profile as *mut EdgeSandboxProfile;
+        let mut error = EdgeSandboxBuffer::default();
+        let family = b"Native Audit Sans";
+        let path = if cfg!(windows) {
+            b"C:\\Windows\\Fonts\\arial.ttf".as_slice()
+        } else if cfg!(target_os = "macos") {
+            b"/System/Library/Fonts/Helvetica.ttc".as_slice()
+        } else {
+            b"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".as_slice()
+        };
+
+        // SAFETY: every pointer remains readable during these synchronous calls.
+        unsafe {
+            assert!(edge_sandbox_profile_set_bool(
+                profile_ptr,
+                profile_field::FONT_USE_SYSTEM_FONTS,
+                true,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_clear_font_binary_sources(
+                profile_ptr,
+                &mut error,
+            ));
+            assert!(edge_sandbox_profile_append_font_binary_source(
+                profile_ptr,
+                family.as_ptr(),
+                family.len(),
+                path.as_ptr(),
+                path.len(),
+                0,
+                &mut error,
+            ));
+        }
+        assert!(error.data.is_null());
+        assert!(profile.fingerprint.fonts.use_system_fonts);
+        assert_eq!(profile.fingerprint.fonts.binary_sources.len(), 1);
+        assert_eq!(
+            profile.fingerprint.fonts.binary_sources[0].family,
+            "Native Audit Sans"
+        );
+        assert_eq!(profile.fingerprint.fonts.binary_sources[0].face_index, 0);
+        assert_eq!(profile.fingerprint.validate(), Ok(()));
+    }
 
     #[test]
     fn new_document_media_and_activation_fields_cross_the_typed_ffi() {

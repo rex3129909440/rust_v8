@@ -153,21 +153,36 @@ fn entries(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    iterator(s, a, r, "entries")
+    crate::webidl::return_array_like_iterator(
+        s,
+        a.this(),
+        crate::webidl::ArrayLikeIteratorKind::Entries,
+        r,
+    );
 }
 fn keys(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    iterator(s, a, r, "keys")
+    crate::webidl::return_array_like_iterator(
+        s,
+        a.this(),
+        crate::webidl::ArrayLikeIteratorKind::Keys,
+        r,
+    );
 }
 fn values(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    iterator(s, a, r, "values")
+    crate::webidl::return_array_like_iterator(
+        s,
+        a.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        r,
+    );
 }
 
 fn for_each(
@@ -175,24 +190,7 @@ fn for_each(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "callback must be a function");
-        return;
-    };
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let this_arg = arguments.get(1);
-    for (index, range) in record.ranges.iter().enumerate() {
-        let range = v8::Local::new(scope, range);
-        let index = v8::Integer::new_from_unsigned(scope, index as u32);
-        let _ = callback.call(
-            scope,
-            this_arg,
-            &[range.into(), index.into(), arguments.this().into()],
-        );
-    }
+    crate::webidl::array_like_for_each(scope, arguments)
 }
 
 fn get_length(

@@ -20,20 +20,33 @@ fn create_cdata_section(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createCDATASection' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     if super::document::content_type(scope, arguments.this()) == Some("text/html") {
         super::node::throw_dom_exception(
             scope,
             "NotSupportedError",
-            "CDATA sections are not supported by HTML documents",
+            "Failed to execute 'createCDATASection' on 'Document': This operation is not supported for HTML documents.",
         );
         return;
     }
-    let data = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(data) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'createCDATASection' on 'Document'",
+    ) else {
+        return;
+    };
     if data.contains("]]>") {
         super::node::throw_dom_exception(
             scope,
             "InvalidCharacterError",
-            "CDATA section data cannot contain ']]>'",
+            "Failed to execute 'createCDATASection' on 'Document': String cannot contain ']]>' since that is the end delimiter of a CData section.",
         );
         return;
     }

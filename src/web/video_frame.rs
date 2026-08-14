@@ -104,10 +104,62 @@ fn construct(
         return;
     }
     let source_value = arguments.get(0);
+    if source_value.is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'VideoFrame': The provided value is not of type '(CSSImageValue or HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap or OffscreenCanvas or SVGImageElement or VideoFrame)'.",
+        );
+        return;
+    }
     let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
     let cloned = v8::Local::<v8::Object>::try_from(source_value)
         .ok()
         .and_then(|source| record(scope, source));
+    let buffer_source = v8::Local::<v8::ArrayBuffer>::try_from(source_value).is_ok()
+        || v8::Local::<v8::ArrayBufferView>::try_from(source_value).is_ok();
+    let platform_image_source = v8::Local::<v8::Object>::try_from(source_value)
+        .ok()
+        .is_some_and(|source| {
+            super::structured_clone::inherits_platform_interface(scope, source, "CSSImageValue")
+                || super::structured_clone::inherits_platform_interface(
+                    scope,
+                    source,
+                    "HTMLCanvasElement",
+                )
+                || super::structured_clone::inherits_platform_interface(
+                    scope,
+                    source,
+                    "HTMLImageElement",
+                )
+                || super::structured_clone::inherits_platform_interface(
+                    scope,
+                    source,
+                    "HTMLVideoElement",
+                )
+                || super::structured_clone::inherits_platform_interface(
+                    scope,
+                    source,
+                    "ImageBitmap",
+                )
+                || super::structured_clone::inherits_platform_interface(
+                    scope,
+                    source,
+                    "OffscreenCanvas",
+                )
+                || super::structured_clone::inherits_platform_interface(
+                    scope,
+                    source,
+                    "SVGImageElement",
+                )
+                || super::structured_clone::inherits_platform_interface(scope, source, "VideoFrame")
+        });
+    if cloned.is_none() && !buffer_source && !platform_image_source {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'VideoFrame': The provided value is not of type '(CSSImageValue or HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap or OffscreenCanvas or SVGImageElement or VideoFrame)'.",
+        );
+        return;
+    }
     let record = if let Some(mut record) = cloned {
         record.timestamp = options
             .and_then(|options| optional_number(scope, options, "timestamp"))
@@ -335,6 +387,23 @@ fn live_record(
     record(scope, object).filter(|record| !record.closed)
 }
 
+fn require_live_record(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<VideoFrameRecord> {
+    match record(scope, object) {
+        None => {
+            crate::webidl::throw_type_error(scope, "Illegal invocation");
+            None
+        }
+        Some(record) if record.closed => {
+            crate::webidl::throw_type_error(scope, "VideoFrame is closed");
+            None
+        }
+        Some(record) => Some(record),
+    }
+}
+
 fn get_format(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
@@ -355,25 +424,23 @@ fn get_timestamp(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(v) = live_record(s, a.this()) {
-        r.set(v8::Number::new(s, v.timestamp).into())
-    } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
-    }
+    let Some(v) = require_live_record(s, a.this()) else {
+        return;
+    };
+    r.set(v8::Number::new(s, v.timestamp).into())
 }
 fn get_duration(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(v) = live_record(s, a.this()) {
-        if let Some(value) = v.duration {
-            r.set(v8::Number::new(s, value).into())
-        } else {
-            r.set(v8::null(s).into())
-        }
+    let Some(v) = require_live_record(s, a.this()) else {
+        return;
+    };
+    if let Some(value) = v.duration {
+        r.set(v8::Number::new(s, value).into())
     } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
+        r.set(v8::null(s).into())
     }
 }
 
@@ -383,11 +450,10 @@ fn return_u32(
     mut result: v8::ReturnValue<'_>,
     select: impl FnOnce(&VideoFrameRecord) -> u32,
 ) {
-    if let Some(record) = live_record(scope, arguments.this()) {
-        result.set(v8::Integer::new_from_unsigned(scope, select(&record)).into())
-    } else {
-        crate::webidl::throw_type_error(scope, "VideoFrame is closed")
-    }
+    let Some(record) = require_live_record(scope, arguments.this()) else {
+        return;
+    };
+    result.set(v8::Integer::new_from_unsigned(scope, select(&record)).into())
 }
 fn get_coded_width(
     s: &mut v8::PinScope<'_, '_>,
@@ -430,11 +496,10 @@ fn get_flip(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(v) = live_record(s, a.this()) {
-        r.set(v8::Boolean::new(s, v.flip).into())
-    } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
-    }
+    let Some(v) = require_live_record(s, a.this()) else {
+        return;
+    };
+    r.set(v8::Boolean::new(s, v.flip).into())
 }
 
 fn define_data(
@@ -470,31 +535,29 @@ fn get_coded_rect(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(v) = live_record(s, a.this()) {
-        r.set(rect(s, 0.0, 0.0, v.coded_width as f64, v.coded_height as f64).into())
-    } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
-    }
+    let Some(v) = require_live_record(s, a.this()) else {
+        return;
+    };
+    r.set(rect(s, 0.0, 0.0, v.coded_width as f64, v.coded_height as f64).into())
 }
 fn get_visible_rect(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(v) = live_record(s, a.this()) {
-        r.set(
-            rect(
-                s,
-                v.visible_x,
-                v.visible_y,
-                v.visible_width,
-                v.visible_height,
-            )
-            .into(),
+    let Some(v) = require_live_record(s, a.this()) else {
+        return;
+    };
+    r.set(
+        rect(
+            s,
+            v.visible_x,
+            v.visible_y,
+            v.visible_width,
+            v.visible_height,
         )
-    } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
-    }
+        .into(),
+    )
 }
 
 fn get_color_space(
@@ -502,11 +565,10 @@ fn get_color_space(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(v) = live_record(s, a.this()) {
-        r.set(v8::Local::new(s, &v.color_space).into())
-    } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
-    }
+    let Some(v) = require_live_record(s, a.this()) else {
+        return;
+    };
+    r.set(v8::Local::new(s, &v.color_space).into())
 }
 
 fn byte_size(record: &VideoFrameRecord) -> u32 {
@@ -522,11 +584,10 @@ fn allocation_size(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(v) = live_record(s, a.this()) {
-        r.set(v8::Integer::new_from_unsigned(s, byte_size(&v)).into())
-    } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
-    }
+    let Some(v) = require_live_record(s, a.this()) else {
+        return;
+    };
+    r.set(v8::Integer::new_from_unsigned(s, byte_size(&v)).into())
 }
 
 fn clone_frame(
@@ -534,8 +595,7 @@ fn clone_frame(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    let Some(v) = live_record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed");
+    let Some(v) = require_live_record(s, a.this()) else {
         return;
     };
     let Ok(constructor) = ensure_constructor(s) else {
@@ -566,6 +626,10 @@ fn copy_to(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "VideoFrame", "copyTo", r);
+        return;
+    }
     let Some(v) = live_record(s, a.this()) else {
         crate::webidl::throw_type_error(s, "VideoFrame is closed");
         return;
@@ -601,11 +665,10 @@ fn metadata(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if live_record(s, a.this()).is_some() {
-        r.set(v8::Object::new(s).into())
-    } else {
-        crate::webidl::throw_type_error(s, "VideoFrame is closed")
+    if require_live_record(s, a.this()).is_none() {
+        return;
     }
+    r.set(v8::Object::new(s).into())
 }
 
 fn optional_value<'s>(

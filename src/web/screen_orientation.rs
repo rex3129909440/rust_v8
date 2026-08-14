@@ -162,6 +162,17 @@ fn lock(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<ScreenOrientationStore>()
+        .is_none_or(|store| {
+            !store
+                .records
+                .contains_key(&a.this().get_identity_hash().get())
+        })
+    {
+        crate::webidl::reject_illegal_invocation_promise(scope, "ScreenOrientation", "lock", r);
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, a.get(0));
     let allowed = matches!(
         value.as_str(),
@@ -182,7 +193,6 @@ fn lock(
         .get_slot_mut::<ScreenOrientationStore>()
         .and_then(|s| s.records.get_mut(&a.this().get_identity_hash().get()))
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
     v.locked = true;

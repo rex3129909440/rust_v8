@@ -170,7 +170,17 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "AudioData initializer must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioData': The provided value is not of type 'AudioDataInit'.",
+        );
+        return;
+    };
+    let Some(data_value) = member(scope, init, "data") else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioData': Failed to read the 'data' property from 'AudioDataInit': Required member is undefined.",
+        );
         return;
     };
     let Some(format) = required_string(scope, init, "format") else {
@@ -210,7 +220,7 @@ fn construct(
         crate::webidl::throw_type_error(scope, "AudioData dimensions must be positive");
         return;
     }
-    let Some(bytes) = member(scope, init, "data").and_then(source_bytes) else {
+    let Some(bytes) = source_bytes(data_value) else {
         crate::webidl::throw_type_error(scope, "Required member data is not a BufferSource");
         return;
     };

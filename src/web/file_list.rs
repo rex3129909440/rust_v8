@@ -103,7 +103,7 @@ fn illegal_constructor(
     crate::webidl::throw_type_error(scope, "Illegal constructor");
 }
 
-fn record(
+pub(crate) fn record(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> Option<Vec<v8::Global<v8::Object>>> {
@@ -146,28 +146,14 @@ fn item(
 fn values(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    mut result: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    let Some(files) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, files.len() as i32);
-    for (index, file) in files.iter().enumerate() {
-        let _ = array.set_index(scope, index as u32, v8::Local::new(scope, file).into());
-    }
-    let Some(key) = v8::String::new(scope, "values") else {
-        return;
-    };
-    let Some(method) = array
-        .get(scope, key.into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
-    else {
-        return;
-    };
-    if let Some(iterator) = method.call(scope, array.into(), &[]) {
-        result.set(iterator);
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        result,
+    );
 }
 
 pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {

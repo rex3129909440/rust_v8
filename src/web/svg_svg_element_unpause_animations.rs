@@ -12,7 +12,11 @@ fn unpause_animations(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
     update(scope, arguments.this(), |record| {
-        record.animations_paused = false
+        if record.animations_paused {
+            record.timeline_started_ms = Some(now);
+        }
+        record.animations_paused = false;
     });
 }

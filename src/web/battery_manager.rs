@@ -194,7 +194,11 @@ fn handler_get(
     name: &'static str,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, object).and_then(|record| record.handlers.get(name).cloned());
+    let Some(record) = record(scope, object) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let handler = record.handlers.get(name).cloned();
     super::window_event_handler_support::return_handler(scope, handler, result);
 }
 

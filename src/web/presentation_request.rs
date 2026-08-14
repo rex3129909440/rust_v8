@@ -58,6 +58,19 @@ fn construct(
         crate::webidl::throw_type_error(s, "URL required");
         return;
     }
+    if let Ok(urls) = v8::Local::<v8::Array>::try_from(a.get(0))
+        && urls.length() == 0
+    {
+        if let Ok(exception) = super::dom_exception::create(
+            s,
+            "Failed to construct 'PresentationRequest': An empty sequence of URLs is not supported."
+                .to_owned(),
+            "NotSupportedError".to_owned(),
+        ) {
+            s.throw_exception(exception.into());
+        }
+        return;
+    }
     super::event_target::attach(s, a.this());
     let url = crate::webidl::value_to_string(s, a.get(0));
     s.get_slot_mut::<PresentationRequestStore>()
@@ -85,11 +98,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.handler),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.handler, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -112,7 +125,12 @@ fn get_availability(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "PresentationRequest",
+            "getAvailability",
+            r,
+        );
         return;
     }
     match super::presentation_availability::create(s, true) {
@@ -125,9 +143,10 @@ fn connection(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
     id: Option<String>,
+    method_name: &str,
 ) {
     let Some(v) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PresentationRequest", method_name, r);
         return;
     };
     let id = id.unwrap_or_else(|| {
@@ -145,13 +164,17 @@ fn reconnect(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "PresentationRequest", "reconnect", r);
+        return;
+    }
     let id = crate::webidl::value_to_string(s, a.get(0));
-    connection(s, a, r, Some(id))
+    connection(s, a, r, Some(id), "reconnect")
 }
 fn start(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    connection(s, a, r, None)
+    connection(s, a, r, None, "start")
 }

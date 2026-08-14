@@ -201,15 +201,15 @@ fn add_listener(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let Some(mut current) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
     let Ok(function) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
         return;
     };
     let identity = function.get_identity_hash().get();
     let function = v8::Global::new(scope, function);
-    let Some(mut current) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
     if current
         .listeners
         .iter()
@@ -235,14 +235,14 @@ fn remove_listener(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(function) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        return;
-    };
-    let identity = function.get_identity_hash().get();
     let Some(mut record) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    let Ok(function) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
+        return;
+    };
+    let identity = function.get_identity_hash().get();
     record
         .listeners
         .retain(|listener| v8::Local::new(scope, listener).get_identity_hash().get() != identity);

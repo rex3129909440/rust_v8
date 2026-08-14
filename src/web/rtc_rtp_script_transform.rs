@@ -77,6 +77,13 @@ fn construct(
         );
         return;
     };
+    if !super::structured_clone::inherits_platform_interface(scope, worker, "Worker") {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCRtpScriptTransform': parameter 1 is not of type 'Worker'.",
+        );
+        return;
+    }
     let record = RtcRtpScriptTransformRecord {
         worker: v8::Global::new(scope, worker),
         options: v8::Global::new(scope, arguments.get(1)),

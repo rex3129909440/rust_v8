@@ -57,6 +57,25 @@ fn construct(
         crate::webidl::throw_type_error(s, "3 arguments required");
         return;
     }
+    if a.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'USBEndpoint': parameter 1 is not of type 'USBAlternateInterface'.",
+        );
+        return;
+    }
+    let valid_alternate = v8::Local::<v8::Object>::try_from(a.get(0))
+        .ok()
+        .is_some_and(|object| {
+            super::structured_clone::inherits_platform_interface(s, object, "USBAlternateInterface")
+        });
+    if !valid_alternate {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'USBEndpoint': parameter 1 is not of type 'USBAlternateInterface'.",
+        );
+        return;
+    }
     let number = a.get(1).uint32_value(s).unwrap_or(1);
     let direction = crate::webidl::value_to_string(s, a.get(2));
     s.get_slot_mut::<UsbEndpointStore>()

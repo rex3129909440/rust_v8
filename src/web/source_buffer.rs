@@ -180,6 +180,10 @@ fn set_mode(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let v = crate::webidl::value_to_string(scope, a.get(0));
     if !matches!(v.as_str(), "segments" | "sequence") {
         crate::webidl::throw_type_error(scope, "Invalid SourceBuffer mode");
@@ -404,6 +408,10 @@ fn append_buffer(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let bytes = match super::text_decoder::bytes_from_value(scope, a.get(0)) {
         Ok(v) => v,
         Err(m) => {
@@ -437,6 +445,10 @@ fn remove(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let start = a.get(0).number_value(scope).unwrap_or(0.0);
     let end = a.get(1).number_value(scope).unwrap_or(0.0);
     if start < 0.0 || end <= start {

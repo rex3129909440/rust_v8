@@ -17,6 +17,7 @@ pub(crate) struct MediaRecord {
     pub(crate) ready_state: u32,
     pub(crate) seeking: bool,
     pub(crate) current_time: f64,
+    pub(crate) playback_started_ms: Option<f64>,
     pub(crate) duration: f64,
     pub(crate) error: Option<v8::Global<v8::Object>>,
     pub(crate) paused: bool,
@@ -55,6 +56,7 @@ impl Default for MediaRecord {
             ready_state: 0,
             seeking: false,
             current_time: 0.0,
+            playback_started_ms: None,
             duration: f64::NAN,
             error: None,
             paused: true,
@@ -209,7 +211,12 @@ pub(crate) fn attach_with_tag(
     tag_name: &str,
 ) {
     super::html_element::attach(scope, object, tag_name);
-    let controls_list = super::dom_token_list::create(scope, "").ok();
+    let controls_list = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::MediaControls,
+    )
+    .ok();
     let text_tracks = super::text_track_list::create(scope).ok();
     let remote = super::remote_playback::create(scope).ok();
     let has_source = !source.is_empty();
@@ -276,6 +283,38 @@ pub(crate) fn record(
         .cloned()
 }
 
+fn raw_current_time(record: &MediaRecord, now_ms: f64) -> f64 {
+    if record.paused {
+        return record.current_time;
+    }
+    let elapsed = record
+        .playback_started_ms
+        .map(|started| ((now_ms - started).max(0.0) / 1_000.0) * record.playback_rate)
+        .unwrap_or(0.0);
+    (record.current_time + elapsed).max(0.0)
+}
+
+fn effective_current_time(record: &MediaRecord, now_ms: f64) -> f64 {
+    let current = raw_current_time(record, now_ms);
+    if record.duration.is_finite() && record.duration > 0.0 {
+        if record.loop_enabled {
+            current % record.duration
+        } else {
+            current.min(record.duration)
+        }
+    } else {
+        current
+    }
+}
+
+fn playback_has_ended(record: &MediaRecord, now_ms: f64) -> bool {
+    !record.paused
+        && !record.loop_enabled
+        && record.duration.is_finite()
+        && record.duration >= 0.0
+        && raw_current_time(record, now_ms) >= record.duration
+}
+
 pub(crate) fn update(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -338,10 +377,12 @@ fn schedule_media_update(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_,
         record.ready_state = 0;
         record.seeking = false;
         record.current_time = 0.0;
+        record.playback_started_ms = None;
         record.duration = f64::NAN;
         record.error = None;
         record.ended = false;
         record.has_played = false;
+        record.paused = true;
         record.generation
     };
     let Some(url) = url else {
@@ -526,8 +567,14 @@ pub(crate) fn get_buffered(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    if record(scope, arguments.this()).is_some() {
-        empty_ranges(scope, result, Vec::new());
+    if let Some(record) = record(scope, arguments.this()) {
+        let ranges =
+            if record.ready_state >= 2 && record.duration.is_finite() && record.duration > 0.0 {
+                vec![(0.0, record.duration)]
+            } else {
+                Vec::new()
+            };
+        empty_ranges(scope, result, ranges);
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -563,7 +610,8 @@ pub(crate) fn get_current_time(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Number::new(scope, record.current_time).into());
+        let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+        result.set(v8::Number::new(scope, effective_current_time(&record, now)).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -575,9 +623,14 @@ pub(crate) fn set_current_time(
     _: v8::ReturnValue<'_>,
 ) {
     let value = arguments.get(0).number_value(scope).unwrap_or(0.0);
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
     update(scope, arguments.this(), |record| {
         record.seeking = true;
         record.current_time = value.max(0.0);
+        if !record.paused {
+            record.playback_started_ms = Some(now);
+        }
+        record.ended = false;
         record.seeking = false;
     });
 }
@@ -600,7 +653,9 @@ pub(crate) fn get_paused(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Boolean::new(scope, record.paused).into());
+        let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+        result
+            .set(v8::Boolean::new(scope, record.paused || playback_has_ended(&record, now)).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -647,8 +702,17 @@ pub(crate) fn set_playback_rate(
     _: v8::ReturnValue<'_>,
 ) {
     let value = arguments.get(0).number_value(scope).unwrap_or(1.0);
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+    let current_time =
+        record(scope, arguments.this()).map(|record| effective_current_time(&record, now));
     update(scope, arguments.this(), |record| {
-        record.playback_rate = value
+        if let Some(current_time) = current_time {
+            record.current_time = current_time;
+        }
+        record.playback_rate = value;
+        if !record.paused {
+            record.playback_started_ms = Some(now);
+        }
     });
 }
 
@@ -658,8 +722,10 @@ pub(crate) fn get_played(
     result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        let ranges = if record.has_played && record.current_time > 0.0 {
-            vec![(0.0, record.current_time)]
+        let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+        let current_time = effective_current_time(&record, now);
+        let ranges = if record.has_played && current_time > 0.0 {
+            vec![(0.0, current_time)]
         } else {
             Vec::new()
         };
@@ -692,7 +758,9 @@ pub(crate) fn get_ended(
     mut result: v8::ReturnValue<'_>,
 ) {
     if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Boolean::new(scope, record.ended).into());
+        let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+        result
+            .set(v8::Boolean::new(scope, record.ended || playback_has_ended(&record, now)).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -1073,15 +1141,16 @@ pub(crate) fn can_play_type(
         return;
     }
     let media_type = crate::webidl::value_to_string(scope, arguments.get(0));
-    let support = if media_type.starts_with("audio/mpeg")
-        || media_type.starts_with("audio/ogg")
-        || media_type.starts_with("audio/wav")
-        || media_type.starts_with("audio/webm")
-        || media_type.starts_with("video/mp4")
-        || media_type.starts_with("video/webm")
-    {
+    let media = &crate::fingerprint::edge(scope).media;
+    let support = if crate::fingerprint_environment::media_capability_matches(
+        &media.can_play_probably_types,
+        &media_type,
+    ) {
         "probably"
-    } else if media_type.starts_with("audio/") || media_type.starts_with("video/") {
+    } else if crate::fingerprint_environment::media_capability_matches(
+        &media.can_play_maybe_types,
+        &media_type,
+    ) {
         "maybe"
     } else {
         ""
@@ -1112,7 +1181,10 @@ pub(crate) fn load(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    update(scope, arguments.this(), |record| record.paused = true);
+    update(scope, arguments.this(), |record| {
+        record.paused = true;
+        record.playback_started_ms = None;
+    });
     schedule_media_update(scope, arguments.this());
 }
 
@@ -1121,7 +1193,16 @@ pub(crate) fn pause(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    update(scope, arguments.this(), |record| record.paused = true);
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
+    let current_time =
+        record(scope, arguments.this()).map(|record| effective_current_time(&record, now));
+    update(scope, arguments.this(), |record| {
+        if let Some(current_time) = current_time {
+            record.current_time = current_time;
+        }
+        record.paused = true;
+        record.playback_started_ms = None;
+    });
 }
 
 pub(crate) fn play(
@@ -1130,11 +1211,19 @@ pub(crate) fn play(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "HTMLMediaElement", "play", result);
         return;
     }
+    let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
     update(scope, arguments.this(), |record| {
+        if record.duration.is_finite()
+            && record.current_time >= record.duration
+            && !record.loop_enabled
+        {
+            record.current_time = 0.0;
+        }
         record.paused = false;
+        record.playback_started_ms = Some(now);
         record.has_played = true;
         record.ended = false;
     });
@@ -1223,7 +1312,12 @@ pub(crate) fn set_sink_id(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "HTMLMediaElement",
+            "setSinkId",
+            result,
+        );
         return;
     }
     let sink_id = crate::webidl::value_to_string(scope, arguments.get(0));
@@ -1256,6 +1350,19 @@ pub(crate) fn set_media_keys(
     mut result: v8::ReturnValue<'_>,
 ) {
     let identity = arguments.this().get_identity_hash().get();
+    if scope
+        .get_slot::<HtmlMediaElementStore>()
+        .and_then(|store| store.records.get(&identity))
+        .is_none()
+    {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "HTMLMediaElement",
+            "setMediaKeys",
+            result,
+        );
+        return;
+    }
     let value = arguments.get(0);
     let media_keys =
         (!value.is_null() && !value.is_undefined()).then(|| v8::Global::new(scope, value));
@@ -1268,8 +1375,6 @@ pub(crate) fn set_media_keys(
         if let Ok(promise) = super::writable_stream::resolved_promise(scope, undefined.into()) {
             result.set(promise.into());
         }
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
 }
 
@@ -1329,6 +1434,7 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
 fn run_media_request(scope: &mut v8::PinScope<'_, '_>, request: PendingMediaRequest) {
     let context = v8::Local::new(scope, &request.context);
     let request_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_current_task_realm(request_scope);
     let element = v8::Local::new(request_scope, &request.element);
     if !request_is_current(request_scope, element, request.generation) {
         return;
@@ -1362,6 +1468,26 @@ fn run_media_request(scope: &mut v8::PinScope<'_, '_>, request: PendingMediaRequ
             dispatch_media_event(request_scope, element, "durationchange");
             if request_is_current(request_scope, element, request.generation) {
                 dispatch_media_event(request_scope, element, "loadedmetadata");
+            }
+            if request_is_current(request_scope, element, request.generation) {
+                if let Some(record) = request_scope
+                    .get_slot_mut::<HtmlMediaElementStore>()
+                    .and_then(|store| store.records.get_mut(&element.get_identity_hash().get()))
+                {
+                    // data:/blob:/network-replay bodies are already complete
+                    // local byte snapshots.  After loadedmetadata's event
+                    // stack returns Blink advances through HAVE_CURRENT_DATA
+                    // to HAVE_ENOUGH_DATA before promise reactions run.
+                    record.ready_state = 4;
+                    record.network_state = 1;
+                }
+                dispatch_media_event(request_scope, element, "loadeddata");
+                if request_is_current(request_scope, element, request.generation) {
+                    dispatch_media_event(request_scope, element, "canplay");
+                }
+                if request_is_current(request_scope, element, request.generation) {
+                    dispatch_media_event(request_scope, element, "canplaythrough");
+                }
             }
         }
         Err(failure) => {

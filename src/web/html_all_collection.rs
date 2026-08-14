@@ -172,6 +172,9 @@ fn refresh_one(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Objec
     let mut names = Vec::new();
     for item in &items {
         for attribute in ["id", "name"] {
+            if attribute == "name" && !supports_name_attribute(scope, *item) {
+                continue;
+            }
             if let Some(value) = super::element::attribute_value(scope, *item, attribute)
                 && !value.is_empty()
                 && !names.contains(&value)
@@ -255,15 +258,31 @@ fn matching<'s>(
     items: &[v8::Local<'s, v8::Object>],
     name: &str,
 ) -> Vec<v8::Local<'s, v8::Object>> {
+    let ids = items
+        .iter()
+        .copied()
+        .filter(|item| super::element::attribute_value(scope, *item, "id").as_deref() == Some(name))
+        .collect::<Vec<_>>();
+    if !ids.is_empty() {
+        return ids;
+    }
     items
         .iter()
         .copied()
         .filter(|item| {
-            ["id", "name"].into_iter().any(|attribute| {
-                super::element::attribute_value(scope, *item, attribute).as_deref() == Some(name)
-            })
+            supports_name_attribute(scope, *item)
+                && super::element::attribute_value(scope, *item, "name").as_deref() == Some(name)
         })
         .collect()
+}
+
+fn supports_name_attribute(scope: &v8::PinScope<'_, '_>, item: v8::Local<'_, v8::Object>) -> bool {
+    super::element::record(scope, item).is_some_and(|record| {
+        matches!(
+            record.tag_name.to_ascii_uppercase().as_str(),
+            "EMBED" | "FORM" | "IFRAME" | "IMG" | "OBJECT"
+        )
+    })
 }
 
 fn return_named(
@@ -289,6 +308,10 @@ fn return_item(
     argument: v8::Local<'_, v8::Value>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if argument.is_undefined() {
+        result.set(v8::null(scope).into());
+        return;
+    }
     if argument.is_string() {
         let name = crate::webidl::value_to_string(scope, argument);
         if let Ok(index) = name.parse::<usize>() {
@@ -346,6 +369,13 @@ fn named_item(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'namedItem' on 'HTMLAllCollection': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let name = crate::webidl::value_to_string(scope, arguments.get(0));
     return_named(scope, &items, &name, result)
 }

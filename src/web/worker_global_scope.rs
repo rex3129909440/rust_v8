@@ -147,6 +147,7 @@ pub(crate) fn enable_native_trace_for_existing_realms(
             RealmKind::Shared => format!("sharedWorker[{id}]"),
             RealmKind::Service => format!("serviceWorker[{id}]"),
         };
+        crate::trace::relabel_json_intrinsic_trace(child_scope, &label)?;
         crate::trace::label_native_value(child_scope, global.into(), &label);
         if let Some(target) = target {
             let target = v8::Local::new(child_scope, &target);
@@ -235,17 +236,31 @@ pub(crate) fn create(
 
     let install_result = {
         let realm_scope = &mut v8::ContextScope::new(scope, context);
+        crate::browser_surface::register_current_realm_from_fingerprint(realm_scope)?;
         let global = realm_scope.get_current_context().global(realm_scope);
         let trace_target = global
             .get_prototype(realm_scope)
             .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
             .ok_or_else(|| "Worker global target is unavailable".to_owned())?;
+        let trace_label = match kind {
+            RealmKind::Dedicated => format!("worker[{realm_id}]"),
+            RealmKind::Shared => format!("sharedWorker[{realm_id}]"),
+            RealmKind::Service => format!("serviceWorker[{realm_id}]"),
+        };
+        crate::trace::install_json_intrinsic_trace(realm_scope, &trace_label)?;
         mirror_worker_intrinsics_to_target(realm_scope, trace_target, kind)?;
         super::console_edge::install(realm_scope)?;
         if kind != RealmKind::Dedicated {
             mirror_global_to_target(realm_scope, trace_target, "console")?;
         }
         install_common_globals(realm_scope)?;
+        let web_assembly_key = crate::webidl::string(realm_scope, "WebAssembly")?;
+        let web_assembly = realm_scope
+            .get_current_context()
+            .global(realm_scope)
+            .get(realm_scope, web_assembly_key.into())
+            .ok_or_else(|| "Worker WebAssembly namespace is unavailable".to_owned())?;
+        super::web_assembly_global::install(realm_scope, web_assembly)?;
         super::worker_realm_interfaces::install(realm_scope)?;
         if kind != RealmKind::Dedicated {
             mirror_realm_local_globals(realm_scope, trace_target)?;
@@ -298,23 +313,25 @@ pub(crate) fn create(
         {
             return Err("cannot attach WorkerGlobalScope target prototype".to_owned());
         }
+        if kind == RealmKind::Dedicated {
+            crate::browser_surface::finalize_worker_versioned_interfaces(
+                realm_scope,
+                trace_target,
+            )?;
+            crate::browser_surface::finalize_worker_global(realm_scope, trace_target)?;
+        }
         super::event_target::attach(realm_scope, global);
         super::event_target::attach_alias(realm_scope, trace_target, global);
         crate::determinism::install(realm_scope)?;
         if crate::trace::is_enabled(realm_scope) {
-            let label = match kind {
-                RealmKind::Dedicated => format!("worker[{realm_id}]"),
-                RealmKind::Shared => format!("sharedWorker[{realm_id}]"),
-                RealmKind::Service => format!("serviceWorker[{realm_id}]"),
-            };
             crate::trace::reserve_prototype_property_label_from_global(
                 realm_scope,
                 "MessagePort",
                 "postMessage",
-                &format!("{label}.MessagePort.prototype.postMessage"),
+                &format!("{trace_label}.MessagePort.prototype.postMessage"),
             )?;
-            crate::trace::label_native_value(realm_scope, global.into(), &label);
-            crate::trace::label_native_value(realm_scope, trace_target.into(), &label);
+            crate::trace::label_native_value(realm_scope, global.into(), &trace_label);
+            crate::trace::label_native_value(realm_scope, trace_target.into(), &trace_label);
         }
         Ok::<_, String>((
             location.1,
@@ -709,6 +726,7 @@ fn install_common_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String
     super::navigator_ua_data::install(scope)?;
     super::media_source_handle::install(scope)?;
     super::media_source::install(scope)?;
+    super::media_source_handle_property::define_for_current_realm(scope)?;
     super::media_capabilities::install(scope)?;
     super::idb_version_change_event::install(scope)?;
     super::idb_transaction::install(scope)?;
@@ -1563,6 +1581,7 @@ fn reclaim_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {
     };
     super::worker::terminate_children_for_parent_context(scope, &context);
     super::worker_realm_interfaces::cleanup(scope, realm_id);
+    crate::browser_surface::cleanup_realm(scope, realm_id);
     if let Some(store) = scope.get_slot_mut::<WorkerRealmStore>() {
         store.records.remove(&realm_id);
     }
@@ -1819,6 +1838,7 @@ pub(crate) fn deliver_message(
     };
     let context = v8::Local::new(scope, &record.context);
     let worker_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_task_realm(worker_scope, realm_id);
     let Some(data) = super::worker_structured_clone::deserialize(worker_scope, message) else {
         let handler = record.onmessageerror.clone();
         dispatch_simple_event(worker_scope, &record, "messageerror", handler);
@@ -1852,6 +1872,7 @@ pub(crate) fn deliver_service_message(
     };
     let context = v8::Local::new(scope, &record.context);
     let worker_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_task_realm(worker_scope, realm_id);
     let Some(data) = super::worker_structured_clone::deserialize(worker_scope, message) else {
         dispatch_service_simple_event(
             worker_scope,
@@ -2234,12 +2255,6 @@ pub(crate) fn run_timers(scope: &mut v8::PinScope<'_, '_>) -> bool {
             record.running_timer_nesting_level = timer.nesting_level;
         }
         run_timer(scope, realm_id, timer);
-        if let Some(record) = scope
-            .get_slot_mut::<WorkerRealmStore>()
-            .and_then(|store| store.records.get_mut(&realm_id))
-        {
-            record.running_timer_nesting_level = 0;
-        }
         ran = true;
     }
 
@@ -2289,6 +2304,8 @@ fn run_timer(scope: &mut v8::PinScope<'_, '_>, realm_id: i32, timer: TimerRecord
     };
     let context = v8::Local::new(scope, &record.context);
     let worker_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_task_realm(worker_scope, realm_id);
+    let task_start = super::performance_observer::task_start(worker_scope);
     match timer.callback {
         TimerCallback::Function(callback) => {
             let callback = v8::Local::new(worker_scope, &callback);
@@ -2312,7 +2329,16 @@ fn run_timer(scope: &mut v8::PinScope<'_, '_>, realm_id: i32, timer: TimerRecord
             }
         }
     }
+    if let Some(record) = worker_scope
+        .get_slot_mut::<WorkerRealmStore>()
+        .and_then(|store| store.records.get_mut(&realm_id))
+    {
+        record.running_timer_nesting_level = 0;
+    }
     worker_scope.perform_microtask_checkpoint();
+    if super::performance_observer::record_completed_task(worker_scope, task_start, false) {
+        worker_scope.perform_microtask_checkpoint();
+    }
 }
 
 fn run_animation_frame(
@@ -2326,6 +2352,8 @@ fn run_animation_frame(
     };
     let context = v8::Local::new(scope, &record.context);
     let worker_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_task_realm(worker_scope, realm_id);
+    let task_start = super::performance_observer::task_start(worker_scope);
     let callback = v8::Local::new(worker_scope, &callback);
     let receiver: v8::Local<v8::Value> = worker_scope
         .get_current_context()
@@ -2342,6 +2370,9 @@ fn run_animation_frame(
     let timestamp = v8::Number::new(worker_scope, timestamp);
     let _ = callback.call(worker_scope, receiver, &[timestamp.into()]);
     worker_scope.perform_microtask_checkpoint();
+    if super::performance_observer::record_completed_task(worker_scope, task_start, true) {
+        worker_scope.perform_microtask_checkpoint();
+    }
 }
 
 pub(crate) fn set_timeout(

@@ -280,10 +280,7 @@ fn with_record_mut(
         operation(record);
         record.owner_url
     } else {
-        crate::webidl::throw_type_error(
-            scope,
-            "Illegal invocation: receiver is not a URLSearchParams",
-        );
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
     if let Some(owner) = owner {
@@ -686,6 +683,10 @@ fn for_each(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if !require_argument_count(scope, arguments.length(), 1, "forEach") {
         return;
     }

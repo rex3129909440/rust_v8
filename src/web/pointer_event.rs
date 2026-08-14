@@ -129,6 +129,27 @@ pub(crate) fn construct(
     result.set(arguments.this().into());
 }
 
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: String,
+    mouse_data: super::mouse_event::MouseEventData,
+    pointer_record: PointerRecord,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create PointerEvent".to_owned());
+    }
+    super::mouse_event::attach(scope, event, event_type, mouse_data);
+    scope
+        .get_slot_mut::<PointerEventStore>()
+        .ok_or_else(|| "PointerEvent state was not prepared".to_owned())?
+        .records
+        .insert(event.get_identity_hash().get(), pointer_record);
+    Ok(event)
+}
+
 pub(crate) fn get_coalesced_events(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

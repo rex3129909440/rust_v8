@@ -32,6 +32,10 @@ fn set_ms_video_processing(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     let valid = matches!(
         value.as_str(),

@@ -14,7 +14,7 @@ fn call(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let prefix = if arguments.get(0).is_null() {
+    let prefix = if arguments.get(0).is_null_or_undefined() {
         None
     } else {
         Some(crate::webidl::value_to_string(scope, arguments.get(0)))

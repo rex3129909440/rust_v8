@@ -25,7 +25,7 @@ fn get_shadow_root_custom_element_registry(
     if let Some(value) = record.shadow_root_custom_element_registry {
         result.set(v8::Local::new(scope, value).into());
     } else {
-        result.set(v8::null(scope).into());
+        result.set(v8::String::empty(scope).into());
     }
 }
 

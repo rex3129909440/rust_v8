@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 struct AccessRecord {
     bytes: Arc<Mutex<Vec<u8>>>,
     closed: bool,
+    mode: String,
 }
 
 #[derive(Default)]
@@ -46,6 +47,7 @@ fn ensure<'s>(scope: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Func
     super::file_system_sync_access_handle_read::define(scope, prototype)?;
     super::file_system_sync_access_handle_truncate::define(scope, prototype)?;
     super::file_system_sync_access_handle_write::define(scope, prototype)?;
+    super::file_system_sync_access_handle_mode_property::define(scope, prototype)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
@@ -67,6 +69,7 @@ fn illegal(
 pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     bytes: Arc<Mutex<Vec<u8>>>,
+    mode: String,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
@@ -83,9 +86,21 @@ pub(crate) fn create<'s>(
             AccessRecord {
                 bytes,
                 closed: false,
+                mode,
             },
         );
     Ok(object)
+}
+
+pub(crate) fn mode(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<String> {
+    scope
+        .get_slot::<FileSystemSyncAccessHandleStore>()?
+        .records
+        .get(&object.get_identity_hash().get())
+        .map(|record| record.mode.clone())
 }
 
 fn record_id(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Option<i32> {

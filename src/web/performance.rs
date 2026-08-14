@@ -266,6 +266,7 @@ pub(crate) fn finalize_page_load(scope: &mut v8::PinScope<'_, '_>) {
             add_entry_for_current_realm(scope, entry, "paint");
         }
     }
+    super::rendering_performance_state::update(scope);
 }
 
 fn document_has_contentful_paint(scope: &v8::PinScope<'_, '_>) -> bool {
@@ -1225,6 +1226,34 @@ pub(crate) fn add_entry_for_current_realm(
     };
     if added {
         super::performance_observer::queue_entry(scope, entry, entry_type);
+    }
+}
+
+pub(crate) fn record_host_input_event(
+    scope: &mut v8::PinScope<'_, '_>,
+    event_type: &str,
+    interaction_completed: bool,
+) {
+    let realm_id = crate::webidl::realm_id(scope);
+    let event_counts = scope.get_slot::<PerformanceStore>().and_then(|store| {
+        store
+            .records
+            .values()
+            .find(|record| record.realm_id == realm_id)
+            .map(|record| record.event_counts.clone())
+    });
+    if let Some(event_counts) = event_counts {
+        super::event_counts::increment(scope, v8::Local::new(scope, &event_counts), event_type);
+    }
+    if interaction_completed
+        && let Some(record) = scope.get_slot_mut::<PerformanceStore>().and_then(|store| {
+            store
+                .records
+                .values_mut()
+                .find(|record| record.realm_id == realm_id)
+        })
+    {
+        record.interaction_count = record.interaction_count.saturating_add(1);
     }
 }
 

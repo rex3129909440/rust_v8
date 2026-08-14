@@ -10,6 +10,10 @@ fn call(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if super::node::record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let equal = v8::Local::<v8::Object>::try_from(arguments.get(0))
         .ok()
         .is_some_and(|other| super::node::equal_nodes(scope, arguments.this(), other));

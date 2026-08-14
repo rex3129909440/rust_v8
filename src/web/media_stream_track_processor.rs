@@ -72,6 +72,13 @@ fn construct(
         );
         return;
     }
+    if arguments.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'MediaStreamTrackProcessor': The provided value is not of type 'MediaStreamTrackProcessorInit'.",
+        );
+        return;
+    }
     let track = match track_from_argument(scope, arguments.get(0)) {
         Ok(track) => track,
         Err(message) => {

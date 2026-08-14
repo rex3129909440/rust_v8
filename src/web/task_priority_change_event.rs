@@ -50,11 +50,35 @@ pub(crate) fn construct(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !a.is_construct_call() || a.length() < 2 {
-        crate::webidl::throw_type_error(scope, "TaskPriorityChangeEvent requires 2 arguments");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'TaskPriorityChangeEvent': 2 arguments required, but only 1 present.",
+        );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, a.get(0));
+    let Some(event_type) = crate::webidl::dom_string(scope, a.get(0)) else {
+        return;
+    };
+    if !a.get(1).is_object() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'TaskPriorityChangeEvent': The provided value is not of type 'TaskPriorityChangeEventInit'.",
+        );
+        return;
+    }
     let init = v8::Local::<v8::Object>::try_from(a.get(1)).ok();
+    let previous_priority_missing = init
+        .and_then(|init| {
+            v8::String::new(scope, "previousPriority").and_then(|key| init.get(scope, key.into()))
+        })
+        .is_none_or(|value| value.is_undefined());
+    if previous_priority_missing {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'TaskPriorityChangeEvent': Failed to read the 'previousPriority' property from 'TaskPriorityChangeEventInit': Required member is undefined.",
+        );
+        return;
+    }
     let previous = init
         .and_then(|o| {
             v8::String::new(scope, "previousPriority").and_then(|k| o.get(scope, k.into()))

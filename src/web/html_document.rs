@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 #[derive(Default)]
 pub(crate) struct HtmlDocumentStore {
     constructors: HashMap<i32, v8::Global<v8::Function>>,
+    instances: HashSet<i32>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -64,10 +66,23 @@ pub(crate) fn create_from_source<'s>(
     }
     super::node::attach(scope, object, 9, "#document".to_owned(), None);
     super::document::attach(scope, object, "text/html".to_owned());
+    super::document::set_string_value(scope, object, "URL", "about:blank");
+    super::document::set_string_value(scope, object, "documentURI", "about:blank");
+    super::document::set_string_value(scope, object, "fallbackBaseURL", "about:blank");
+    super::document::set_string_value(scope, object, "compatMode", "CSS1Compat");
+    if let Some(store) = scope.get_slot_mut::<HtmlDocumentStore>() {
+        store.instances.insert(object.get_identity_hash().get());
+    }
     if !source.is_empty() {
         super::document::parse_source(scope, object, &source)?;
     }
     Ok(object)
+}
+
+pub(crate) fn is_instance(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    scope
+        .get_slot::<HtmlDocumentStore>()
+        .is_some_and(|store| store.instances.contains(&object.get_identity_hash().get()))
 }
 
 fn illegal_constructor(

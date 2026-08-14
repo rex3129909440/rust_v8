@@ -15,20 +15,50 @@ fn create_document(
     if !require_instance(scope, arguments.this()) {
         return;
     }
+    if arguments.length() < 2 {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'createDocument' on 'DOMImplementation': 2 arguments required, but only {} present.",
+                arguments.length()
+            ),
+        );
+        return;
+    }
     let namespace = if arguments.get(0).is_null_or_undefined() {
         None
     } else {
-        let value = crate::webidl::value_to_string(scope, arguments.get(0));
+        let Some(value) = crate::webidl::dom_string_with_context(
+            scope,
+            arguments.get(0),
+            "Failed to execute 'createDocument' on 'DOMImplementation'",
+        ) else {
+            return;
+        };
         (!value.is_empty()).then_some(value)
     };
-    let qualified_name = crate::webidl::value_to_string(scope, arguments.get(1));
+    let Some(qualified_name) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(1),
+        "Failed to execute 'createDocument' on 'DOMImplementation'",
+    ) else {
+        return;
+    };
     if !qualified_name.is_empty()
-        && let Err((name, message)) =
+        && let Err((name, _)) =
             super::document::validate_qualified_name(namespace.as_deref(), &qualified_name, false)
     {
-        super::node::throw_dom_exception(scope, name, message);
+        let message = super::document::qualified_name_error_message(
+            "createDocument",
+            "DOMImplementation",
+            name,
+            namespace.as_deref(),
+            &qualified_name,
+        );
+        super::node::throw_dom_exception(scope, name, &message);
         return;
     }
+    let qualified_name = super::document::canonical_qualified_name(&qualified_name);
     let document =
         match super::xml_document::create_with_type(scope, String::new(), "application/xml") {
             Ok(document) => document,
@@ -39,11 +69,17 @@ fn create_document(
         };
     if !arguments.get(2).is_null_or_undefined() {
         let Ok(doctype) = v8::Local::<v8::Object>::try_from(arguments.get(2)) else {
-            crate::webidl::throw_type_error(scope, "The doctype is not a DocumentType");
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'createDocument' on 'DOMImplementation': parameter 3 is not of type 'DocumentType'.",
+            );
             return;
         };
         if !super::node::record(scope, doctype).is_some_and(|record| record.node_type == 10) {
-            crate::webidl::throw_type_error(scope, "The doctype is not a DocumentType");
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to execute 'createDocument' on 'DOMImplementation': parameter 3 is not of type 'DocumentType'.",
+            );
             return;
         }
         super::node::set_owner_document(scope, doctype, document);

@@ -16,6 +16,10 @@ fn set_xml_version(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !super::document::is_document(s, a.this()) {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(s, a.get(0));
     if value != "1.0" && value != "1.1" {
         super::node::throw_dom_exception(

@@ -9,6 +9,10 @@ fn extend(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let Some(current) = super::selection::record(scope, a.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
     let Ok(node) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "extend requires a Node");
         return;
@@ -18,12 +22,12 @@ fn extend(
         super::node::throw_dom_exception(scope, "IndexSizeError", "The offset is out of bounds");
         return;
     }
-    let Some(current) = super::selection::record(scope, a.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
     let Some(anchor) = current.anchor else {
-        super::node::throw_dom_exception(scope, "InvalidStateError", "The Selection has no anchor");
+        super::node::throw_dom_exception(
+            scope,
+            "InvalidStateError",
+            "Failed to execute 'extend' on 'Selection': This Selection object doesn't have any Ranges.",
+        );
         return;
     };
     let anchor_local = v8::Local::new(scope, &anchor);

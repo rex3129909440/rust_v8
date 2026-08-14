@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 const SHOW_ALL: u32 = u32::MAX;
-const FILTER_ACCEPT: i32 = 1;
-const FILTER_REJECT: i32 = 2;
+pub(crate) const FILTER_ACCEPT: i32 = 1;
+pub(crate) const FILTER_REJECT: i32 = 2;
 const FILTER_SKIP: i32 = 3;
 
 #[derive(Default)]
@@ -16,7 +16,7 @@ pub(crate) struct TreeWalkerRecord {
     pub id: i32,
     pub root: v8::Global<v8::Object>,
     pub what_to_show: u32,
-    pub filter: Option<v8::Global<v8::Value>>,
+    pub filter: Option<v8::Global<v8::Object>>,
     pub current: v8::Global<v8::Object>,
     pub active: bool,
 }
@@ -75,7 +75,7 @@ pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     root: v8::Local<'_, v8::Object>,
     what_to_show: Option<u32>,
-    filter: Option<v8::Local<'_, v8::Value>>,
+    filter: Option<v8::Local<'_, v8::Object>>,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
@@ -143,17 +143,18 @@ pub(crate) fn set_current(
     }
 }
 
-fn direct_parent<'s>(
+pub(crate) fn direct_parent<'s>(
     scope: &v8::PinScope<'s, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> Option<v8::Local<'s, v8::Object>> {
     super::node::parent(scope, object)
 }
 
-fn filter_status(
+pub(crate) fn filter_status(
     scope: &mut v8::PinScope<'_, '_>,
     walker_record: &TreeWalkerRecord,
     node: v8::Local<'_, v8::Object>,
+    operation: &str,
 ) -> Result<i32, ()> {
     let node_type = super::node::record(scope, node)
         .map(|record| record.node_type)
@@ -172,19 +173,22 @@ fn filter_status(
     let (function, receiver) = if let Ok(function) = v8::Local::<v8::Function>::try_from(filter) {
         (function, v8::undefined(scope).into())
     } else {
-        let Ok(filter_object) = v8::Local::<v8::Object>::try_from(filter) else {
-            return Ok(FILTER_REJECT);
-        };
         let Some(key) = v8::String::new(scope, "acceptNode") else {
-            return Ok(FILTER_REJECT);
+            return Err(());
         };
-        let Some(value) = filter_object.get(scope, key.into()) else {
-            return Ok(FILTER_REJECT);
+        let Some(value) = filter.get(scope, key.into()) else {
+            return Err(());
         };
         let Ok(function) = v8::Local::<v8::Function>::try_from(value) else {
-            return Ok(FILTER_REJECT);
+            crate::webidl::throw_type_error(
+                scope,
+                &format!(
+                    "Failed to execute '{operation}' on 'TreeWalker': Failed to execute 'acceptNode' on 'NodeFilter': The provided callback is not callable."
+                ),
+            );
+            return Err(());
         };
-        (function, filter_object.into())
+        (function, filter.into())
     };
     let already_active = scope
         .get_slot::<TreeWalkerStore>()
@@ -194,7 +198,9 @@ fn filter_status(
         super::node::throw_dom_exception(
             scope,
             "InvalidStateError",
-            "The TreeWalker filter is already active.",
+            &format!(
+                "Failed to execute '{operation}' on 'TreeWalker': Filter function can't be recursive"
+            ),
         );
         return Err(());
     }
@@ -206,8 +212,9 @@ fn filter_status(
     }
     let outcome = function
         .call(scope, receiver, &[node.into()])
-        .and_then(|value| value.int32_value(scope))
-        .filter(|status| matches!(*status, FILTER_ACCEPT | FILTER_REJECT | FILTER_SKIP));
+        .and_then(|value| {
+            super::node_filter::convert_filter_result(scope, value, operation, "TreeWalker").ok()
+        });
     if let Some(record) = scope
         .get_slot_mut::<TreeWalkerStore>()
         .and_then(|store| store.records.get_mut(&walker_record.id))
@@ -217,20 +224,280 @@ fn filter_status(
     outcome.ok_or(())
 }
 
-pub(crate) fn visible_children(
+pub(crate) fn first_child<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    super::node::children(scope, node).into_iter().next()
+}
+
+pub(crate) fn last_child<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    super::node::children(scope, node).into_iter().next_back()
+}
+
+pub(crate) fn next_sibling<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let parent = direct_parent(scope, node)?;
+    let children = super::node::children(scope, parent);
+    let index = children
+        .iter()
+        .position(|child| child.strict_equals(node.into()))?;
+    children.get(index + 1).copied()
+}
+
+pub(crate) fn previous_sibling<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    node: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let parent = direct_parent(scope, node)?;
+    let children = super::node::children(scope, parent);
+    let index = children
+        .iter()
+        .position(|child| child.strict_equals(node.into()))?;
+    index
+        .checked_sub(1)
+        .and_then(|index| children.get(index))
+        .copied()
+}
+
+pub(crate) fn traverse_children(
     scope: &mut v8::PinScope<'_, '_>,
     record: &TreeWalkerRecord,
-    parent: v8::Local<'_, v8::Object>,
-) -> Result<Vec<v8::Global<v8::Object>>, ()> {
-    let mut output = Vec::new();
-    for child in super::node::children(scope, parent) {
-        match filter_status(scope, record, child)? {
-            FILTER_ACCEPT => output.push(v8::Global::new(scope, child)),
-            FILTER_SKIP => output.extend(visible_children(scope, record, child)?),
-            _ => {}
+    forward: bool,
+    operation: &str,
+) -> Result<Option<v8::Global<v8::Object>>, ()> {
+    let boundary = v8::Local::new(scope, &record.current);
+    let mut node = boundary;
+    let mut candidate = if forward {
+        first_child(scope, node)
+    } else {
+        last_child(scope, node)
+    };
+    while let Some(next) = candidate {
+        node = next;
+        let status = filter_status(scope, record, node, operation)?;
+        if status == FILTER_ACCEPT {
+            return Ok(Some(v8::Global::new(scope, node)));
+        }
+        if status != FILTER_REJECT {
+            candidate = if forward {
+                first_child(scope, node)
+            } else {
+                last_child(scope, node)
+            };
+            if candidate.is_some() {
+                continue;
+            }
+        }
+        loop {
+            candidate = if forward {
+                next_sibling(scope, node)
+            } else {
+                previous_sibling(scope, node)
+            };
+            if candidate.is_some() {
+                break;
+            }
+            let Some(parent) = direct_parent(scope, node) else {
+                return Ok(None);
+            };
+            if parent.strict_equals(boundary.into()) {
+                return Ok(None);
+            }
+            node = parent;
         }
     }
-    Ok(output)
+    Ok(None)
+}
+
+pub(crate) fn traverse_siblings(
+    scope: &mut v8::PinScope<'_, '_>,
+    record: &TreeWalkerRecord,
+    forward: bool,
+    operation: &str,
+) -> Result<Option<v8::Global<v8::Object>>, ()> {
+    let root = v8::Local::new(scope, &record.root);
+    let mut node = v8::Local::new(scope, &record.current);
+    if node.strict_equals(root.into()) {
+        return Ok(None);
+    }
+    loop {
+        let mut sibling = if forward {
+            next_sibling(scope, node)
+        } else {
+            previous_sibling(scope, node)
+        };
+        while let Some(next) = sibling {
+            if let Some(candidate) =
+                visible_in_sibling_branch(scope, record, next, forward, operation)?
+            {
+                return Ok(Some(candidate));
+            }
+            sibling = if forward {
+                next_sibling(scope, next)
+            } else {
+                previous_sibling(scope, next)
+            };
+        }
+        let Some(parent) = direct_parent(scope, node) else {
+            return Ok(None);
+        };
+        if parent.strict_equals(root.into()) {
+            return Ok(None);
+        }
+        node = parent;
+        let status = filter_status(scope, record, node, operation)?;
+        if status == FILTER_ACCEPT || status == FILTER_REJECT {
+            return Ok(None);
+        }
+    }
+}
+
+fn visible_in_sibling_branch(
+    scope: &mut v8::PinScope<'_, '_>,
+    record: &TreeWalkerRecord,
+    node: v8::Local<'_, v8::Object>,
+    forward: bool,
+    operation: &str,
+) -> Result<Option<v8::Global<v8::Object>>, ()> {
+    let status = filter_status(scope, record, node, operation)?;
+    if status == FILTER_ACCEPT {
+        return Ok(Some(v8::Global::new(scope, node)));
+    }
+    if status == FILTER_REJECT {
+        return Ok(None);
+    }
+    let children = super::node::children(scope, node);
+    if forward {
+        for child in children {
+            if let Some(candidate) =
+                visible_in_sibling_branch(scope, record, child, forward, operation)?
+            {
+                return Ok(Some(candidate));
+            }
+        }
+    } else {
+        for child in children.into_iter().rev() {
+            if let Some(candidate) =
+                visible_in_sibling_branch(scope, record, child, forward, operation)?
+            {
+                return Ok(Some(candidate));
+            }
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn traverse_parent(
+    scope: &mut v8::PinScope<'_, '_>,
+    record: &TreeWalkerRecord,
+    operation: &str,
+) -> Result<Option<v8::Global<v8::Object>>, ()> {
+    let root = v8::Local::new(scope, &record.root);
+    let mut node = v8::Local::new(scope, &record.current);
+    if node.strict_equals(root.into()) {
+        return Ok(None);
+    }
+    while let Some(parent) = direct_parent(scope, node) {
+        node = parent;
+        let accepted = filter_status(scope, record, node, operation)? == FILTER_ACCEPT;
+        if accepted {
+            return Ok(Some(v8::Global::new(scope, node)));
+        }
+        if node.strict_equals(root.into()) {
+            return Ok(None);
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn traverse_next(
+    scope: &mut v8::PinScope<'_, '_>,
+    record: &TreeWalkerRecord,
+    operation: &str,
+) -> Result<Option<v8::Global<v8::Object>>, ()> {
+    let root = v8::Local::new(scope, &record.root);
+    let mut node = v8::Local::new(scope, &record.current);
+    let mut status = FILTER_ACCEPT;
+    loop {
+        while status != FILTER_REJECT {
+            let Some(child) = first_child(scope, node) else {
+                break;
+            };
+            node = child;
+            status = filter_status(scope, record, node, operation)?;
+            if status == FILTER_ACCEPT {
+                return Ok(Some(v8::Global::new(scope, node)));
+            }
+        }
+        let mut temporary = Some(node);
+        let mut sibling = None;
+        while let Some(value) = temporary {
+            if value.strict_equals(root.into()) {
+                return Ok(None);
+            }
+            sibling = next_sibling(scope, value);
+            if sibling.is_some() {
+                break;
+            }
+            temporary = direct_parent(scope, value);
+        }
+        let Some(next) = sibling else {
+            return Ok(None);
+        };
+        node = next;
+        status = filter_status(scope, record, node, operation)?;
+        if status == FILTER_ACCEPT {
+            return Ok(Some(v8::Global::new(scope, node)));
+        }
+    }
+}
+
+pub(crate) fn traverse_previous(
+    scope: &mut v8::PinScope<'_, '_>,
+    record: &TreeWalkerRecord,
+    operation: &str,
+) -> Result<Option<v8::Global<v8::Object>>, ()> {
+    let root = v8::Local::new(scope, &record.root);
+    let mut node = v8::Local::new(scope, &record.current);
+    while !node.strict_equals(root.into()) {
+        let mut sibling = previous_sibling(scope, node);
+        while let Some(previous) = sibling {
+            node = previous;
+            let mut status = filter_status(scope, record, node, operation)?;
+            while status != FILTER_REJECT {
+                let Some(child) = last_child(scope, node) else {
+                    break;
+                };
+                node = child;
+                status = filter_status(scope, record, node, operation)?;
+            }
+            if status == FILTER_ACCEPT {
+                return Ok(Some(v8::Global::new(scope, node)));
+            }
+            sibling = previous_sibling(scope, node);
+        }
+        let Some(parent) = direct_parent(scope, node) else {
+            return Ok(None);
+        };
+        node = parent;
+        if node.strict_equals(root.into()) {
+            return if filter_status(scope, record, node, operation)? == FILTER_ACCEPT {
+                Ok(Some(v8::Global::new(scope, node)))
+            } else {
+                Ok(None)
+            };
+        }
+        if filter_status(scope, record, node, operation)? == FILTER_ACCEPT {
+            return Ok(Some(v8::Global::new(scope, node)));
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn return_candidate(
@@ -245,43 +512,5 @@ pub(crate) fn return_candidate(
             result.set(candidate.into());
         }
         None => result.set(v8::null(scope).into()),
-    }
-}
-
-pub(crate) fn traversable_preorder(
-    scope: &mut v8::PinScope<'_, '_>,
-    record: &TreeWalkerRecord,
-    node: v8::Local<'_, v8::Object>,
-    output: &mut Vec<(v8::Global<v8::Object>, bool)>,
-) -> Result<(), ()> {
-    for child in super::node::children(scope, node) {
-        let status = filter_status(scope, record, child)?;
-        output.push((v8::Global::new(scope, child), status == FILTER_ACCEPT));
-        if status != FILTER_REJECT {
-            traversable_preorder(scope, record, child, output)?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn visible_parent(
-    scope: &mut v8::PinScope<'_, '_>,
-    record: &TreeWalkerRecord,
-    node: v8::Local<'_, v8::Object>,
-) -> Result<Option<v8::Global<v8::Object>>, ()> {
-    let root = v8::Local::new(scope, &record.root);
-    let Some(mut parent) = direct_parent(scope, node) else {
-        return Ok(None);
-    };
-    loop {
-        if parent.strict_equals(root.into())
-            || filter_status(scope, record, parent)? == FILTER_ACCEPT
-        {
-            return Ok(Some(v8::Global::new(scope, parent)));
-        }
-        let Some(next) = direct_parent(scope, parent) else {
-            return Ok(None);
-        };
-        parent = next;
     }
 }

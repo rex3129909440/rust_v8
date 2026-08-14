@@ -163,16 +163,32 @@ pub(crate) fn table_rows<'s>(
     scope: &v8::PinScope<'s, '_>,
     table: v8::Local<'s, v8::Object>,
 ) -> Vec<v8::Local<'s, v8::Object>> {
+    let children = super::node::children(scope, table);
     let mut rows = Vec::new();
-    for child in super::node::children(scope, table) {
-        if super::html_table_row_element::is_row(scope, child) {
-            rows.push(child);
-        } else if super::html_table_section_element::is_section(scope, child) {
-            for row in super::node::children(scope, child) {
-                if super::html_table_row_element::is_row(scope, row) {
-                    rows.push(row);
-                }
-            }
+    // HTMLTableElement.rows is not plain tree order: THEAD rows precede all
+    // table/TBODY rows and TFOOT rows follow them, irrespective of where the
+    // section nodes currently occur in the table child list.
+    for child in &children {
+        if tag_name(scope, *child).as_deref() == Some("THEAD") {
+            rows.extend(super::html_table_section_element::direct_rows(
+                scope, *child,
+            ));
+        }
+    }
+    for child in &children {
+        if super::html_table_row_element::is_row(scope, *child) {
+            rows.push(*child);
+        } else if tag_name(scope, *child).as_deref() == Some("TBODY") {
+            rows.extend(super::html_table_section_element::direct_rows(
+                scope, *child,
+            ));
+        }
+    }
+    for child in &children {
+        if tag_name(scope, *child).as_deref() == Some("TFOOT") {
+            rows.extend(super::html_table_section_element::direct_rows(
+                scope, *child,
+            ));
         }
     }
     rows
@@ -223,21 +239,38 @@ pub(crate) fn get_caption(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_optional(s, a, r, |x| &x.caption);
+    return_special(s, a, r, SpecialChild::Caption);
 }
 pub(crate) fn get_t_head(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_optional(s, a, r, |x| &x.t_head);
+    return_special(s, a, r, SpecialChild::Head);
 }
 pub(crate) fn get_t_foot(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_optional(s, a, r, |x| &x.t_foot);
+    return_special(s, a, r, SpecialChild::Foot);
+}
+
+fn return_special(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+    kind: SpecialChild,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    if let Some(value) = special_child(scope, arguments.this(), kind) {
+        result.set(value.into());
+    } else {
+        result.set(v8::null(scope).into());
+    }
 }
 
 pub(crate) fn set_caption(
@@ -290,11 +323,7 @@ pub(crate) fn set_special_child(
     value: v8::Local<'_, v8::Value>,
     kind: SpecialChild,
 ) {
-    let current = record(scope, table).and_then(|record| match kind {
-        SpecialChild::Caption => record.caption,
-        SpecialChild::Head => record.t_head,
-        SpecialChild::Foot => record.t_foot,
-    });
+    let current = special_child(scope, table, kind).map(|value| v8::Global::new(scope, value));
     if value.is_null() {
         if let Some(current) = current {
             let _ = super::node::detach(scope, v8::Local::new(scope, current));
@@ -312,7 +341,17 @@ pub(crate) fn set_special_child(
         SpecialChild::Foot => tag_name(scope, object).is_some_and(|tag| tag == "TFOOT"),
     };
     if !valid {
-        crate::webidl::throw_type_error(scope, "The value has an invalid element type");
+        let (property, interface) = match kind {
+            SpecialChild::Caption => ("caption", "HTMLTableCaptionElement"),
+            SpecialChild::Head => ("tHead", "HTMLTableSectionElement"),
+            SpecialChild::Foot => ("tFoot", "HTMLTableSectionElement"),
+        };
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to set the '{property}' property on 'HTMLTableElement': Failed to convert value to '{interface}'."
+            ),
+        );
         return;
     }
     if let Some(current) = current {
@@ -379,12 +418,12 @@ pub(crate) fn create_caption(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(snapshot) = record(scope, arguments.this()) else {
+    if record(scope, arguments.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
-    };
-    if let Some(caption) = snapshot.caption {
-        result.set(v8::Local::new(scope, caption).into());
+    }
+    if let Some(caption) = special_child(scope, arguments.this(), SpecialChild::Caption) {
+        result.set(caption.into());
         return;
     }
     match super::html_table_caption_element::create(scope) {
@@ -412,10 +451,22 @@ pub(crate) fn create_section(
             return None;
         }
     };
-    let index = if tag == "THEAD" {
-        1.min(super::node::children(scope, table).len())
-    } else {
-        super::node::children(scope, table).len()
+    let children = super::node::children(scope, table);
+    let index = match tag {
+        "THEAD" => children
+            .iter()
+            .position(|child| {
+                matches!(
+                    tag_name(scope, *child).as_deref(),
+                    Some("THEAD" | "TBODY" | "TFOOT" | "TR")
+                )
+            })
+            .unwrap_or(children.len()),
+        "TBODY" => children
+            .iter()
+            .position(|child| tag_name(scope, *child).as_deref() == Some("TFOOT"))
+            .unwrap_or(children.len()),
+        _ => children.len(),
     };
     let section_global = v8::Global::new(scope, section);
     let global = kind.map(|_| section_global.clone());
@@ -446,13 +497,13 @@ pub(crate) fn create_t_head(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(snapshot) = record(scope, arguments.this()) else {
+    if record(scope, arguments.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
-    };
+    }
     let table = v8::Global::new(scope, arguments.this());
-    if let Some(section) = snapshot.t_head {
-        result.set(v8::Local::new(scope, section).into());
+    if let Some(section) = special_child(scope, arguments.this(), SpecialChild::Head) {
+        result.set(section.into());
     } else if let Some(section) = create_section(scope, &table, "THEAD", Some(SpecialChild::Head)) {
         result.set(v8::Local::new(scope, section).into());
     }
@@ -462,13 +513,13 @@ pub(crate) fn create_t_foot(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(snapshot) = record(scope, arguments.this()) else {
+    if record(scope, arguments.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
-    };
+    }
     let table = v8::Global::new(scope, arguments.this());
-    if let Some(section) = snapshot.t_foot {
-        result.set(v8::Local::new(scope, section).into());
+    if let Some(section) = special_child(scope, arguments.this(), SpecialChild::Foot) {
+        result.set(section.into());
     } else if let Some(section) = create_section(scope, &table, "TFOOT", Some(SpecialChild::Foot)) {
         result.set(v8::Local::new(scope, section).into());
     }
@@ -500,13 +551,8 @@ pub(crate) fn delete_special(
     table: v8::Local<'_, v8::Object>,
     kind: SpecialChild,
 ) {
-    let current = record(scope, table).and_then(|record| match kind {
-        SpecialChild::Caption => record.caption,
-        SpecialChild::Head => record.t_head,
-        SpecialChild::Foot => record.t_foot,
-    });
-    if let Some(current) = current {
-        let _ = super::node::detach(scope, v8::Local::new(scope, current));
+    if let Some(current) = special_child(scope, table, kind) {
+        let _ = super::node::detach(scope, current);
     }
     update_special(scope, table, kind, None);
     refresh_collections(scope, table);
@@ -528,7 +574,17 @@ pub(crate) fn insert_row(
         arguments.get(0).int32_value(scope).unwrap_or(-1)
     };
     if requested < -1 || (requested != -1 && requested as usize > rows.len()) {
-        throw_index_size(scope);
+        let message = if requested < -1 {
+            format!(
+                "Failed to execute 'insertRow' on 'HTMLTableElement': The index provided ({requested}) is less than -1."
+            )
+        } else {
+            format!(
+                "Failed to execute 'insertRow' on 'HTMLTableElement': The index provided ({requested}) is greater than the number of rows in the table ({}).",
+                rows.len()
+            )
+        };
+        throw_index_size_message(scope, &message);
         return;
     }
     let row = match super::html_table_row_element::create(scope) {
@@ -581,8 +637,17 @@ pub(crate) fn delete_row(
     } else {
         None
     };
+    if requested == -1 && rows.is_empty() {
+        return;
+    }
     let Some(index) = index.filter(|index| *index < rows.len()) else {
-        throw_index_size(scope);
+        throw_index_size_message(
+            scope,
+            &format!(
+                "Failed to execute 'deleteRow' on 'HTMLTableElement': The index provided ({requested}) is greater than or equal to the number of rows in the table ({}).",
+                rows.len()
+            ),
+        );
         return;
     };
     let _ = super::node::detach(scope, rows[index]);
@@ -590,14 +655,60 @@ pub(crate) fn delete_row(
 }
 
 pub(crate) fn throw_index_size(scope: &mut v8::PinScope<'_, '_>) {
-    match super::dom_exception::create(
-        scope,
-        "The index is not in the allowed range.".to_owned(),
-        "IndexSizeError".to_owned(),
-    ) {
+    throw_index_size_message(scope, "The index is not in the allowed range.");
+}
+
+pub(crate) fn throw_index_size_message(scope: &mut v8::PinScope<'_, '_>, message: &str) {
+    match super::dom_exception::create(scope, message.to_owned(), "IndexSizeError".to_owned()) {
         Ok(error) => {
             scope.throw_exception(error.into());
         }
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }
+}
+
+pub(crate) fn get_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value =
+        super::element::attribute_value(scope, arguments.this(), attribute).unwrap_or_default();
+    if let Some(value) = v8::String::new(scope, &value) {
+        result.set(value.into());
+    }
+}
+
+pub(crate) fn set_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value = crate::webidl::value_to_string(scope, arguments.get(0));
+    let _ =
+        super::element::set_attribute_value(scope, arguments.this(), attribute.to_owned(), value);
+}
+
+pub(crate) fn special_child<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    table: v8::Local<'s, v8::Object>,
+    kind: SpecialChild,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let expected = match kind {
+        SpecialChild::Caption => "CAPTION",
+        SpecialChild::Head => "THEAD",
+        SpecialChild::Foot => "TFOOT",
+    };
+    super::node::children(scope, table)
+        .into_iter()
+        .find(|child| tag_name(scope, *child).as_deref() == Some(expected))
 }

@@ -77,7 +77,9 @@ fn construct(
         );
         return;
     }
-    let input = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(input) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Some(url) = normalize_url(scope, &input) else {
         crate::webidl::throw_type_error(scope, "Invalid WebSocket URL");
         return;
@@ -221,7 +223,12 @@ fn get_opened(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.opened).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'opened' property from 'WebSocketStream': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }
 fn get_closed(
@@ -232,7 +239,12 @@ fn get_closed(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.closed).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'closed' property from 'WebSocketStream': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }
 

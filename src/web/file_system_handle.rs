@@ -124,6 +124,10 @@ fn is_same_entry(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "FileSystemHandle", "isSameEntry", r);
+        return;
+    }
     let same = v8::Local::<v8::Object>::try_from(a.get(0))
         .ok()
         .and_then(|o| record(s, o))
@@ -135,10 +139,11 @@ fn is_same_entry(
 fn permission(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
+    method: &str,
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "FileSystemHandle", method, r);
         return;
     }
     let v = v8::String::new(s, "granted").unwrap();
@@ -149,14 +154,14 @@ fn query_permission(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    permission(s, a, r)
+    permission(s, a, "queryPermission", r)
 }
 fn request_permission(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    permission(s, a, r)
+    permission(s, a, "requestPermission", r)
 }
 fn remove(
     s: &mut v8::PinScope<'_, '_>,
@@ -171,7 +176,7 @@ fn remove(
         let x = v8::undefined(s);
         resolve(s, x.into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "FileSystemHandle", "remove", r)
     }
 }
 

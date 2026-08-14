@@ -71,12 +71,20 @@ fn construct(
         crate::webidl::throw_type_error(scope, "DecompressionStream requires a format");
         return;
     }
-    let format = match crate::webidl::value_to_string(scope, arguments.get(0)).as_str() {
+    let Some(format_name) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
+    let format = match format_name.as_str() {
         "deflate" => CompressionFormat::Deflate,
         "deflate-raw" => CompressionFormat::DeflateRaw,
         "gzip" => CompressionFormat::Gzip,
         _ => {
-            crate::webidl::throw_type_error(scope, "Unsupported compression format");
+            crate::webidl::throw_type_error(
+                scope,
+                &format!(
+                    "Failed to construct 'DecompressionStream': Unsupported compression format: '{format_name}'"
+                ),
+            );
             return;
         }
     };

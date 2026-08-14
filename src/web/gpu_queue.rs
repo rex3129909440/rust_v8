@@ -169,6 +169,19 @@ fn on_submitted_work_done(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if scope.get_slot::<GpuQueueStore>().is_none_or(|store| {
+        !store
+            .records
+            .contains_key(&arguments.this().get_identity_hash().get())
+    }) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "GPUQueue",
+            "onSubmittedWorkDone",
+            result,
+        );
+        return;
+    }
     if update(scope, arguments.this(), |_| {}) {
         let value = v8::undefined(scope);
         if let Ok(promise) = super::writable_stream::resolved_promise(scope, value.into()) {

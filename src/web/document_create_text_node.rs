@@ -14,7 +14,20 @@ fn create_text_node(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let data = crate::webidl::value_to_string(scope, arguments.get(0));
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createTextNode' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(data) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'createTextNode' on 'Document'",
+    ) else {
+        return;
+    };
     match super::text::create(scope, data) {
         Ok(text) => {
             super::node::set_owner_document(scope, text, arguments.this());

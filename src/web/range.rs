@@ -159,6 +159,10 @@ pub(crate) fn set_relative(
     start: bool,
     after: bool,
 ) {
+    if super::abstract_range::record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(node) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "The argument is not a Node");
         return;
@@ -192,21 +196,33 @@ pub(crate) fn set_relative(
 pub(crate) fn boundary_arguments(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: &v8::FunctionCallbackArguments<'_>,
+    method: &str,
 ) -> Option<(v8::Global<v8::Object>, u32)> {
     let Ok(node) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The first argument is not a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            &format!("Failed to execute '{method}' on 'Range': parameter 1 is not of type 'Node'."),
+        );
         return None;
     };
     let offset = arguments.get(1).uint32_value(scope).unwrap_or(0);
     let Some(length) = boundary_length(scope, node) else {
-        crate::webidl::throw_type_error(scope, "The first argument is not a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            &format!("Failed to execute '{method}' on 'Range': parameter 1 is not of type 'Node'."),
+        );
         return None;
     };
     if super::node::record(scope, node).is_some_and(|record| record.node_type == 10) {
+        let node_name = super::node::record(scope, node)
+            .map(|record| record.node_name)
+            .unwrap_or_default();
         super::node::throw_dom_exception(
             scope,
             "InvalidNodeTypeError",
-            "DocumentType nodes cannot be range boundary containers",
+            &format!(
+                "Failed to execute '{method}' on 'Range': The node provided is of type '{node_name}'."
+            ),
         );
         return None;
     }
@@ -214,7 +230,9 @@ pub(crate) fn boundary_arguments(
         super::node::throw_dom_exception(
             scope,
             "IndexSizeError",
-            "The offset is larger than the node's length",
+            &format!(
+                "Failed to execute '{method}' on 'Range': The offset {offset} is larger than the node's length ({length})."
+            ),
         );
         return None;
     }

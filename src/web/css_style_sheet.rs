@@ -771,6 +771,10 @@ fn replace_sync(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if !is_constructed(scope, arguments.this()) {
         super::node::throw_dom_exception(
             scope,
@@ -790,6 +794,10 @@ fn replace(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "CSSStyleSheet", "replace", result);
+        return;
+    }
     let Some(resolver) = v8::PromiseResolver::new(scope) else {
         crate::webidl::throw_type_error(scope, "cannot create Promise");
         return;

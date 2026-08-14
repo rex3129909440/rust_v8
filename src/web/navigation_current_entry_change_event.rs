@@ -58,12 +58,18 @@ pub(crate) fn construct(
     if !a.is_construct_call() || a.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'NavigationCurrentEntryChangeEvent': 2 arguments required",
+            "Failed to construct 'NavigationCurrentEntryChangeEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, a.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(a.get(1)) else {
-        crate::webidl::throw_type_error(scope, "The event initializer is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'NavigationCurrentEntryChangeEvent': The provided value is not of type 'NavigationCurrentEntryChangeEventInit'.",
+        );
         return;
     };
     let Some(from_key) = v8::String::new(scope, "from") else {
@@ -73,7 +79,10 @@ pub(crate) fn construct(
         return;
     };
     let Ok(from) = v8::Local::<v8::Object>::try_from(from_value) else {
-        crate::webidl::throw_type_error(scope, "from must be a NavigationHistoryEntry");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'NavigationCurrentEntryChangeEvent': Failed to read the 'from' property from 'NavigationCurrentEntryChangeEventInit': Required member is undefined.",
+        );
         return;
     };
     if !super::navigation_history_entry::is_entry(scope, from) {
@@ -86,14 +95,7 @@ pub(crate) fn construct(
     let bubbles = super::event::boolean_property(scope, init, "bubbles");
     let cancelable = super::event::boolean_property(scope, init, "cancelable");
     let composed = super::event::boolean_property(scope, init, "composed");
-    super::event::attach(
-        scope,
-        a.this(),
-        crate::webidl::value_to_string(scope, a.get(0)),
-        bubbles,
-        cancelable,
-        composed,
-    );
+    super::event::attach(scope, a.this(), event_type, bubbles, cancelable, composed);
     let from = v8::Global::new(scope, from);
     scope
         .get_slot_mut::<NavigationCurrentEntryChangeEventStore>()

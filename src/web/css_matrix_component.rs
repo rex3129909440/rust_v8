@@ -80,8 +80,24 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSMatrixComponent requires a matrix");
         return;
     }
-    let Some((matrix, two_d)) = clone_matrix(scope, arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "Invalid matrix");
+    let matrix_value = arguments.get(0);
+    let valid_matrix = v8::Local::<v8::Object>::try_from(matrix_value)
+        .ok()
+        .is_some_and(|object| {
+            super::structured_clone::inherits_platform_interface(scope, object, "DOMMatrixReadOnly")
+        });
+    if !valid_matrix {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSMatrixComponent': parameter 1 is not of type 'DOMMatrixReadOnly'.",
+        );
+        return;
+    }
+    let Some((matrix, two_d)) = clone_matrix(scope, matrix_value) else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSMatrixComponent': parameter 1 is not of type 'DOMMatrixReadOnly'.",
+        );
         return;
     };
     scope
@@ -121,6 +137,10 @@ fn set_matrix(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some((matrix, _)) = clone_matrix(scope, arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "Invalid matrix");
         return;

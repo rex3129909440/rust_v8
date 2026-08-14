@@ -44,6 +44,9 @@ struct NavigatorRecord {
     usb: v8::Global<v8::Object>,
     xr: v8::Global<v8::Object>,
     storage_buckets: v8::Global<v8::Object>,
+    contacts: v8::Global<v8::Object>,
+    model_context: v8::Global<v8::Object>,
+    cookie_deprecation_label: v8::Global<v8::Object>,
     vibration_pattern: Vec<u32>,
 }
 
@@ -74,17 +77,6 @@ fn ensure_constructor<'s>(
     )?;
     let p = crate::webidl::prototype(scope, c)?;
     crate::webidl::reset_constructor_order(scope, p)?;
-    // Chromium 148 exposed windowControlsOverlay after vibrate.  Chromium
-    // 150 moved it before hardwareConcurrency.  Preserve the evidenced order
-    // selected by the configured UA instead of imposing one prototype shape
-    // on every supported browser version.
-    let chromium_148_order = crate::fingerprint::navigator(scope)
-        .user_agent
-        .split("Chrome/")
-        .nth(1)
-        .and_then(|tail| tail.split('.').next())
-        .and_then(|major| major.parse::<u32>().ok())
-        == Some(148);
     super::navigator_vendor_sub_property::define(scope, p)?;
     super::navigator_product_sub_property::define(scope, p)?;
     super::navigator_vendor_property::define(scope, p)?;
@@ -105,14 +97,12 @@ fn ensure_constructor<'s>(
         "webkitPersistentStorage",
         get_persistent_storage,
     )?;
-    if !chromium_148_order {
-        crate::webidl::define_readonly_accessor(
-            scope,
-            p,
-            "windowControlsOverlay",
-            get_window_controls_overlay,
-        )?;
-    }
+    crate::webidl::define_readonly_accessor(
+        scope,
+        p,
+        "windowControlsOverlay",
+        get_window_controls_overlay,
+    )?;
     super::navigator_hardware_concurrency_property::define(scope, p)?;
     super::navigator_cookie_enabled_property::define(scope, p)?;
     super::navigator_app_code_name_property::define(scope, p)?;
@@ -133,15 +123,8 @@ fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, p, "javaEnabled", 0, java_enabled)?;
     crate::webidl::define_method(scope, p, "sendBeacon", 1, send_beacon)?;
     crate::webidl::define_method(scope, p, "vibrate", 1, vibrate)?;
-    if chromium_148_order {
-        crate::webidl::define_readonly_accessor(
-            scope,
-            p,
-            "windowControlsOverlay",
-            get_window_controls_overlay,
-        )?;
-    }
     crate::webidl::finish_constructor(scope, p, c)?;
+    super::navigator_model_context_property::define(scope, p)?;
     crate::webidl::define_readonly_accessor(
         scope,
         p,
@@ -163,6 +146,7 @@ fn ensure_constructor<'s>(
     crate::webidl::define_readonly_accessor(scope, p, "locks", get_locks)?;
     crate::webidl::define_readonly_accessor(scope, p, "storage", get_storage)?;
     crate::webidl::define_readonly_accessor(scope, p, "gpu", get_gpu)?;
+    super::navigator_contacts_property::define(scope, p)?;
     crate::webidl::define_readonly_accessor(scope, p, "login", get_login)?;
     crate::webidl::define_readonly_accessor(scope, p, "ink", get_ink)?;
     crate::webidl::define_readonly_accessor(scope, p, "mediaCapabilities", get_media_capabilities)?;
@@ -238,6 +222,7 @@ fn ensure_constructor<'s>(
         1,
         get_interest_group_ad_auction_data,
     )?;
+    super::navigator_cookie_deprecation_label_property::define(scope, p)?;
     crate::webidl::define_method(
         scope,
         p,
@@ -251,6 +236,13 @@ fn ensure_constructor<'s>(
         "unregisterProtocolHandler",
         2,
         unregister_protocol_handler,
+    )?;
+    let version = crate::browser_surface::current_version(scope);
+    crate::browser_surface::reorder_string_properties(
+        scope,
+        p,
+        crate::browser_surface::navigator_names(version),
+        "Navigator.prototype",
     )?;
     let stored = v8::Global::new(scope, c);
     scope
@@ -318,6 +310,9 @@ pub(crate) fn create<'s>(
     let usb = super::usb::create(scope)?;
     let xr = super::xr_system::create(scope)?;
     let storage_buckets = super::storage_bucket_manager::create(scope)?;
+    let contacts = super::contacts_manager::create(scope)?;
+    let model_context = super::model_context::create(scope)?;
+    let cookie_deprecation_label = super::cookie_deprecation_label::create(scope)?;
     let record = NavigatorRecord {
         scheduling: v8::Global::new(scope, scheduling),
         user_activation: v8::Global::new(scope, user_activation),
@@ -355,6 +350,9 @@ pub(crate) fn create<'s>(
         usb: v8::Global::new(scope, usb),
         xr: v8::Global::new(scope, xr),
         storage_buckets: v8::Global::new(scope, storage_buckets),
+        contacts: v8::Global::new(scope, contacts),
+        model_context: v8::Global::new(scope, model_context),
+        cookie_deprecation_label: v8::Global::new(scope, cookie_deprecation_label),
         vibration_pattern: Vec::new(),
     };
     scope
@@ -431,6 +429,25 @@ fn return_object(
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation")
     }
+}
+
+pub(crate) enum AndroidObjectProperty {
+    Contacts,
+    ModelContext,
+    CookieDeprecationLabel,
+}
+
+pub(crate) fn get_android_object(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    result: v8::ReturnValue<'_>,
+    property: AndroidObjectProperty,
+) {
+    return_object(scope, arguments, result, |record| match property {
+        AndroidObjectProperty::Contacts => record.contacts.clone(),
+        AndroidObjectProperty::ModelContext => record.model_context.clone(),
+        AndroidObjectProperty::CookieDeprecationLabel => record.cookie_deprecation_label.clone(),
+    });
 }
 fn get_scheduling(
     s: &mut v8::PinScope<'_, '_>,
@@ -801,6 +818,21 @@ fn ensure_navigator(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::
         false
     }
 }
+fn ensure_navigator_promise(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    method: &str,
+    result: &mut v8::ReturnValue<'_>,
+) -> bool {
+    if record(scope, object).is_some() {
+        return true;
+    }
+    let message = format!("Failed to execute '{method}' on 'Navigator': Illegal invocation");
+    if let Some(promise) = crate::webidl::rejected_type_error_promise(scope, &message) {
+        result.set(promise.into());
+    }
+    false
+}
 fn resolve_value(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
@@ -828,9 +860,9 @@ fn ad_auction_components(
 fn run_ad_auction(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(scope, arguments.this(), "runAdAuction", &mut result) {
         let null = v8::null(scope);
         resolve_value(scope, null.into(), result)
     }
@@ -857,27 +889,27 @@ fn can_share(
 fn share(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(scope, arguments.this(), "share", &mut result) {
         resolve_undefined(scope, result)
     }
 }
 fn clear_app_badge(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(scope, arguments.this(), "clearAppBadge", &mut result) {
         resolve_undefined(scope, result)
     }
 }
 fn get_battery(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if !ensure_navigator(scope, arguments.this()) {
+    if !ensure_navigator_promise(scope, arguments.this(), "getBattery", &mut result) {
         return;
     }
     match super::battery_manager::create(scope) {
@@ -915,9 +947,9 @@ fn get_user_media(
 fn request_midi_access(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if !ensure_navigator(scope, arguments.this()) {
+    if !ensure_navigator_promise(scope, arguments.this(), "requestMIDIAccess", &mut result) {
         return;
     }
     match super::midi_access::create(scope) {
@@ -928,9 +960,14 @@ fn request_midi_access(
 fn request_media_key_system_access(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if !ensure_navigator(scope, arguments.this()) {
+    if !ensure_navigator_promise(
+        scope,
+        arguments.this(),
+        "requestMediaKeySystemAccess",
+        &mut result,
+    ) {
         return;
     }
     if arguments.length() < 2 {
@@ -954,9 +991,9 @@ fn request_media_key_system_access(
 fn set_app_badge(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if !ensure_navigator(scope, arguments.this()) {
+    if !ensure_navigator_promise(scope, arguments.this(), "setAppBadge", &mut result) {
         return;
     }
     if !arguments.get(0).is_undefined() {
@@ -974,18 +1011,23 @@ fn webkit_get_user_media(
 fn clear_origin_joined_ad_interest_groups(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(
+        scope,
+        arguments.this(),
+        "clearOriginJoinedAdInterestGroups",
+        &mut result,
+    ) {
         resolve_undefined(scope, result)
     }
 }
 fn create_auction_nonce(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if !ensure_navigator(scope, arguments.this()) {
+    if !ensure_navigator_promise(scope, arguments.this(), "createAuctionNonce", &mut result) {
         return;
     }
     let nonce = v8::String::new(scope, "00000000-0000-4000-8000-000000000001")
@@ -995,18 +1037,18 @@ fn create_auction_nonce(
 fn join_ad_interest_group(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(scope, arguments.this(), "joinAdInterestGroup", &mut result) {
         resolve_undefined(scope, result)
     }
 }
 fn leave_ad_interest_group(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(scope, arguments.this(), "leaveAdInterestGroup", &mut result) {
         resolve_undefined(scope, result)
     }
 }
@@ -1022,18 +1064,23 @@ fn update_ad_interest_groups(
 fn deprecated_replace_in_urn(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(
+        scope,
+        arguments.this(),
+        "deprecatedReplaceInURN",
+        &mut result,
+    ) {
         resolve_undefined(scope, result)
     }
 }
 fn deprecated_urn_to_url(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if !ensure_navigator(scope, arguments.this()) {
+    if !ensure_navigator_promise(scope, arguments.this(), "deprecatedURNToURL", &mut result) {
         return;
     }
     let urn = crate::webidl::value_to_string(scope, arguments.get(0));
@@ -1043,9 +1090,14 @@ fn deprecated_urn_to_url(
 fn get_installed_related_apps(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if ensure_navigator(scope, arguments.this()) {
+    if ensure_navigator_promise(
+        scope,
+        arguments.this(),
+        "getInstalledRelatedApps",
+        &mut result,
+    ) {
         let applications = v8::Array::new(scope, 0);
         resolve_value(scope, applications.into(), result)
     }
@@ -1053,9 +1105,14 @@ fn get_installed_related_apps(
 fn get_interest_group_ad_auction_data(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    result: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    if !ensure_navigator(scope, arguments.this()) {
+    if !ensure_navigator_promise(
+        scope,
+        arguments.this(),
+        "getInterestGroupAdAuctionData",
+        &mut result,
+    ) {
         return;
     }
     let data = v8::Object::new(scope);

@@ -127,7 +127,12 @@ fn get_response_ready(
     if let Some(response) = response {
         result.set(v8::Local::new(scope, &response).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'responseReady' property from 'BackgroundFetchRecord': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }
 

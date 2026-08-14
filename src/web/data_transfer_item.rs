@@ -10,6 +10,7 @@ pub(crate) enum ItemPayload {
 pub(crate) struct ItemRecord {
     pub media_type: String,
     pub payload: ItemPayload,
+    pub(crate) created_via_set_data: bool,
 }
 
 #[derive(Default)]
@@ -79,6 +80,22 @@ pub(crate) fn create_string<'s>(
         ItemRecord {
             media_type: media_type.to_ascii_lowercase(),
             payload: ItemPayload::String(value),
+            created_via_set_data: false,
+        },
+    )
+}
+
+pub(crate) fn create_string_from_set_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: String,
+    media_type: String,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    create(
+        scope,
+        ItemRecord {
+            media_type: media_type.to_ascii_lowercase(),
+            payload: ItemPayload::String(value),
+            created_via_set_data: true,
         },
     )
 }
@@ -93,6 +110,7 @@ pub(crate) fn create_file<'s>(
         ItemRecord {
             media_type: media_type.to_ascii_lowercase(),
             payload: ItemPayload::File(v8::Global::new(scope, file)),
+            created_via_set_data: false,
         },
     )
 }
@@ -267,7 +285,12 @@ fn get_as_file_system_handle(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "DataTransferItem",
+            "getAsFileSystemHandle",
+            result,
+        );
         return;
     }
     let null = v8::null(scope);

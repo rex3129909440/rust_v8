@@ -91,6 +91,7 @@ fn set_enabled(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
     enabled: bool,
+    method_name: &str,
 ) {
     if let Some(v) = s
         .get_slot_mut::<NavigationPreloadManagerStore>()
@@ -99,7 +100,12 @@ fn set_enabled(
         v.enabled = enabled;
         resolve(s, v8::undefined(s).into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "NavigationPreloadManager",
+            method_name,
+            r,
+        )
     }
 }
 fn enable(
@@ -107,20 +113,35 @@ fn enable(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_enabled(s, a, r, true)
+    set_enabled(s, a, r, true, "enable")
 }
 fn disable(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_enabled(s, a, r, false)
+    set_enabled(s, a, r, false, "disable")
 }
 fn set_header_value(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if s.get_slot::<NavigationPreloadManagerStore>()
+        .is_none_or(|store| {
+            !store
+                .records
+                .contains_key(&a.this().get_identity_hash().get())
+        })
+    {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "NavigationPreloadManager",
+            "setHeaderValue",
+            r,
+        );
+        return;
+    }
     let header = crate::webidl::value_to_string(s, a.get(0));
     if let Some(v) = s
         .get_slot_mut::<NavigationPreloadManagerStore>()
@@ -128,8 +149,6 @@ fn set_header_value(
     {
         v.header = header;
         resolve(s, v8::undefined(s).into(), r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn get_state(
@@ -142,7 +161,12 @@ fn get_state(
         .and_then(|store| store.records.get(&a.this().get_identity_hash().get()))
         .cloned()
     else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "NavigationPreloadManager",
+            "getState",
+            r,
+        );
         return;
     };
     let object = v8::Object::new(s);

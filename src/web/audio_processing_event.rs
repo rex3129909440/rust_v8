@@ -74,22 +74,27 @@ pub(crate) fn construct(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "AudioProcessingEvent requires a type and initializer",
+            "Failed to construct 'AudioProcessingEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
         crate::webidl::throw_type_error(
             scope,
-            "AudioProcessingEvent initializer must be an object",
+            "Failed to construct 'AudioProcessingEvent': The provided value is not of type 'AudioProcessingEventInit'.",
         );
         return;
     };
     let Some(input_buffer) = property(scope, init, "inputBuffer")
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
     else {
-        crate::webidl::throw_type_error(scope, "inputBuffer is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'AudioProcessingEvent': Failed to read the 'inputBuffer' property from 'AudioProcessingEventInit': Required member is undefined.",
+        );
         return;
     };
     let Some(output_buffer) = property(scope, init, "outputBuffer")

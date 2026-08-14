@@ -37,6 +37,7 @@ fn ensure_constructor<'s>(
     crate::webidl::define_accessor(scope, prototype, "z", get_z, set_z)?;
     crate::webidl::define_accessor(scope, prototype, "w", get_w, set_w)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(scope, constructor.into(), "fromPoint", 0, from_point)?;
     let parent = super::dom_point_read_only::ensure_constructor(scope)?;
     crate::webidl::inherit(scope, constructor, parent)?;
     let realm_constructor = v8::Global::new(scope, constructor);
@@ -46,6 +47,18 @@ fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(constructor)
+}
+
+fn from_point(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let point = super::dom_point_read_only::from_value(scope, arguments.get(0));
+    match create(scope, point) {
+        Ok(point) => result.set(point.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
 }
 
 fn construct(

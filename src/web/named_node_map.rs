@@ -77,7 +77,7 @@ pub(crate) fn create_for_element<'s>(
     }
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
-    let map = v8::Object::new(scope);
+    let map = new_exotic_map(scope)?;
     if crate::webidl::set_platform_prototype(scope, map, prototype.into()) != Some(true) {
         return Err("cannot create NamedNodeMap".to_owned());
     }
@@ -123,7 +123,6 @@ fn synchronize(
     let previous = map_record(scope, map)
         .map(|record| record.attributes)
         .unwrap_or_default();
-    remove_own_attribute_properties(scope, map, &previous);
     let mut next = Vec::new();
     for snapshot in snapshots {
         let existing = previous.iter().find_map(|attribute| {
@@ -147,6 +146,9 @@ fn synchronize(
                 Some(element),
             )?,
         };
+        if let Some(document) = super::node::owner_document(scope, element) {
+            super::node::set_owner_document(scope, attribute, document);
+        }
         next.push(v8::Global::new(scope, attribute));
     }
     for attribute in &previous {
@@ -159,7 +161,6 @@ fn synchronize(
             super::attr::set_owner(scope, attribute, None);
         }
     }
-    define_own_attribute_properties(scope, map, &next);
     if let Some(record) = scope
         .get_slot_mut::<NamedNodeMapStore>()
         .and_then(|store| store.records.get_mut(&map.get_identity_hash().get()))
@@ -169,50 +170,230 @@ fn synchronize(
     Ok(())
 }
 
-fn remove_own_attribute_properties(
-    scope: &v8::PinScope<'_, '_>,
-    map: v8::Local<'_, v8::Object>,
-    attributes: &[v8::Global<v8::Object>],
-) {
-    for (index, attribute) in attributes.iter().enumerate() {
-        if let Some(key) = v8::String::new(scope, &index.to_string()) {
-            let _ = map.delete(scope, key.into());
-        }
-        let attribute = v8::Local::new(scope, attribute);
-        if let Some(record) = super::attr::record(scope, attribute)
-            && let Some(key) = v8::String::new(scope, &record.name)
-        {
-            let _ = map.delete(scope, key.into());
-        }
+fn new_exotic_map<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let template = v8::ObjectTemplate::new(scope);
+    template.set_indexed_property_handler(
+        v8::IndexedPropertyHandlerConfiguration::new()
+            .getter(indexed_getter)
+            .setter(indexed_setter)
+            .query(indexed_query)
+            .deleter(indexed_deleter)
+            .enumerator(indexed_enumerator),
+    );
+    template.set_named_property_handler(
+        v8::NamedPropertyHandlerConfiguration::new()
+            .getter(named_getter)
+            .setter(named_setter)
+            .query(named_query)
+            .deleter(named_deleter)
+            .enumerator(named_enumerator),
+    );
+    template
+        .new_instance(scope)
+        .ok_or_else(|| "cannot create NamedNodeMap exotic object".to_owned())
+}
+
+fn indexed_getter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "get", index, None);
+    let Some(attribute) = attributes(scope, arguments.holder())
+        .and_then(|attributes| attributes.get(index as usize).copied())
+    else {
+        return v8::Intercepted::kNo;
+    };
+    result.set(attribute.into());
+    v8::Intercepted::kYes
+}
+
+fn indexed_setter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    value: v8::Local<'_, v8::Value>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "set", index, Some(value));
+    if attributes(scope, arguments.holder())
+        .is_none_or(|attributes| (index as usize) >= attributes.len())
+    {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn indexed_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "has", index, None);
+    if attributes(scope, arguments.holder())
+        .is_some_and(|attributes| (index as usize) < attributes.len())
+    {
+        result.set_int32(1);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
     }
 }
 
-fn define_own_attribute_properties(
-    scope: &v8::PinScope<'_, '_>,
-    map: v8::Local<'_, v8::Object>,
-    attributes: &[v8::Global<v8::Object>],
-) {
-    for (index, attribute) in attributes.iter().enumerate() {
-        let attribute = v8::Local::new(scope, attribute);
-        if let Some(index_key) = v8::String::new(scope, &index.to_string()) {
-            let _ = map.define_own_property(
-                scope,
-                index_key.into(),
-                attribute.into(),
-                v8::PropertyAttribute::READ_ONLY,
-            );
-        }
-        if let Some(record) = super::attr::record(scope, attribute)
-            && let Some(name_key) = v8::String::new(scope, &record.name)
-        {
-            let _ = map.define_own_property(
-                scope,
-                name_key.into(),
-                attribute.into(),
-                v8::PropertyAttribute::READ_ONLY,
-            );
-        }
+fn indexed_deleter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Boolean>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "delete", index, None);
+    if attributes(scope, arguments.holder())
+        .is_none_or(|attributes| (index as usize) >= attributes.len())
+    {
+        return v8::Intercepted::kNo;
     }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn indexed_enumerator(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Array>,
+) {
+    crate::trace::record_native_enumeration(scope, &arguments);
+    let length = attributes(scope, arguments.holder()).map_or(0, |attributes| attributes.len());
+    let indices = (0..length)
+        .map(|index| v8::Integer::new_from_unsigned(scope, index as u32).into())
+        .collect::<Vec<v8::Local<v8::Value>>>();
+    result.set(v8::Array::new_with_elements(scope, &indices));
+}
+
+fn property_name(scope: &v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>) -> Option<String> {
+    if key.is_symbol() {
+        return None;
+    }
+    key.to_string(scope)
+        .map(|key| key.to_rust_string_lossy(scope))
+}
+
+fn reserved_name(name: &str) -> bool {
+    matches!(
+        name,
+        "length"
+            | "getNamedItem"
+            | "getNamedItemNS"
+            | "item"
+            | "removeNamedItem"
+            | "removeNamedItemNS"
+            | "setNamedItem"
+            | "setNamedItemNS"
+            | "constructor"
+            | "__proto__"
+    )
+}
+
+fn named_value<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    object: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    if reserved_name(name) {
+        return None;
+    }
+    attributes(scope, object)?.into_iter().find(|attribute| {
+        super::attr::record(scope, *attribute).is_some_and(|record| record.name == name)
+    })
+}
+
+fn named_getter(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "get", key, None);
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    let Some(attribute) = named_value(scope, arguments.holder(), &name) else {
+        return v8::Intercepted::kNo;
+    };
+    result.set(attribute.into());
+    v8::Intercepted::kYes
+}
+
+fn named_setter(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    value: v8::Local<'_, v8::Value>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "set", key, Some(value));
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    if named_value(scope, arguments.holder(), &name).is_none() {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn named_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "has", key, None);
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    if named_value(scope, arguments.holder(), &name).is_some() {
+        result.set_int32(3);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
+    }
+}
+
+fn named_deleter(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Boolean>,
+) -> v8::Intercepted {
+    crate::trace::record_named_native_intercept(scope, &arguments, "delete", key, None);
+    let Some(name) = property_name(scope, key) else {
+        return v8::Intercepted::kNo;
+    };
+    if named_value(scope, arguments.holder(), &name).is_none() {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn named_enumerator(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Array>,
+) {
+    crate::trace::record_native_enumeration(scope, &arguments);
+    let names = attributes(scope, arguments.holder())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|attribute| super::attr::record(scope, attribute))
+        .filter_map(|record| v8::String::new(scope, &record.name).map(Into::into))
+        .collect::<Vec<v8::Local<v8::Value>>>();
+    result.set(v8::Array::new_with_elements(scope, &names));
 }
 
 fn illegal_constructor(
@@ -283,20 +464,40 @@ pub(crate) fn set_item(
     mut result: v8::ReturnValue<'_>,
     namespace_aware: bool,
 ) {
-    let Ok(attribute) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The supplied node is not an Attr");
-        return;
-    };
-    let Some(attribute_record) = super::attr::record(scope, attribute) else {
-        throw_dom_exception(
-            scope,
-            "HierarchyRequestError",
-            "The supplied node is not an Attr",
-        );
-        return;
+    let method = if namespace_aware {
+        "setNamedItemNS"
+    } else {
+        "setNamedItem"
     };
     let Some(element) = owner(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute '{method}' on 'NamedNodeMap': 1 argument required, but only 0 present."
+            ),
+        );
+        return;
+    }
+    let Ok(attribute) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute '{method}' on 'NamedNodeMap': parameter 1 is not of type 'Attr'."
+            ),
+        );
+        return;
+    };
+    let Some(attribute_record) = super::attr::record(scope, attribute) else {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute '{method}' on 'NamedNodeMap': parameter 1 is not of type 'Attr'."
+            ),
+        );
         return;
     };
     if let Some(current_owner) = attribute_record.owner_element.as_ref() {
@@ -305,7 +506,9 @@ pub(crate) fn set_item(
             throw_dom_exception(
                 scope,
                 "InUseAttributeError",
-                "The attribute is already in use by another element",
+                &format!(
+                    "Failed to execute '{method}' on 'NamedNodeMap': The node provided is an attribute node that is already an attribute of another Element; attribute nodes must be explicitly cloned."
+                ),
             );
             return;
         }
@@ -355,7 +558,6 @@ fn replace_attribute_object(
     let previous = map_record(scope, map)
         .map(|record| record.attributes)
         .unwrap_or_default();
-    remove_own_attribute_properties(scope, map, &previous);
     let mut next = previous;
     if let Some(index) = next.iter().position(|candidate| {
         let candidate = v8::Local::new(scope, candidate);
@@ -366,7 +568,6 @@ fn replace_attribute_object(
     } else {
         next.push(v8::Global::new(scope, replacement));
     }
-    define_own_attribute_properties(scope, map, &next);
     if let Some(record) = scope
         .get_slot_mut::<NamedNodeMapStore>()
         .and_then(|store| store.records.get_mut(&map.get_identity_hash().get()))
@@ -381,6 +582,7 @@ pub(crate) fn remove_item(
     mut result: v8::ReturnValue<'_>,
     namespace: Option<Option<String>>,
     name: &str,
+    method: &str,
 ) {
     let Some(element) = owner(scope, map) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
@@ -398,7 +600,9 @@ pub(crate) fn remove_item(
         throw_dom_exception(
             scope,
             "NotFoundError",
-            "No attribute with the requested name exists",
+            &format!(
+                "Failed to execute '{method}' on 'NamedNodeMap': No item with name '{name}' was found."
+            ),
         );
         return;
     };

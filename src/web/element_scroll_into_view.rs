@@ -8,8 +8,17 @@ pub(crate) fn define(
 fn scroll_into_view(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
+    if super::element::record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "Element",
+            "scrollIntoView",
+            result,
+        );
+        return;
+    }
     if !super::element_method_support::ensure(scope, arguments.this()) {
         return;
     }
@@ -24,6 +33,9 @@ fn scroll_into_view(
         false,
         options.nearest_container,
     );
+    if let Ok(promise) = super::element_method_support::resolved_undefined(scope) {
+        result.set(promise.into());
+    }
 }
 
 #[derive(Clone, Copy)]

@@ -122,12 +122,15 @@ pub(crate) fn is_labellable(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> bool {
-    super::element::record(scope, object).is_some_and(|record| match record.tag_name.as_str() {
-        "BUTTON" | "METER" | "OUTPUT" | "PROGRESS" | "SELECT" | "TEXTAREA" => true,
-        "INPUT" => !super::element::attribute_value(scope, object, "type")
-            .is_some_and(|value| value.eq_ignore_ascii_case("hidden")),
-        _ => false,
-    })
+    super::custom_element_registry::is_form_associated(scope, object)
+        || super::element::record(scope, object).is_some_and(|record| {
+            match record.tag_name.as_str() {
+                "BUTTON" | "METER" | "OUTPUT" | "PROGRESS" | "SELECT" | "TEXTAREA" => true,
+                "INPUT" => !super::element::attribute_value(scope, object, "type")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("hidden")),
+                _ => false,
+            }
+        })
 }
 pub(crate) fn find_by_id<'s>(
     scope: &v8::PinScope<'s, '_>,

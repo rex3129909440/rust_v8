@@ -30,6 +30,10 @@ fn set_zoom_and_pan(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = arguments.get(0).int32_value(scope).unwrap_or(0);
     if value != ZOOM_AND_PAN_DISABLE && value != ZOOM_AND_PAN_MAGNIFY {
         crate::webidl::throw_type_error(scope, "Invalid SVG zoomAndPan value");

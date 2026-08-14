@@ -55,7 +55,10 @@ pub(crate) fn illegal(
     _: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    crate::webidl::throw_type_error(s, "Illegal constructor")
+    crate::webidl::throw_type_error(
+        s,
+        "Failed to construct 'HIDInputReportEvent': Illegal constructor",
+    )
 }
 pub(crate) fn create<'s>(
     s: &mut v8::PinScope<'s, '_>,

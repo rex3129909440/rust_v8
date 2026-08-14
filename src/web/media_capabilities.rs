@@ -1,6 +1,7 @@
 #[derive(Default)]
 pub(crate) struct MediaCapabilitiesStore {
     constructor: crate::webidl::RealmConstructor,
+    identities: std::collections::HashSet<i32>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -53,7 +54,18 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
         return Err("cannot create MediaCapabilities".to_owned());
     }
+    scope
+        .get_slot_mut::<MediaCapabilitiesStore>()
+        .ok_or_else(|| "MediaCapabilities state was not prepared".to_owned())?
+        .identities
+        .insert(object.get_identity_hash().get());
     Ok(object)
+}
+
+fn is_instance(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    scope
+        .get_slot::<MediaCapabilitiesStore>()
+        .is_some_and(|store| store.identities.contains(&object.get_identity_hash().get()))
 }
 
 fn illegal_constructor(
@@ -72,6 +84,15 @@ fn decoding_info(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !is_instance(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "MediaCapabilities",
+            "decodingInfo",
+            result,
+        );
+        return;
+    }
     let Some(configuration) = configuration(scope, arguments.get(0), "MediaDecodingConfiguration")
     else {
         return;
@@ -100,6 +121,15 @@ fn encoding_info(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !is_instance(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "MediaCapabilities",
+            "encodingInfo",
+            result,
+        );
+        return;
+    }
     let Some(configuration) = configuration(scope, arguments.get(0), "MediaEncodingConfiguration")
     else {
         return;

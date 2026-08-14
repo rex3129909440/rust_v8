@@ -312,7 +312,12 @@ fn set_sink_id(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "AudioContext",
+            "setSinkId",
+            result,
+        );
         return;
     }
 
@@ -423,7 +428,7 @@ fn close(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(snapshot) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "AudioContext", "close", result);
         return;
     };
     if snapshot.closed {
@@ -447,7 +452,7 @@ fn resume(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "AudioContext", "resume", result);
         return;
     };
     if record.closed {
@@ -464,7 +469,7 @@ fn suspend(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "AudioContext", "suspend", result);
         return;
     };
     if record.closed {
@@ -498,16 +503,30 @@ fn get_output_timestamp(
     };
     let current_time =
         super::base_audio_context::current_time(scope, arguments.this()).unwrap_or(0.0);
+    // Blink exposes the audio device's output position here, not the render
+    // graph's current position.  The graph is ahead by both the processing
+    // latency (`baseLatency`) and the host/device latency (`outputLatency`).
+    // We do not have a physical audio callback in the sandbox, so use the
+    // configured latency estimate while preserving the normative ordering
+    // `currentTime > contextTime` once rendering has started.
+    let output_delay = record.base_latency + record.output_latency;
     let context_time = if current_time <= 0.0 {
         0.0
     } else {
-        (current_time - record.base_latency).max(0.0)
+        (current_time - output_delay).max(0.0)
     };
     let performance_time = if context_time <= 0.0 {
         0.0
     } else {
-        let now = super::performance::now_for_current_realm(scope).unwrap_or(0.0);
-        (now - (current_time - context_time) * 1_000.0).max(0.0)
+        // `performanceTime` is the estimated wall-clock moment at which the
+        // frame at `contextTime` is being rendered by the output device.  A
+        // real Chromium audio callback can make this snapshot a few
+        // milliseconds stale.  With no device callback, the best estimate is
+        // the current realm clock; subtracting the output latency a second
+        // time would describe an older, unrelated frame.
+        super::performance::now_for_current_realm(scope)
+            .unwrap_or(0.0)
+            .max(0.0)
     };
     let timestamp = v8::Object::new(scope);
     define_number(scope, timestamp, "contextTime", context_time);

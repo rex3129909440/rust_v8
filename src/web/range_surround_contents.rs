@@ -10,6 +10,10 @@ fn surround_contents(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if super::abstract_range::record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(new_parent) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "The argument is not a Node");
         return;
@@ -26,15 +30,11 @@ fn surround_contents(
         );
         return;
     }
-    if super::abstract_range::record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if super::range_contents::has_partially_contained_non_text(scope, arguments.this()) {
         super::node::throw_dom_exception(
             scope,
             "InvalidStateError",
-            "The range partially contains a non-Text node",
+            "Failed to execute 'surroundContents' on 'Range': The Range has partially selected a non-Text node.",
         );
         return;
     }

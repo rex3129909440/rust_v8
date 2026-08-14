@@ -176,7 +176,12 @@ fn create_writable(
     r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemFileHandle",
+            "createWritable",
+            r,
+        );
         return;
     };
     let bytes = v
@@ -195,7 +200,7 @@ fn get_file(
     r: v8::ReturnValue<'_>,
 ) {
     let Some(v) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "FileSystemFileHandle", "getFile", r);
         return;
     };
     let name = super::file_system_handle::record(s, a.this())
@@ -216,6 +221,10 @@ fn move_file(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "FileSystemFileHandle", "move", r);
+        return;
+    }
     let new_name = crate::webidl::value_to_string(s, a.get(0));
     if let Some(v) = s
         .get_slot_mut::<super::file_system_handle::FileSystemHandleStore>()
@@ -224,7 +233,5 @@ fn move_file(
         v.name = new_name;
         let x = v8::undefined(s);
         resolve(s, x.into(), r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }

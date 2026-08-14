@@ -206,6 +206,8 @@ pub(crate) mod csp_violation_report_body;
 pub(crate) mod css;
 pub(crate) mod css_animation;
 pub(crate) mod css_calculation;
+pub(crate) mod css_computed_style_initial_values;
+pub(crate) mod css_computed_style_properties;
 pub(crate) mod css_condition_rule;
 pub(crate) mod css_container_rule;
 pub(crate) mod css_counter_style_rule;
@@ -620,6 +622,7 @@ pub(crate) mod element;
 pub(crate) mod element_active_view_transition;
 pub(crate) mod element_after;
 pub(crate) mod element_animate;
+pub(crate) mod element_aria_actions_elements;
 pub(crate) mod element_aria_active_descendant_element;
 pub(crate) mod element_aria_atomic;
 pub(crate) mod element_aria_auto_complete;
@@ -854,6 +857,7 @@ pub(crate) mod file_system_sync_access_handle;
 pub(crate) mod file_system_sync_access_handle_close;
 pub(crate) mod file_system_sync_access_handle_flush;
 pub(crate) mod file_system_sync_access_handle_get_size;
+pub(crate) mod file_system_sync_access_handle_mode_property;
 pub(crate) mod file_system_sync_access_handle_read;
 pub(crate) mod file_system_sync_access_handle_truncate;
 pub(crate) mod file_system_sync_access_handle_write;
@@ -868,6 +872,7 @@ pub(crate) mod font_face;
 pub(crate) mod font_face_set;
 pub(crate) mod font_face_set_load_event;
 pub(crate) mod font_face_set_load_event_fontfaces_property;
+pub(crate) mod font_metric_tables;
 pub(crate) mod form_data;
 pub(crate) mod form_data_event;
 pub(crate) mod form_data_event_form_data_property;
@@ -954,6 +959,7 @@ pub(crate) mod html_area_element;
 pub(crate) mod html_audio_element;
 pub(crate) mod html_base_element;
 pub(crate) mod html_body_element;
+pub(crate) mod html_body_element_orientation_handler;
 pub(crate) mod html_br_element;
 pub(crate) mod html_button_element;
 pub(crate) mod html_canvas_element;
@@ -1040,6 +1046,7 @@ pub(crate) mod idb_version_change_event_data_loss_message_property;
 pub(crate) mod idb_version_change_event_data_loss_property;
 pub(crate) mod idb_version_change_event_new_version_property;
 pub(crate) mod idb_version_change_event_old_version_property;
+pub(crate) mod inline_text_layout;
 pub(crate) mod input_event_data_property;
 pub(crate) mod input_event_data_transfer_property;
 pub(crate) mod input_event_get_target_ranges;
@@ -1156,6 +1163,7 @@ pub(crate) mod progress_event_loaded_property;
 pub(crate) mod progress_event_total_property;
 pub(crate) mod promise_rejection_event_promise_property;
 pub(crate) mod promise_rejection_event_reason_property;
+pub(crate) mod rendering_performance_state;
 pub(crate) mod rtc_data_channel_event_channel_property;
 pub(crate) mod rtc_dtmf_tone_change_event_tone_property;
 pub(crate) mod rtc_error_event_error_property;
@@ -1265,7 +1273,13 @@ pub(crate) mod xr_visibility_mask_change_event_indices_property;
 pub(crate) mod xr_visibility_mask_change_event_session_property;
 pub(crate) mod xr_visibility_mask_change_event_vertices_property;
 
+pub(crate) mod android_api_support;
 pub(crate) mod audio_metadata;
+pub(crate) mod barcode_detector;
+pub(crate) mod contact_address;
+pub(crate) mod contacts_manager;
+pub(crate) mod content_index;
+pub(crate) mod cookie_deprecation_label;
 pub(crate) mod dedicated_worker_global_scope_close;
 pub(crate) mod dedicated_worker_global_scope_name_property;
 pub(crate) mod dedicated_worker_global_scope_onmessage_property;
@@ -1276,6 +1290,9 @@ pub(crate) mod dedicated_worker_global_scope_webkit_request_file_system;
 pub(crate) mod dedicated_worker_global_scope_webkit_request_file_system_sync;
 pub(crate) mod dedicated_worker_global_scope_webkit_resolve_local_file_system_sync_url;
 pub(crate) mod dedicated_worker_global_scope_webkit_resolve_local_file_system_url;
+pub(crate) mod document_model_context_property;
+pub(crate) mod document_touch_handlers;
+pub(crate) mod host_input;
 pub(crate) mod html_anchor_element_attribution_src_property;
 pub(crate) mod html_anchor_element_charset_property;
 pub(crate) mod html_anchor_element_coords_property;
@@ -1544,6 +1561,7 @@ pub(crate) mod html_element_style_property;
 pub(crate) mod html_element_tab_index_property;
 pub(crate) mod html_element_title_property;
 pub(crate) mod html_element_toggle_popover;
+pub(crate) mod html_element_touch_handlers;
 pub(crate) mod html_element_translate_property;
 pub(crate) mod html_element_virtual_keyboard_policy_property;
 pub(crate) mod html_element_writing_suggestions_property;
@@ -1635,6 +1653,7 @@ pub(crate) mod html_frame_set_element_onscroll_property;
 pub(crate) mod html_frame_set_element_onstorage_property;
 pub(crate) mod html_frame_set_element_onunhandledrejection_property;
 pub(crate) mod html_frame_set_element_onunload_property;
+pub(crate) mod html_frame_set_element_orientation_handler;
 pub(crate) mod html_frame_set_element_rows_property;
 pub(crate) mod html_geolocation_element;
 pub(crate) mod html_geolocation_element_accuracymode_property;
@@ -1725,6 +1744,7 @@ pub(crate) mod html_input_element_accept_property;
 pub(crate) mod html_input_element_align_property;
 pub(crate) mod html_input_element_alt_property;
 pub(crate) mod html_input_element_autocomplete_property;
+pub(crate) mod html_input_element_capture_property;
 pub(crate) mod html_input_element_check_validity;
 pub(crate) mod html_input_element_checked_property;
 pub(crate) mod html_input_element_default_checked_property;
@@ -2091,6 +2111,7 @@ pub(crate) mod html_u_list_element;
 pub(crate) mod html_u_list_element_compact_property;
 pub(crate) mod html_u_list_element_type_property;
 pub(crate) mod html_unknown_element;
+pub(crate) mod html_user_media_element;
 pub(crate) mod html_video_element;
 pub(crate) mod html_video_element_cancel_video_frame_callback;
 pub(crate) mod html_video_element_disable_picture_in_picture_property;
@@ -2144,6 +2165,7 @@ pub(crate) mod input_device_capabilities;
 pub(crate) mod input_device_info;
 pub(crate) mod input_event;
 pub(crate) mod integrity_violation_report_body;
+pub(crate) mod interaction_contentful_paint;
 pub(crate) mod interest_event;
 pub(crate) mod intersection_observer;
 pub(crate) mod intersection_observer_entry;
@@ -2153,6 +2175,7 @@ pub(crate) mod keyboard_event;
 pub(crate) mod keyboard_layout_map;
 pub(crate) mod keyframe_effect;
 pub(crate) mod language_detector;
+pub(crate) mod language_model;
 pub(crate) mod largest_contentful_paint;
 pub(crate) mod launch_params;
 pub(crate) mod launch_queue;
@@ -2280,6 +2303,7 @@ pub(crate) mod math_ml_element_onwebkittransitionend_property;
 pub(crate) mod math_ml_element_onwheel_property;
 pub(crate) mod math_ml_element_style_property;
 pub(crate) mod math_ml_element_tab_index_property;
+pub(crate) mod math_ml_element_touch_handlers;
 pub(crate) mod media_capabilities;
 pub(crate) mod media_device_info;
 pub(crate) mod media_devices;
@@ -2299,6 +2323,7 @@ pub(crate) mod media_recorder;
 pub(crate) mod media_session;
 pub(crate) mod media_source;
 pub(crate) mod media_source_handle;
+pub(crate) mod media_source_handle_property;
 pub(crate) mod media_stream;
 pub(crate) mod media_stream_audio_destination_node;
 pub(crate) mod media_stream_audio_source_node;
@@ -2330,6 +2355,7 @@ pub(crate) mod midi_output_map;
 pub(crate) mod midi_port;
 pub(crate) mod mime_type;
 pub(crate) mod mime_type_array;
+pub(crate) mod model_context;
 pub(crate) mod mouse_event;
 pub(crate) mod move_by_global;
 pub(crate) mod move_to_global;
@@ -2371,6 +2397,8 @@ pub(crate) mod navigator;
 pub(crate) mod navigator_app_code_name_property;
 pub(crate) mod navigator_app_name_property;
 pub(crate) mod navigator_app_version_property;
+pub(crate) mod navigator_contacts_property;
+pub(crate) mod navigator_cookie_deprecation_label_property;
 pub(crate) mod navigator_cookie_enabled_property;
 pub(crate) mod navigator_device_memory_property;
 pub(crate) mod navigator_do_not_track_property;
@@ -2381,6 +2409,7 @@ pub(crate) mod navigator_languages_property;
 pub(crate) mod navigator_login;
 pub(crate) mod navigator_managed_data;
 pub(crate) mod navigator_max_touch_points_property;
+pub(crate) mod navigator_model_context_property;
 pub(crate) mod navigator_on_line_property;
 pub(crate) mod navigator_pdf_viewer_enabled_property;
 pub(crate) mod navigator_platform_property;
@@ -2396,12 +2425,19 @@ pub(crate) mod navigator_user_agent_property;
 pub(crate) mod navigator_vendor_property;
 pub(crate) mod navigator_vendor_sub_property;
 pub(crate) mod navigator_webdriver_property;
+pub(crate) mod ndef_message;
+pub(crate) mod ndef_reader;
+pub(crate) mod ndef_reading_event;
+pub(crate) mod ndef_record;
 pub(crate) mod network_information;
+pub(crate) mod network_information_downlink_max_property;
 pub(crate) mod network_information_downlink_property;
 pub(crate) mod network_information_effective_type_property;
 pub(crate) mod network_information_onchange_property;
+pub(crate) mod network_information_ontypechange_property;
 pub(crate) mod network_information_rtt_property;
 pub(crate) mod network_information_save_data_property;
+pub(crate) mod network_information_type_property;
 pub(crate) mod node;
 pub(crate) mod node_append_child;
 pub(crate) mod node_base_uri_property;
@@ -2542,6 +2578,7 @@ pub(crate) mod on_mouse_up;
 pub(crate) mod on_mouse_wheel;
 pub(crate) mod on_offline;
 pub(crate) mod on_online;
+pub(crate) mod on_orientation_change;
 pub(crate) mod on_page_hide;
 pub(crate) mod on_page_reveal;
 pub(crate) mod on_page_show;
@@ -2582,6 +2619,10 @@ pub(crate) mod on_submit;
 pub(crate) mod on_suspend;
 pub(crate) mod on_time_update;
 pub(crate) mod on_toggle;
+pub(crate) mod on_touch_cancel;
+pub(crate) mod on_touch_end;
+pub(crate) mod on_touch_move;
+pub(crate) mod on_touch_start;
 pub(crate) mod on_transition_cancel;
 pub(crate) mod on_transition_end;
 pub(crate) mod on_transition_run;
@@ -2645,6 +2686,7 @@ pub(crate) mod performance_paint_timing;
 pub(crate) mod performance_resource_timing;
 pub(crate) mod performance_script_timing;
 pub(crate) mod performance_server_timing;
+pub(crate) mod performance_soft_navigation;
 pub(crate) mod performance_timing;
 pub(crate) mod performance_timing_confidence;
 pub(crate) mod periodic_sync_manager;
@@ -2891,6 +2933,7 @@ pub(crate) mod service_worker_registration_active_property;
 pub(crate) mod service_worker_registration_background_fetch_property;
 pub(crate) mod service_worker_registration_cookies_property;
 pub(crate) mod service_worker_registration_get_notifications;
+pub(crate) mod service_worker_registration_index_property;
 pub(crate) mod service_worker_registration_installing_property;
 pub(crate) mod service_worker_registration_navigation_preload_property;
 pub(crate) mod service_worker_registration_onupdatefound_property;
@@ -2941,6 +2984,7 @@ pub(crate) mod shared_storage;
 pub(crate) mod shared_storage_append_method;
 pub(crate) mod shared_storage_clear_method;
 pub(crate) mod shared_storage_delete_method;
+pub(crate) mod shared_storage_get;
 pub(crate) mod shared_storage_global;
 pub(crate) mod shared_storage_modifier_method;
 pub(crate) mod shared_storage_set_method;
@@ -3177,6 +3221,7 @@ pub(crate) mod svg_element_onwheel_property;
 pub(crate) mod svg_element_owner_svgelement_property;
 pub(crate) mod svg_element_style_property;
 pub(crate) mod svg_element_tab_index_property;
+pub(crate) mod svg_element_touch_handlers;
 pub(crate) mod svg_element_viewport_element_property;
 pub(crate) mod svg_ellipse_element;
 pub(crate) mod svg_ellipse_element_cx_property;
@@ -3674,6 +3719,7 @@ pub(crate) mod wake_lock_sentinel;
 pub(crate) mod web_assembly_global;
 pub(crate) mod web_kit_css_matrix;
 pub(crate) mod web_kit_mutation_observer;
+pub(crate) mod web_mcp_event;
 pub(crate) mod web_socket;
 pub(crate) mod web_socket_error;
 pub(crate) mod web_socket_stream;
@@ -3723,6 +3769,7 @@ pub(crate) mod window_global;
 pub(crate) mod window_length;
 pub(crate) mod window_lifecycle_state;
 pub(crate) mod window_name;
+pub(crate) mod window_orientation;
 pub(crate) mod window_properties;
 pub(crate) mod window_status;
 pub(crate) mod window_view_state;
@@ -3892,6 +3939,22 @@ pub(crate) mod xr_webgl_sub_image;
 pub(crate) mod xslt_processor;
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
+    barcode_detector::prepare(isolate);
+    contact_address::prepare(isolate);
+    contacts_manager::prepare(isolate);
+    content_index::prepare(isolate);
+    cookie_deprecation_label::prepare(isolate);
+    model_context::prepare(isolate);
+    ndef_message::prepare(isolate);
+    ndef_reader::prepare(isolate);
+    ndef_reading_event::prepare(isolate);
+    ndef_record::prepare(isolate);
+    on_orientation_change::prepare(isolate);
+    on_touch_cancel::prepare(isolate);
+    on_touch_end::prepare(isolate);
+    on_touch_move::prepare(isolate);
+    on_touch_start::prepare(isolate);
+    web_mcp_event::prepare(isolate);
     structured_clone::prepare(isolate);
     cookie_change_event::prepare(isolate);
     cookie_store::prepare(isolate);
@@ -4043,6 +4106,7 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     identity_provider::prepare(isolate);
     navigator_login::prepare(isolate);
     language_detector::prepare(isolate);
+    language_model::prepare(isolate);
     lock::prepare(isolate);
     lock_manager::prepare(isolate);
     service_worker::prepare(isolate);
@@ -4260,6 +4324,8 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     font_face_set_load_event::prepare(isolate);
     form_data::prepare(isolate);
     form_data_event::prepare(isolate);
+    host_input::prepare(isolate);
+    root_window_proxy::prepare(isolate);
     node_list::prepare(isolate);
     radio_node_list::prepare(isolate);
     option::prepare(isolate);
@@ -4541,6 +4607,7 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     indexed_db_global::prepare(isolate);
     alert_global::prepare(isolate);
     animation_frame_state::prepare(isolate);
+    rendering_performance_state::prepare(isolate);
     idle_callback_state::prepare(isolate);
     timer_state::prepare(isolate);
     window_lifecycle_state::prepare(isolate);
@@ -4597,6 +4664,7 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     html_audio_element::prepare(isolate);
     html_video_element::prepare(isolate);
     html_unknown_element::prepare(isolate);
+    html_user_media_element::prepare(isolate);
     html_u_list_element::prepare(isolate);
     html_track_element::prepare(isolate);
     html_title_element::prepare(isolate);
@@ -4646,6 +4714,7 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     input_event::prepare(isolate);
     interest_event::prepare(isolate);
     intersection_observer::prepare(isolate);
+    interaction_contentful_paint::prepare(isolate);
     intersection_observer_entry::prepare(isolate);
     keyboard_event::prepare(isolate);
     keyframe_effect::prepare(isolate);
@@ -4719,6 +4788,7 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     performance_observer_entry_list::prepare(isolate);
     performance_paint_timing::prepare(isolate);
     performance_resource_timing::prepare(isolate);
+    performance_soft_navigation::prepare(isolate);
     performance_script_timing::prepare(isolate);
     performance_server_timing::prepare(isolate);
     performance_timing::prepare(isolate);
@@ -5001,13 +5071,18 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     let ran_abort_timeout = abort_signal::run_pending_tasks(scope);
     let ran_scheduler = scheduler::run_pending_tasks(scope);
     let ran_xr = xr_session::run_pending_tasks(scope);
-    let ran_animation = animation_frame_state::run_ready(scope);
+    // Resource-completion tasks queued earlier in the originating script task
+    // run before that task's requested rendering opportunity.  This matters
+    // for immediately available data/blob/replay images: Edge paints the
+    // decoded image on the first frame instead of emitting a premature empty
+    // image-paint record and correcting it on a later frame.
     let ran_image = html_image_element::run_pending_tasks(scope);
     let ran_media = html_media_element::run_pending_tasks(scope);
-    let ran_timer = timer_state::run_ready(scope);
-    let ran_worker = worker::run_pending_tasks(scope);
     let ran_script = html_script_element::run_pending_tasks(scope);
     let ran_link = html_link_element::run_pending_tasks(scope);
+    let ran_animation = animation_frame_state::run_ready(scope);
+    let ran_timer = timer_state::run_ready(scope);
+    let ran_worker = worker::run_pending_tasks(scope);
     service_worker_container::run_pending_tasks(scope);
     let ran_audio_worklet = audio_worklet_node::run_pending(scope);
     let ran_audio_source = audio_scheduled_source_node::run_pending(scope);
@@ -5048,6 +5123,7 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
         timer_state::next_due(scope),
         worker::next_due(scope),
         audio_scheduled_source_node::next_due(scope),
+        idle_callback_state::next_due(scope),
     ]
     .into_iter()
     .flatten()
@@ -5058,13 +5134,14 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     if !crate::determinism::wait_until_elapsed(scope, due_ms) {
         return false;
     }
-    abort_signal::run_pending_tasks(scope)
+    let ran_higher_priority = abort_signal::run_pending_tasks(scope)
         | scheduler::run_pending_tasks(scope)
         | xr_session::run_pending_tasks(scope)
         | animation_frame_state::run_ready(scope)
         | timer_state::run_ready(scope)
         | worker::run_pending_tasks(scope)
-        | audio_scheduled_source_node::run_pending(scope)
+        | audio_scheduled_source_node::run_pending(scope);
+    ran_higher_priority || idle_callback_state::run(scope)
 }
 
 pub(crate) fn enable_native_trace_for_existing_realms(
@@ -5084,16 +5161,33 @@ pub(crate) fn disable_native_trace_for_existing_realms(isolate: &mut v8::OwnedIs
 pub(crate) fn install_after_late_intrinsics(
     scope: &mut v8::PinScope<'_, '_>,
 ) -> Result<(), String> {
+    crate::trace::install_json_intrinsic_trace(scope, "window")?;
+    crate::browser_surface::apply_window_phase(
+        scope,
+        crate::browser_surface::WindowSurfacePhase::BeforeChrome,
+    )?;
     chrome_global::install(scope)
 }
 
 pub(crate) fn install_after_webassembly(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
+    // Android exposes the interfaces in this block immediately after the V8
+    // `console` anchor, before Window's non-configurable `window` property.
+    // They are preinstalled by install_prefix and must not be installed twice.
+    if crate::browser_surface::current_version(scope).is_android() {
+        return Ok(());
+    }
+    install_after_webassembly_impl(scope)
+}
+
+fn install_after_webassembly_impl(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     crash_report_global::install(scope)?;
     cookie_store_global::install(scope)?;
     on_device_motion::install(scope)?;
     on_device_orientation::install(scope)?;
     on_device_orientation_absolute::install(scope)?;
-    on_pointer_raw_update::install(scope)?;
+    if crate::browser_surface::current_version(scope).major() >= 142 {
+        on_pointer_raw_update::install(scope)?;
+    }
     caches_global::install(scope)?;
     document_picture_in_picture_global::install(scope)?;
     shared_storage_global::install(scope)?;
@@ -5245,6 +5339,7 @@ pub(crate) fn install_after_webassembly(scope: &mut v8::PinScope<'_, '_>) -> Res
     identity_provider::install(scope)?;
     navigator_login::install(scope)?;
     language_detector::install(scope)?;
+    language_model::install(scope)?;
     lock::install(scope)?;
     lock_manager::install(scope)?;
     service_worker::install(scope)?;
@@ -5432,6 +5527,18 @@ pub(crate) fn install_after_webassembly(scope: &mut v8::PinScope<'_, '_>) -> Res
 
 pub(crate) fn install_prefix(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     install_window_interfaces(scope)?;
+    if crate::browser_surface::current_version(scope).is_android() {
+        // HTTPS evidence from Chromium Android 140-151 places speech, media,
+        // sensor, WebGPU and mobile-only constructors before Window globals.
+        // Preinstall them while every property after `console` is still
+        // configurable; the phase reconciler stages late globals for their
+        // later positions around `top` and `chrome`.
+        install_after_webassembly_impl(scope)?;
+    }
+    crate::browser_surface::apply_window_phase(
+        scope,
+        crate::browser_surface::WindowSurfacePhase::Interfaces,
+    )?;
     install_window_globals(scope)
 }
 
@@ -5444,6 +5551,14 @@ pub(crate) fn install_window_interfaces(scope: &mut v8::PinScope<'_, '_>) -> Res
     webkit_media_stream::install(scope)?;
     web_kit_mutation_observer::install(scope)?;
     web_kit_css_matrix::install(scope)?;
+    // Chromium 140 still placed XSLTProcessor with the early XSLT/XPath
+    // constructor block. From 141 onward it moved to the late interface block.
+    if matches!(
+        crate::browser_surface::current_version(scope).major(),
+        140 | 144
+    ) {
+        xslt_processor::install(scope)?;
+    }
     xpath_result::install(scope)?;
     xpath_expression::install(scope)?;
     xpath_evaluator::install(scope)?;
@@ -5686,6 +5801,9 @@ pub(crate) fn install_window_interfaces(scope: &mut v8::PinScope<'_, '_>) -> Res
     rtc_certificate::install(scope)?;
     promise_rejection_event::install(scope)?;
     progress_event::install(scope)?;
+    if crate::browser_surface::current_version(scope).major() <= 146 {
+        profiler::install(scope)?;
+    }
     processing_instruction::install(scope)?;
     pop_state_event::install(scope)?;
     pointer_event::install(scope)?;
@@ -5700,6 +5818,8 @@ pub(crate) fn install_window_interfaces(scope: &mut v8::PinScope<'_, '_>) -> Res
     performance_server_timing::install(scope)?;
     performance_script_timing::install(scope)?;
     performance_resource_timing::install(scope)?;
+    interaction_contentful_paint::install(scope)?;
+    performance_soft_navigation::install(scope)?;
     performance_paint_timing::install(scope)?;
     performance_observer_entry_list::install(scope)?;
     performance_observer::install(scope)?;
@@ -5805,6 +5925,7 @@ pub(crate) fn install_window_interfaces(scope: &mut v8::PinScope<'_, '_>) -> Res
     hash_change_event::install(scope)?;
     html_video_element::install(scope)?;
     html_unknown_element::install(scope)?;
+    html_user_media_element::install(scope)?;
     html_u_list_element::install(scope)?;
     html_track_element::install(scope)?;
     html_title_element::install(scope)?;
@@ -5893,6 +6014,7 @@ pub(crate) fn install_window_interfaces(scope: &mut v8::PinScope<'_, '_>) -> Res
     form_data::install(scope)?;
     font_face_set_load_event::install(scope)?;
     font_face::install(scope)?;
+    font_face_set::install(scope)?;
     focus_event::install(scope)?;
     file_reader::install(scope)?;
     file_list::install(scope)?;
@@ -6053,7 +6175,17 @@ pub(crate) fn install_window_interfaces(scope: &mut v8::PinScope<'_, '_>) -> Res
     abstract_range::install(scope)?;
     abort_signal::install(scope)?;
     abort_controller::install(scope)?;
-    Ok(())
+    barcode_detector::install(scope)?;
+    contact_address::install(scope)?;
+    contacts_manager::install(scope)?;
+    content_index::install(scope)?;
+    cookie_deprecation_label::install(scope)?;
+    model_context::install(scope)?;
+    ndef_message::install(scope)?;
+    ndef_reader::install(scope)?;
+    ndef_reading_event::install(scope)?;
+    ndef_record::install(scope)?;
+    web_mcp_event::install(scope)
 }
 
 fn install_window_globals(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
@@ -6115,6 +6247,14 @@ pub(crate) fn install_context_window_globals(
 pub(crate) fn install_window_event_handlers(
     scope: &mut v8::PinScope<'_, '_>,
 ) -> Result<(), String> {
+    if crate::browser_surface::current_version(scope).is_android() {
+        on_orientation_change::install(scope)?;
+        on_touch_cancel::install(scope)?;
+        on_touch_end::install(scope)?;
+        on_touch_move::install(scope)?;
+        on_touch_start::install(scope)?;
+        window_orientation::install(scope)?;
+    }
     on_search::install(scope)?;
     on_app_installed::install(scope)?;
     on_before_install_prompt::install(scope)?;
@@ -6197,6 +6337,9 @@ pub(crate) fn install_window_event_handlers(
     on_lost_pointer_capture::install(scope)?;
     on_pointer_down::install(scope)?;
     on_pointer_move::install(scope)?;
+    if crate::browser_surface::current_version(scope).major() <= 141 {
+        on_pointer_raw_update::install(scope)?;
+    }
     on_pointer_up::install(scope)?;
     on_pointer_cancel::install(scope)?;
     on_pointer_over::install(scope)?;

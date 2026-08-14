@@ -10,8 +10,12 @@ fn generate_key(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if !super::subtle_crypto_support::require_receiver(scope, &arguments)
-        || !super::subtle_crypto_support::require_arguments(scope, &arguments, 3, "generateKey")
+    if !super::subtle_crypto_support::require_receiver(
+        scope,
+        &arguments,
+        "generateKey",
+        &mut result,
+    ) || !super::subtle_crypto_support::require_arguments(scope, &arguments, 3, "generateKey")
     {
         return;
     }

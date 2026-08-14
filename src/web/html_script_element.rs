@@ -69,9 +69,11 @@ pub(crate) fn ensure_constructor<'s>(
     super::html_script_element_html_for_property::define(scope, p)?;
     super::html_script_element_integrity_property::define(scope, p)?;
     super::html_script_element_blocking_property::define(scope, p)?;
+    crate::webidl::define_accessor(scope, p, "cacheHint", get_cache_hint, set_cache_hint)?;
     super::html_script_element_text_content_property::define(scope, p)?;
     super::html_script_element_inner_text_property::define(scope, p)?;
     crate::webidl::finish_constructor(scope, p, c)?;
+    crate::webidl::define_method(scope, c.into(), "supports", 1, supports)?;
     super::html_script_element_attribution_src_property::define(scope, p)?;
     let stored = v8::Global::new(scope, c);
     scope
@@ -80,6 +82,65 @@ pub(crate) fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, stored);
     Ok(c)
+}
+
+fn get_cache_hint(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if let Some(record) = record(scope, arguments.this()) {
+        let value = record
+            .strings
+            .get("cacheHint")
+            .map(String::as_str)
+            .unwrap_or("");
+        if let Some(value) = v8::String::new(scope, value) {
+            result.set(value.into());
+        }
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
+}
+
+fn set_cache_hint(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let value = crate::webidl::value_to_string(scope, arguments.get(0));
+    if let Some(record) = scope
+        .get_slot_mut::<HtmlScriptElementStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get_mut(&arguments.this().get_identity_hash().get())
+        })
+    {
+        record.strings.insert("cacheHint".to_owned(), value);
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
+}
+
+fn supports(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'supports' on 'HTMLScriptElement': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let script_type = crate::webidl::value_to_string(scope, arguments.get(0));
+    let supported = matches!(
+        script_type.as_str(),
+        "classic" | "module" | "importmap" | "speculationrules"
+    );
+    result.set(v8::Boolean::new(scope, supported).into());
 }
 pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -91,7 +152,11 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLScriptElement".to_owned());
     }
     super::html_element::attach(scope, o, "SCRIPT");
-    let blocking = super::dom_token_list::create(scope, "")?;
+    let blocking = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::Blocking,
+    )?;
     let blocking = v8::Global::new(scope, blocking);
     scope
         .get_slot_mut::<HtmlScriptElementStore>()
@@ -431,6 +496,8 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
     };
     let context = v8::Local::new(scope, &pending.context);
     let script_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_current_task_realm(script_scope);
+    let task_start = super::performance_observer::task_start(script_scope);
     let element = v8::Local::new(script_scope, &pending.element);
     if let Some(source) = pending.source {
         let success = if pending.module {
@@ -446,6 +513,10 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
         );
     } else {
         dispatch_completion(script_scope, element, "error");
+    }
+    script_scope.perform_microtask_checkpoint();
+    if super::performance_observer::record_completed_task(script_scope, task_start, false) {
+        script_scope.perform_microtask_checkpoint();
     }
     true
 }

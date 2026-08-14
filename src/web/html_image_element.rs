@@ -56,6 +56,7 @@ pub(crate) struct ImageRecord {
     pub(crate) natural_height: u32,
     pub(crate) intrinsic_width: u32,
     pub(crate) intrinsic_height: u32,
+    pub(crate) load_time: f64,
     pub(crate) generation: u64,
     decode_waiters: Vec<v8::Global<v8::PromiseResolver>>,
 }
@@ -981,7 +982,12 @@ pub(crate) fn decode_promise(
     result: &mut v8::ReturnValue<'_>,
 ) {
     let Some(state) = record(scope, object).map(|record| record.request_state) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "HTMLImageElement",
+            "decode",
+            *result,
+        );
         return;
     };
     let Some(resolver) = v8::PromiseResolver::new(scope) else {
@@ -1089,6 +1095,7 @@ fn schedule_image_update(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_,
         record.natural_height = 0;
         record.intrinsic_width = 0;
         record.intrinsic_height = 0;
+        record.load_time = 0.0;
         record.request_state = if candidate.is_some() {
             ImageRequestState::Pending
         } else {
@@ -1345,6 +1352,7 @@ pub(crate) fn run_pending_tasks(scope: &mut v8::PinScope<'_, '_>) -> bool {
 fn run_image_request(scope: &mut v8::PinScope<'_, '_>, request: PendingImageRequest) {
     let context = v8::Local::new(scope, &request.context);
     let request_scope = &mut v8::ContextScope::new(scope, context);
+    super::animation_frame_state::sample_current_task_realm(request_scope);
     let element = v8::Local::new(request_scope, &request.element);
     if record(request_scope, element).is_none_or(|record| record.generation != request.generation) {
         return;
@@ -1358,6 +1366,8 @@ fn run_image_request(scope: &mut v8::PinScope<'_, '_>, request: PendingImageRequ
     });
     let succeeded = dimensions.is_some();
     let (natural_width, natural_height) = dimensions.unwrap_or_default();
+    let completion_time =
+        super::performance::now_for_current_realm(request_scope).unwrap_or(request.start_time);
     let waiters = {
         let Some(record) = request_scope
             .get_slot_mut::<HtmlImageElementStore>()
@@ -1378,6 +1388,7 @@ fn run_image_request(scope: &mut v8::PinScope<'_, '_>, request: PendingImageRequ
         record.intrinsic_height = natural_height;
         record.natural_width = density_corrected_dimension(natural_width, request.density);
         record.natural_height = density_corrected_dimension(natural_height, request.density);
+        record.load_time = if succeeded { completion_time } else { 0.0 };
         std::mem::take(&mut record.decode_waiters)
     };
     if succeeded {
@@ -1388,8 +1399,6 @@ fn run_image_request(scope: &mut v8::PinScope<'_, '_>, request: PendingImageRequ
     if let Ok(resource) = &fetched
         && let Some(status) = resource.response_status
     {
-        let end_time =
-            super::performance::now_for_current_realm(request_scope).unwrap_or(request.start_time);
         let encoded_body_size = crate::content_encoding::encoded_http_body_size(
             &resource.bytes,
             &resource.content_encoding,
@@ -1400,7 +1409,7 @@ fn run_image_request(scope: &mut v8::PinScope<'_, '_>, request: PendingImageRequ
             request.url.clone(),
             "img".to_owned(),
             request.start_time,
-            (end_time - request.start_time).max(0.0),
+            (completion_time - request.start_time).max(0.0),
             status,
             encoded_body_size,
             resource.bytes.len(),

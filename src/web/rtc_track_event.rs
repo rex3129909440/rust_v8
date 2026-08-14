@@ -67,12 +67,18 @@ pub(crate) fn construct<'s>(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'RTCTrackEvent': 2 arguments required",
+            "Failed to construct 'RTCTrackEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "RTCTrackEventInit must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCTrackEvent': The provided value is not of type 'RTCTrackEventInit'.",
+        );
         return;
     };
     let Some(receiver) = required_object(scope, init, "receiver") else {
@@ -85,7 +91,6 @@ pub(crate) fn construct<'s>(
         return;
     };
     let streams = array_property(scope, init, "streams");
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
     let bubbles = super::event::boolean_property(scope, init, "bubbles");
     let cancelable = super::event::boolean_property(scope, init, "cancelable");
     let composed = super::event::boolean_property(scope, init, "composed");
@@ -167,9 +172,23 @@ pub(crate) fn required_object<'s>(
     let key = v8::String::new(scope, name)?;
     let value = init.get(scope, key.into());
     let Some(value) = value else {
-        crate::webidl::throw_type_error(scope, &format!("Required member '{name}' is undefined"));
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to construct 'RTCTrackEvent': Failed to read the '{name}' property from 'RTCTrackEventInit': Required member is undefined."
+            ),
+        );
         return None;
     };
+    if value.is_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to construct 'RTCTrackEvent': Failed to read the '{name}' property from 'RTCTrackEventInit': Required member is undefined."
+            ),
+        );
+        return None;
+    }
     match v8::Local::<v8::Object>::try_from(value) {
         Ok(value) if !value.is_null_or_undefined() => Some(value),
         _ => {

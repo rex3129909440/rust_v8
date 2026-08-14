@@ -126,6 +126,17 @@ fn set_style(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let valid = scope
+        .get_slot::<CssFunctionDeclarationsStore>()
+        .is_some_and(|store| {
+            store
+                .styles
+                .contains_key(&arguments.this().get_identity_hash().get())
+        });
+    if !valid {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(style) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         return;
     };

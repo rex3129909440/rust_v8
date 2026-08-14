@@ -9,6 +9,10 @@ fn set_html(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if super::shadow_root::record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let mut value = crate::webidl::value_to_string(scope, a.get(0));
     while let Some(start) = value.to_ascii_lowercase().find("<script") {
         if let Some(end) = value[start..].to_ascii_lowercase().find("</script>") {

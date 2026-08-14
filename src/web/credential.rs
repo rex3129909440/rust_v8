@@ -43,6 +43,13 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_readonly_accessor(scope, prototype, "id", get_id)?;
     crate::webidl::define_readonly_accessor(scope, prototype, "type", get_type)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(
+        scope,
+        constructor.into(),
+        "isConditionalMediationAvailable",
+        0,
+        is_conditional_mediation_available,
+    )?;
     let realm_id = crate::webidl::realm_id(scope);
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
@@ -51,6 +58,17 @@ pub(crate) fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(constructor)
+}
+
+fn is_conditional_mediation_available(
+    scope: &mut v8::PinScope<'_, '_>,
+    _: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let available = v8::Boolean::new(scope, false);
+    if let Ok(promise) = super::writable_stream::resolved_promise(scope, available.into()) {
+        result.set(promise.into());
+    }
 }
 
 fn illegal_constructor(

@@ -125,7 +125,7 @@ fn add(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Cache", "add", result);
         return;
     }
     let request = request_text(scope, arguments.get(0));
@@ -149,7 +149,7 @@ fn add_all(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Cache", "addAll", result);
         return;
     }
     let Ok(values) = v8::Local::<v8::Array>::try_from(arguments.get(0)) else {
@@ -197,7 +197,7 @@ fn put(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Cache", "put", result);
         return;
     }
     let Ok(response) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
@@ -215,7 +215,7 @@ fn match_one(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Cache", "match", result);
         return;
     }
     let request = request_text(scope, arguments.get(0));
@@ -243,7 +243,7 @@ fn match_all(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Cache", "matchAll", result);
         return;
     }
     let requested =
@@ -281,7 +281,7 @@ fn delete(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Cache", "delete", result);
         return;
     }
     let request = request_text(scope, arguments.get(0));
@@ -306,7 +306,7 @@ fn keys(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Cache", "keys", result);
         return;
     }
     let requests = scope

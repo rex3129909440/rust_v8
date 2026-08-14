@@ -14,12 +14,25 @@ fn query_selector_all(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let selector = crate::webidl::value_to_string(scope, arguments.get(0));
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'querySelectorAll' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(selector) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'querySelectorAll' on 'Document'",
+    ) else {
+        return;
+    };
     let matches = match super::dom_selector::query_selector_all(scope, arguments.this(), &selector)
     {
         Ok(matches) => matches,
-        Err(message) => {
-            super::node::throw_dom_exception(scope, "SyntaxError", &message);
+        Err(_) => {
+            super::dom_selector::throw_api_error(scope, "querySelectorAll", "Document", &selector);
             return;
         }
     };

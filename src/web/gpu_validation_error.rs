@@ -31,6 +31,7 @@ fn ensure_constructor<'s>(
     crate::webidl::inherit(scope, constructor, parent)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
     crate::webidl::define_to_string_tag(scope, prototype, "GPUValidationError")?;
+    crate::webidl::lock_constructor_prototype(scope, constructor)?;
     let persistent = v8::Global::new(scope, constructor);
     scope
         .get_slot_mut::<GpuValidationErrorStore>()
@@ -46,6 +47,13 @@ fn construct(
 ) {
     if !arguments.is_construct_call() {
         crate::webidl::throw_type_error(scope, "Please use the 'new' operator");
+        return;
+    }
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'GPUValidationError': 1 argument required, but only 0 present.",
+        );
         return;
     }
     let message = crate::webidl::value_to_string(scope, arguments.get(0));

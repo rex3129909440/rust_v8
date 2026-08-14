@@ -162,15 +162,16 @@ fn unsubscribe(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "PushSubscription", "unsubscribe", r);
+        return;
+    }
     let active = record(s, a.this()).is_some_and(|x| x.active);
     if let Some(x) = s
         .get_slot_mut::<PushSubscriptionStore>()
         .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
     {
         x.active = false
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
-        return;
     }
     let value = v8::Boolean::new(s, active);
     if let Ok(p) = super::writable_stream::resolved_promise(s, value.into()) {

@@ -25,24 +25,10 @@ fn values(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(attributes) = super::named_node_map::attributes(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, attributes.len() as i32);
-    for (index, attribute) in attributes.iter().enumerate() {
-        let _ = array.set_index(scope, index as u32, (*attribute).into());
-    }
-    let Some(key) = v8::String::new(scope, "values") else {
-        return;
-    };
-    let Some(function) = array
-        .get(scope, key.into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
-    else {
-        return;
-    };
-    if let Some(iterator) = function.call(scope, array.into(), &[]) {
-        result.set(iterator);
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        result,
+    );
 }

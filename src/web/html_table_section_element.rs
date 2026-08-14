@@ -96,6 +96,9 @@ pub(crate) fn row_index(
     row: v8::Local<'_, v8::Object>,
 ) -> Option<i32> {
     let parent = super::node::parent(scope, row)?;
+    if super::html_table_element::is_table(scope, parent) {
+        return super::html_table_element::row_index(scope, row);
+    }
     if !is_section(scope, parent) {
         return None;
     }
@@ -171,7 +174,13 @@ pub(crate) fn insert_row(
         arguments.get(0).int32_value(scope).unwrap_or(-1)
     };
     if requested < -1 || (requested != -1 && requested as usize > rows.len()) {
-        throw_index_size(scope);
+        throw_index_size_message(
+            scope,
+            &format!(
+                "Failed to execute 'insertRow' on 'HTMLTableSectionElement': The provided index ({requested} is outside the range [-1, {}].",
+                rows.len()
+            ),
+        );
         return;
     }
     let index = if requested == -1 {
@@ -208,8 +217,17 @@ pub(crate) fn delete_row(
     } else {
         None
     };
+    if requested == -1 && rows.is_empty() {
+        return;
+    }
     let Some(index) = index.filter(|index| *index < rows.len()) else {
-        throw_index_size(scope);
+        throw_index_size_message(
+            scope,
+            &format!(
+                "Failed to execute 'deleteRow' on 'HTMLTableSectionElement': The provided index ({requested} is outside the range [-1, {}].",
+                rows.len()
+            ),
+        );
         return;
     };
     let _ = super::node::detach(scope, rows[index]);
@@ -217,14 +235,45 @@ pub(crate) fn delete_row(
 }
 
 pub(crate) fn throw_index_size(scope: &mut v8::PinScope<'_, '_>) {
-    match super::dom_exception::create(
-        scope,
-        "The index is not in the allowed range.".to_owned(),
-        "IndexSizeError".to_owned(),
-    ) {
+    throw_index_size_message(scope, "The index is not in the allowed range.");
+}
+
+pub(crate) fn throw_index_size_message(scope: &mut v8::PinScope<'_, '_>, message: &str) {
+    match super::dom_exception::create(scope, message.to_owned(), "IndexSizeError".to_owned()) {
         Ok(error) => {
             scope.throw_exception(error.into());
         }
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }
+}
+
+pub(crate) fn get_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value =
+        super::element::attribute_value(scope, arguments.this(), attribute).unwrap_or_default();
+    if let Some(value) = v8::String::new(scope, &value) {
+        result.set(value.into());
+    }
+}
+
+pub(crate) fn set_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value = crate::webidl::value_to_string(scope, arguments.get(0));
+    let _ =
+        super::element::set_attribute_value(scope, arguments.this(), attribute.to_owned(), value);
 }

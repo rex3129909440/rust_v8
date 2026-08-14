@@ -26,24 +26,10 @@ fn values(
     mut result: v8::ReturnValue<'_>,
 ) {
     super::html_collection::refresh_live(scope, arguments.this());
-    let Some(record) = super::html_collection::record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let array = v8::Array::new(scope, record.len() as i32);
-    for (index, item) in record.iter().enumerate() {
-        let _ = array.set_index(scope, index as u32, v8::Local::new(scope, item).into());
-    }
-    let Some(key) = v8::String::new(scope, "values") else {
-        return;
-    };
-    let Some(method) = array.get(scope, key.into()) else {
-        return;
-    };
-    let Ok(method) = v8::Local::<v8::Function>::try_from(method) else {
-        return;
-    };
-    if let Some(iterator) = method.call(scope, array.into(), &[]) {
-        result.set(iterator);
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        result,
+    );
 }

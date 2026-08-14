@@ -1,6 +1,150 @@
 use crate::runtime::EdgeRuntime;
 
 #[test]
+fn json_intrinsics_trace_calls_results_exceptions_and_iframe_realms_without_shape_drift() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let shape = runtime
+        .evaluate(
+            r#"
+            [
+              JSON.parse.name,
+              JSON.parse.length,
+              JSON.stringify.name,
+              JSON.stringify.length,
+              Function.prototype.toString.call(JSON.parse),
+              Function.prototype.toString.call(JSON.stringify),
+              Object.getOwnPropertyDescriptor(JSON, "parse").enumerable,
+              Object.getOwnPropertyDescriptor(JSON, "parse").writable,
+              Object.getOwnPropertyDescriptor(JSON, "parse").configurable
+            ].join("|")
+            "#,
+        )
+        .expect("JSON shape")
+        .to_string();
+    assert_eq!(
+        shape,
+        concat!(
+            "parse|2|stringify|3|",
+            "function parse() { [native code] }|",
+            "function stringify() { [native code] }|false|true|true"
+        )
+    );
+    assert!(runtime.native_trace().is_empty());
+    runtime
+        .evaluate(
+            "window.__originalJsonParse=JSON.parse;window.__originalJsonStringify=JSON.stringify",
+        )
+        .expect("save original JSON intrinsics");
+
+    runtime.enable_native_trace().expect("enable JSON trace");
+    assert_eq!(
+        runtime
+            .evaluate("JSON.parse===__originalJsonParse&&JSON.stringify===__originalJsonStringify")
+            .expect("stable JSON intrinsic identity while tracing")
+            .to_string(),
+        "true"
+    );
+    runtime
+        .evaluate(
+            r#"
+            (() => {
+              const text = JSON.stringify({ payload: "x".repeat(256), values: [1, 2] });
+              const parsed = JSON.parse(text);
+              try { JSON.parse("{"); } catch (error) {}
+              window.__traceGetterCalls = 0;
+              JSON.stringify({ get inspected() { __traceGetterCalls++; return 7; } });
+              const cyclic = { label: "cycle" };
+              cyclic.self = cyclic;
+              try { JSON.stringify(cyclic); } catch (error) {}
+              const frame = document.createElement("iframe");
+              frame.srcdoc = "<script>window.value=JSON.stringify({realm:'iframe'})<\/script>";
+              document.body.appendChild(frame);
+              const worker = new Worker("data:text/javascript," + encodeURIComponent(
+                "postMessage(JSON.stringify({realm:'worker'}))"
+              ));
+              return parsed.payload.length + ":" + frame.contentWindow.value;
+            })()
+            "#,
+        )
+        .expect("traced JSON calls");
+
+    let trace = runtime.native_trace();
+    let stringify = trace
+        .iter()
+        .find(|entry| entry.api == "window.JSON.stringify")
+        .expect("window JSON.stringify trace");
+    assert!(
+        stringify.result.contains(&"x".repeat(256)),
+        "JSON.stringify result was truncated: {}",
+        stringify.result
+    );
+    assert_eq!(
+        runtime
+            .evaluate("String(__traceGetterCalls)")
+            .expect("trace getter call count")
+            .to_string(),
+        "1",
+        "trace snapshot invoked the JSON getter in addition to JSON.stringify"
+    );
+    assert!(
+        trace.iter().any(|entry| {
+            entry.api == "window.JSON.stringify"
+                && entry.arguments.contains("\"label\":\"cycle\"")
+                && entry.arguments.contains("\"self\":[Circular]")
+                && entry.result.starts_with("threw ")
+        }),
+        "circular JSON.stringify input or exception was not trace-safe: {trace:#?}"
+    );
+    assert!(
+        stringify.arguments.contains("\"payload\"")
+            && stringify.arguments.contains(&"x".repeat(256))
+            && stringify.arguments.contains("\"values\":[1,2]"),
+        "JSON.stringify input object was not safely expanded: {}",
+        stringify.arguments
+    );
+    assert!(
+        trace.iter().any(|entry| {
+            entry.api == "window.JSON.parse" && entry.arguments.contains(&"x".repeat(256))
+        }),
+        "JSON.parse input was not retained: {trace:#?}"
+    );
+    assert!(
+        trace.iter().any(|entry| {
+            entry.api == "window.JSON.parse" && entry.result.starts_with("threw ")
+        }),
+        "JSON.parse exception was not recorded: {trace:#?}"
+    );
+    assert!(
+        trace.iter().any(|entry| {
+            entry.api.starts_with("iframe[") && entry.api.ends_with(".JSON.stringify")
+        }),
+        "iframe JSON.stringify was not realm-labelled: {trace:#?}"
+    );
+    assert!(
+        trace.iter().any(|entry| {
+            entry.api.starts_with("worker[") && entry.api.ends_with(".JSON.stringify")
+        }),
+        "Worker JSON.stringify was not realm-labelled: {trace:#?}"
+    );
+
+    runtime.disable_native_trace();
+    runtime.clear_native_trace();
+    assert_eq!(
+        runtime
+            .evaluate(
+                "JSON.parse===__originalJsonParse&&JSON.stringify===__originalJsonStringify&&JSON.parse('1')===1"
+            )
+            .expect("restored original JSON intrinsics")
+            .to_string(),
+        "true"
+    );
+    assert!(
+        runtime.native_trace().is_empty(),
+        "disabled trace retained JSON call entries"
+    );
+}
+
+#[test]
 fn native_trace_excludes_user_selected_api_paths_and_expands_array_arguments() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     runtime
@@ -512,7 +656,7 @@ fn every_window_own_descriptor_keeps_its_edge_shape_after_proxy_warmup() {
     evaluate_direct(&mut direct_hash, FUNCTION_STRESS_WARMUP);
     let expected_hash = evaluate_direct(&mut direct_hash, WINDOW_DESCRIPTOR_HASH);
     assert_eq!(
-        expected_hash, "3a6ffea6",
+        expected_hash, "d282a0de",
         "the complete direct Window descriptor hash changed"
     );
 

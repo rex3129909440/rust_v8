@@ -71,23 +71,34 @@ pub(crate) fn construct<'s>(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'RTCPeerConnectionIceErrorEvent': 2 arguments required",
+            "Failed to construct 'RTCPeerConnectionIceErrorEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "Event init must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCPeerConnectionIceErrorEvent': The provided value is not of type 'RTCPeerConnectionIceErrorEventInit'.",
+        );
         return;
     };
     let Some(error_code_value) = property(scope, init, "errorCode") else {
-        crate::webidl::throw_type_error(scope, "Required member 'errorCode' is undefined");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCPeerConnectionIceErrorEvent': Failed to read the 'errorCode' property from 'RTCPeerConnectionIceErrorEventInit': Required member is undefined.",
+        );
         return;
     };
     if error_code_value.is_undefined() {
-        crate::webidl::throw_type_error(scope, "Required member 'errorCode' is undefined");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCPeerConnectionIceErrorEvent': Failed to read the 'errorCode' property from 'RTCPeerConnectionIceErrorEventInit': Required member is undefined.",
+        );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
     super::event::attach(
         scope,
         arguments.this(),

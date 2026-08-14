@@ -12,16 +12,16 @@ fn set_orient_to_angle(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
     let Ok(angle) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "setOrientToAngle requires an SVGAngle");
         return;
     };
     let Some(angle) = super::svg_angle::snapshot(scope, angle) else {
         crate::webidl::throw_type_error(scope, "setOrientToAngle requires an SVGAngle");
-        return;
-    };
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
     let orient_type = v8::Local::new(scope, &record.orient_type);

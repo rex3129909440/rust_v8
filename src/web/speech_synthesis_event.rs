@@ -83,9 +83,14 @@ pub(crate) fn construct(
         );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        throw_required_utterance(scope, "SpeechSynthesisEvent");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'SpeechSynthesisEvent': The provided value is not of type 'SpeechSynthesisEventInit'.",
+        );
         return;
     };
     let Some(utterance) = object_property(scope, init, "utterance") else {
@@ -127,7 +132,7 @@ pub(crate) fn throw_required_utterance(scope: &mut v8::PinScope<'_, '_>, interfa
     crate::webidl::throw_type_error(
         scope,
         &format!(
-            "Failed to construct '{interface}': Failed to read the 'utterance' property: Required member is undefined."
+            "Failed to construct '{interface}': Failed to read the 'utterance' property from 'SpeechSynthesisEventInit': Required member is undefined."
         ),
     )
 }

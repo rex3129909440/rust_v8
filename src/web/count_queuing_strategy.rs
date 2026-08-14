@@ -66,7 +66,10 @@ fn construct(
         return;
     }
     let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "CountQueuingStrategy init must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CountQueuingStrategy': The provided value is not of type 'QueuingStrategyInit'.",
+        );
         return;
     };
     let Some(key) = v8::String::new(scope, "highWaterMark") else {
@@ -77,7 +80,10 @@ fn construct(
         .and_then(|value| value.number_value(scope))
         .unwrap_or(f64::NAN);
     if high_water_mark.is_nan() || high_water_mark < 0.0 {
-        crate::webidl::throw_type_error(scope, "highWaterMark must be non-negative");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CountQueuingStrategy': Failed to read the 'highWaterMark' property from 'QueuingStrategyInit': Required member is undefined.",
+        );
         return;
     }
     scope

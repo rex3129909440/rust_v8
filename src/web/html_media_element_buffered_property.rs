@@ -12,9 +12,5 @@ fn get_buffered(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    if record(scope, arguments.this()).is_some() {
-        empty_ranges(scope, result, Vec::new());
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-    }
+    super::html_media_element::get_buffered(scope, arguments, result);
 }

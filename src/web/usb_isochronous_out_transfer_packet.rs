@@ -53,7 +53,28 @@ fn construct(
         crate::webidl::throw_type_error(s, "use new");
         return;
     }
-    let status = crate::webidl::value_to_string(s, a.get(0));
+    if a.get(0).is_null_or_undefined() {
+        let status = crate::webidl::value_to_string(s, a.get(0));
+        crate::webidl::throw_type_error(
+            s,
+            &format!(
+                "Failed to construct 'USBIsochronousOutTransferPacket': The provided value '{status}' is not a valid enum value of type USBTransferStatus."
+            ),
+        );
+        return;
+    }
+    let Some(status) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
+    if !matches!(status.as_str(), "ok" | "stall" | "babble") {
+        crate::webidl::throw_type_error(
+            s,
+            &format!(
+                "Failed to construct 'USBIsochronousOutTransferPacket': The provided value '{status}' is not a valid enum value of type USBTransferStatus."
+            ),
+        );
+        return;
+    }
     s.get_slot_mut::<UsbIsochronousOutTransferPacketStore>()
         .unwrap()
         .records
@@ -85,6 +106,14 @@ fn record(s: &v8::PinScope<'_, '_>, o: v8::Local<'_, v8::Object>) -> Option<Pack
         .records
         .get(&o.get_identity_hash().get())
         .cloned()
+}
+
+pub(crate) fn is_instance(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    super::structured_clone::inherits_platform_interface(
+        scope,
+        object,
+        "USBIsochronousOutTransferPacket",
+    )
 }
 fn written(
     s: &mut v8::PinScope<'_, '_>,

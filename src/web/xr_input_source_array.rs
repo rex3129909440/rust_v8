@@ -122,22 +122,12 @@ fn entries(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(values) = array(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let output = v8::Array::new(scope, values.length() as i32);
-    for index in 0..values.length() {
-        let pair = v8::Array::new(scope, 2);
-        let index_value = v8::Integer::new_from_unsigned(scope, index);
-        let source = values
-            .get_index(scope, index)
-            .unwrap_or_else(|| v8::undefined(scope).into());
-        let _ = pair.set_index(scope, 0, index_value.into());
-        let _ = pair.set_index(scope, 1, source);
-        let _ = output.set_index(scope, index, pair.into());
-    }
-    result.set(output.into());
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Entries,
+        result,
+    );
 }
 
 fn keys(
@@ -145,16 +135,12 @@ fn keys(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(values) = sources(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let output = v8::Array::new(scope, values.len() as i32);
-    for index in 0..values.len() {
-        let index_value = v8::Integer::new_from_unsigned(scope, index as u32);
-        let _ = output.set_index(scope, index as u32, index_value.into());
-    }
-    result.set(output.into());
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Keys,
+        result,
+    );
 }
 
 fn values(
@@ -162,32 +148,18 @@ fn values(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(values) = array(scope, arguments.this()) {
-        result.set(values.into())
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    crate::webidl::return_array_like_iterator(
+        scope,
+        arguments.this(),
+        crate::webidl::ArrayLikeIteratorKind::Values,
+        result,
+    );
 }
 
 fn for_each(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    mut result: v8::ReturnValue<'_>,
+    _: v8::ReturnValue<'_>,
 ) {
-    let Some(values) = sources(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "callback must be a function");
-        return;
-    };
-    let this_arg = arguments.get(1);
-    for (index, source) in values.iter().enumerate() {
-        let source = v8::Local::new(scope, source);
-        let index_value = v8::Integer::new_from_unsigned(scope, index as u32);
-        let callback_arguments = [source.into(), index_value.into(), arguments.this().into()];
-        let _ = callback.call(scope, this_arg, &callback_arguments);
-    }
-    result.set(v8::undefined(scope).into());
+    crate::webidl::array_like_for_each(scope, arguments)
 }

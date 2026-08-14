@@ -13,7 +13,12 @@ fn get_html(
     if !super::element_method_support::ensure(scope, arguments.this()) {
         return;
     }
-    let html = super::dom_html::serialize_children(scope, arguments.this());
+    let Some(options) = super::dom_html::get_html_options(scope, arguments.get(0), "Element")
+    else {
+        return;
+    };
+    let html =
+        super::dom_html::serialize_element_contents_for_get_html(scope, arguments.this(), &options);
     if let Some(html) = v8::String::new(scope, &html) {
         result.set(html.into());
     }

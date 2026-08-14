@@ -19,24 +19,23 @@ fn delete_from_document(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    if let (Some(anchor), Some(focus)) = (v.anchor.clone(), v.focus.clone()) {
-        let x = v8::Local::new(scope, &anchor);
-        let y = v8::Local::new(scope, &focus);
-        if x.strict_equals(y.into())
-            && let Some(data) = super::character_data::data_if_character(scope, x)
-        {
-            let units: Vec<u16> = data.encode_utf16().collect();
-            let start = v.anchor_offset.min(v.focus_offset) as usize;
-            let end = (v.anchor_offset.max(v.focus_offset) as usize).min(units.len());
-            let mut out = units;
-            out.drain(start..end);
-            super::character_data::set_data_if_character(scope, x, String::from_utf16_lossy(&out));
-        }
+    let Some(range) = v.ranges.first() else {
+        return;
+    };
+    let range = v8::Local::new(scope, range);
+    if super::range_contents::delete_contents(scope, range).is_err() {
+        return;
     }
-    let anchor = v.anchor.clone();
-    let offset = v.anchor_offset;
+    let Some(boundary) = super::abstract_range::record(scope, range) else {
+        return;
+    };
+    let anchor = boundary.start_container.clone();
+    let focus = boundary.start_container;
+    let offset = boundary.start_offset;
     super::selection::update(scope, a.this(), |x| {
-        x.focus = anchor;
+        x.anchor = Some(anchor);
+        x.focus = Some(focus);
+        x.anchor_offset = offset;
         x.focus_offset = offset;
         x.direction = "none".to_owned();
     })

@@ -199,7 +199,13 @@ pub(crate) fn insert_cell(
         arguments.get(0).int32_value(scope).unwrap_or(-1)
     };
     if requested < -1 || (requested != -1 && requested as usize > cells.len()) {
-        throw_index_size(scope);
+        throw_index_size_message(
+            scope,
+            &format!(
+                "Failed to execute 'insertCell' on 'HTMLTableRowElement': The value provided ({requested}) is outside the range [-1, {}].",
+                cells.len()
+            ),
+        );
         return;
     }
     let index = if requested == -1 {
@@ -236,8 +242,17 @@ pub(crate) fn delete_cell(
     } else {
         None
     };
+    if requested == -1 && cells.is_empty() {
+        return;
+    }
     let Some(index) = index.filter(|index| *index < cells.len()) else {
-        throw_index_size(scope);
+        throw_index_size_message(
+            scope,
+            &format!(
+                "Failed to execute 'deleteCell' on 'HTMLTableRowElement': The value provided ({requested}) is outside the range [0, {}).",
+                cells.len()
+            ),
+        );
         return;
     };
     let _ = super::node::detach(scope, cells[index]);
@@ -245,14 +260,45 @@ pub(crate) fn delete_cell(
 }
 
 pub(crate) fn throw_index_size(scope: &mut v8::PinScope<'_, '_>) {
-    match super::dom_exception::create(
-        scope,
-        "The index is not in the allowed range.".to_owned(),
-        "IndexSizeError".to_owned(),
-    ) {
+    throw_index_size_message(scope, "The index is not in the allowed range.");
+}
+
+pub(crate) fn throw_index_size_message(scope: &mut v8::PinScope<'_, '_>, message: &str) {
+    match super::dom_exception::create(scope, message.to_owned(), "IndexSizeError".to_owned()) {
         Ok(error) => {
             scope.throw_exception(error.into());
         }
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }
+}
+
+pub(crate) fn get_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value =
+        super::element::attribute_value(scope, arguments.this(), attribute).unwrap_or_default();
+    if let Some(value) = v8::String::new(scope, &value) {
+        result.set(value.into());
+    }
+}
+
+pub(crate) fn set_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value = crate::webidl::value_to_string(scope, arguments.get(0));
+    let _ =
+        super::element::set_attribute_value(scope, arguments.this(), attribute.to_owned(), value);
 }

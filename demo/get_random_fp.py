@@ -45,9 +45,16 @@ from fingerprint_runtime_composer import (  # noqa: E402
 )
 from android_device_profile_catalog import (  # noqa: E402
     choose_android_device_profile,
+    choose_android_version_for_device,
+    get_android_device_profile_by_id,
     get_android_device_profiles,
+    materialize_android_device_profile,
+)
+from android_graphics_capability_catalog import (  # noqa: E402
+    build_android_graphics_capabilities,
 )
 from android_font_profile_catalog import build_android_font_profile  # noqa: E402
+from android_css_profile_catalog import chromium_android_css_overrides  # noqa: E402
 from mac_chromium150_capture_catalog import (  # noqa: E402
     CHROME_MAC_REMOTE_SPEECH_VOICES,
     MAC_CHROMIUM150_AUDIO,
@@ -186,7 +193,7 @@ DEFAULT_MAC_USER_AGENT = (
     "Chrome/150.0.0.0 Safari/537.36"
 )
 DEFAULT_ANDROID_EDGE_USER_AGENT = (
-    "Mozilla/5.0 (Linux; Android 15; K) "
+    "Mozilla/5.0 (Linux; Android 10; K) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/150.0.0.0 Mobile Safari/537.36 EdgA/150.0.0.0"
 )
@@ -385,7 +392,7 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
 
     ua_match = re.search(r"\b(?:Chrome|Chromium)/(\d+)", navigator.user_agent)
     chromium_major = int(ua_match.group(1)) if ua_match else 0
-    if chromium_major < 140 or chromium_major > 150:
+    if chromium_major < 140 or chromium_major > 151:
         issues.append("navigator.userAgent has no supported Chromium major")
 
     edge_match = re.search(r"\b(?:Edg|EdgA)/(\d+)", navigator.user_agent)
@@ -400,7 +407,7 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
     expected_platforms = {
         "windows": ("Win32", "Windows", False),
         "macos": ("MacIntel", "macOS", False),
-        "android": ("Linux armv8l", "Android", True),
+        "android": ("Linux armv81", "Android", True),
     }
     expected = expected_platforms.get(fingerprint.platform)
     if expected is None:
@@ -530,6 +537,18 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
         fingerprint.physical_memory_gb,
         fingerprint.platform,
     )
+    if fingerprint.platform == "android":
+        try:
+            selected_android_device = get_android_device_profile_by_id(
+                fingerprint.screen_profile_id
+            )
+        except KeyError:
+            selected_android_device = None
+        if (
+            selected_android_device is not None
+            and selected_android_device.get("jsHeapSizeLimit") is not None
+        ):
+            expected_heap_limit = int(selected_android_device["jsHeapSizeLimit"])
     if memory.performance_js_heap_size_limit != expected_heap_limit:
         issues.append("performance.memory heap limit conflicts with physical memory")
     if memory.console_js_heap_size_limit != memory.performance_js_heap_size_limit:
@@ -605,6 +624,65 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
             issues.append("Windows font inventory conflicts with platformVersion")
         if profile.sensors.available is not bool(navigator.max_touch_points):
             issues.append("Windows sensor availability conflicts with device form factor")
+    elif fingerprint.platform == "android":
+        permissions = profile.permissions
+        expected_android_permissions = {
+            "accelerometer": "granted",
+            "background_sync": "granted",
+            "camera": "prompt",
+            "clipboard_read": "prompt",
+            "clipboard_write": "granted",
+            "geolocation": "prompt",
+            "gyroscope": "granted",
+            "magnetometer": "granted",
+            "microphone": "prompt",
+            "midi": "prompt",
+            "notifications": "prompt",
+            "payment_handler": "granted",
+            "persistent_storage": "prompt",
+            "speaker_selection": "unsupported",
+            "storage_access": "granted",
+            "top_level_storage_access": "invalid-origin",
+            "window_management": "denied",
+        }
+        if any(
+            getattr(permissions, name) != value
+            for name, value in expected_android_permissions.items()
+        ):
+            issues.append("Android untouched permission states conflict with HTTPS evidence")
+        if profile.sensors.available is not True:
+            issues.append("Android profile disables available motion/orientation sensors")
+        if profile.plugins.plugins:
+            issues.append("Android clean profile unexpectedly exposes desktop PDF plugins")
+        if profile.speech.voices:
+            issues.append("Android clean profile unexpectedly injects desktop speech voices")
+        try:
+            selected_android_device = get_android_device_profile_by_id(
+                fingerprint.screen_profile_id
+            )
+            android_major = int(str(ua_data.platform_version).split(".", 1)[0])
+            expected_webgl, expected_webgpu = build_android_graphics_capabilities(
+                materialize_android_device_profile(
+                    selected_android_device,
+                    android_major,
+                ),
+                chromium_major,
+            )
+        except (KeyError, TypeError, ValueError):
+            issues.append("Android device/OS selection metadata is invalid")
+        else:
+            for field in (
+                "max_texture_size",
+                "max_renderbuffer_size",
+                "max_viewport_width",
+                "max_viewport_height",
+                "webgl2_max_samples",
+            ):
+                if getattr(profile.webgl, field) != expected_webgl[field]:
+                    issues.append("Android WebGL capabilities conflict with GPU family")
+                    break
+            if profile.webgpu.available is not expected_webgpu["available"]:
+                issues.append("Android WebGPU availability conflicts with device/OS")
 
     headers = dict(fingerprint.request_headers)
     if headers.get("user-agent") != navigator.user_agent:
@@ -687,8 +765,8 @@ def _resolve_user_agent(
     if chrome_match is None:
         raise ValueError("user_agent must contain a Chrome or Chromium version")
     chromium_major = int(chrome_match.group(1))
-    if not 140 <= chromium_major <= 150:
-        raise ValueError("user_agent Chromium major must be between 140 and 150")
+    if not 140 <= chromium_major <= 151:
+        raise ValueError("user_agent Chromium major must be between 140 and 151")
 
     is_windows = "Windows NT" in ua_string
     is_macos = "Macintosh" in ua_string or "Mac OS X" in ua_string
@@ -705,12 +783,13 @@ def _resolve_user_agent(
     )
     if browser_name == "edge":
         edge_match = re.search(r"\b(?:Edg|EdgA)/(\d+)(?:\.\d+){0,3}", ua_string)
-        if edge_match is None or not 140 <= int(edge_match.group(1)) <= 150:
-            raise ValueError("user_agent Edge major must be between 140 and 150")
+        if edge_match is None or not 140 <= int(edge_match.group(1)) <= 151:
+            raise ValueError("user_agent Edge major must be between 140 and 151")
         if int(edge_match.group(1)) != chromium_major:
             raise ValueError("user_agent Chrome and Edge majors must match")
 
     ua_options: dict[str, object] = {}
+    android_ua_is_frozen = False
     if platform_name == "macos":
         # Chromium's frozen UA still says Intel/10_15_7 on Apple silicon.  The
         # high-entropy UA-CH fields carry the selected Apple-silicon profile.
@@ -724,15 +803,29 @@ def _resolve_user_agent(
     elif platform_name == "android":
         android_match = re.search(r"\bAndroid\s+([\d.]+)", ua_string)
         model_match = re.search(
-            r"\bAndroid\s+[\d.]+;\s*([^;)]+?)(?:\s+Build/[^)]*)?\)",
+            r"\bAndroid\s+[\d.]+;\s*(.+?)(?:\s+Build/[^)]*)?\)\s+AppleWebKit/",
             ua_string,
         )
+        android_version_parts = (
+            android_match.group(1).split(".")[:3] if android_match else []
+        )
+        android_platform_version = ".".join(
+            android_version_parts + ["0"] * (3 - len(android_version_parts))
+        )
+        parsed_model = model_match.group(1).strip() if model_match else "K"
+        # Chromium's reduced Android UA deliberately freezes the low-entropy
+        # OS/model tokens to "Android 10; K".  Keep that fact as parser
+        # metadata; it is not the concrete device selected for UA-CH.
+        android_ua_is_frozen = (
+            parsed_model.upper() == "K"
+            and android_platform_version == "10.0.0"
+        )
         ua_options.update(
-            architecture="arm",
-            bitness="64",
+            architecture="",
+            bitness="",
             platform="Android",
-            platformVersion=(android_match.group(1) if android_match else ""),
-            model=(model_match.group(1).strip() if model_match else "K"),
+            platformVersion=android_platform_version,
+            model=parsed_model,
             mobile=True,
             formFactors=("Mobile",),
         )
@@ -748,7 +841,10 @@ def _resolve_user_agent(
             "tags": (
                 platform_name,
                 "arm64"
-                if str(ua_data.get("architecture", "")).lower() == "arm"
+                if (
+                    platform_name == "android"
+                    or str(ua_data.get("architecture", "")).lower() == "arm"
+                )
                 else "x64",
             ),
             "userAgent": ua_string,
@@ -757,6 +853,7 @@ def _resolve_user_agent(
             "userAgentData": ua_data,
             "headers": headers,
             "chromiumMajor": chromium_major,
+            "androidUaIsFrozen": android_ua_is_frozen,
         },
         platform_name,
     )
@@ -937,6 +1034,26 @@ def _windows_css_for_screen_and_locale(
     return replace(css, **overrides)
 
 
+def _android_css_for_device(
+    css: object,
+    selected: dict[str, object],
+    locale: str,
+    chromium_major: int,
+) -> object:
+    """Apply Chromium's Android control theme for the selected device."""
+
+    window = selected.get("window", {})
+    if not isinstance(window, dict):
+        window = {}
+    overrides = chromium_android_css_overrides(
+        float(window.get("devicePixelRatio", 1.0)),
+        locale,
+        str(selected.get("oem", "aosp")),
+        chromium_major,
+    )
+    return replace(css, **overrides)
+
+
 def _speech_profile(selected: dict[str, object]) -> SpeechProfile:
     voices = []
     for item in selected.get("voices", ()):
@@ -1108,6 +1225,89 @@ def _mac_media_profile(media: object) -> object:
     )
 
 
+def _android_media_profile(
+    media: object,
+    device: dict[str, object],
+    chromium_major: int,
+) -> object:
+    """Build the Android Chromium codec surface for one device tier."""
+
+    supported_constraints = [
+        "aspectRatio", "autoGainControl", "brightness", "channelCount",
+        "colorTemperature", "contrast", "deviceId", "displaySurface",
+        "echoCancellation", "exposureCompensation", "exposureMode",
+        "exposureTime", "facingMode", "focusDistance", "focusMode",
+        "frameRate", "groupId", "height", "iso", "latency",
+        "noiseSuppression", "pan", "pointsOfInterest", "resizeMode",
+        "sampleRate", "sampleSize", "saturation", "sharpness",
+        "suppressLocalAudioPlayback", "tilt", "torch", "voiceIsolation",
+        "whiteBalanceMode", "width", "zoom",
+    ]
+    if int(chromium_major) >= 141:
+        supported_constraints.insert(
+            supported_constraints.index("sampleRate"),
+            "restrictOwnAudio",
+        )
+    power_efficient = [
+        'audio/webm; codecs="opus"',
+        'video/webm; codecs="vp09.00.10.08"',
+    ]
+    if str(device.get("mediaTier", "")) == "av1-hardware":
+        power_efficient.append('video/webm; codecs="av01.0.04M.08"')
+
+    return replace(
+        media,
+        supported_constraints=tuple(supported_constraints),
+        can_play_probably_types=(
+            "audio/mpeg",
+            'audio/ogg; codecs="vorbis"',
+            'audio/webm; codecs="opus"',
+            'video/webm; codecs="vp8"',
+            'video/webm; codecs="vp09.00.10.08"',
+            'video/webm; codecs="av01.0.04M.08"',
+        ),
+        can_play_maybe_types=(),
+        media_source_types=(
+            "audio/mpeg",
+            'audio/webm; codecs="opus"',
+            'video/webm; codecs="vp8"',
+            'video/webm; codecs="vp09.00.10.08"',
+            'video/webm; codecs="av01.0.04M.08"',
+        ),
+        media_recorder_types=(
+            'audio/webm; codecs="opus"',
+            'video/webm; codecs="vp8"',
+            'video/webm; codecs="av01.0.04M.08"',
+        ),
+        decoding_supported_types=(
+            'audio/webm; codecs="opus"',
+            'video/webm; codecs="vp09.00.10.08"',
+            'video/webm; codecs="av01.0.04M.08"',
+        ),
+        decoding_smooth_types=(
+            'audio/webm; codecs="opus"',
+            'video/webm; codecs="vp09.00.10.08"',
+            'video/webm; codecs="av01.0.04M.08"',
+        ),
+        decoding_power_efficient_types=tuple(power_efficient),
+        encoding_supported_types=(
+            'audio/webm; codecs="opus"',
+            'video/webm; codecs="vp8"',
+            'video/webm; codecs="av01.0.04M.08"',
+        ),
+        encoding_smooth_types=(
+            'audio/webm; codecs="opus"',
+            'video/webm; codecs="vp8"',
+            'video/webm; codecs="av01.0.04M.08"',
+        ),
+        encoding_power_efficient_types=(),
+        audio_decoder_codecs=("opus",),
+        audio_encoder_codecs=("opus",),
+        video_decoder_codecs=("vp8", "vp9", "av1"),
+        video_encoder_codecs=("vp8", "av1"),
+    )
+
+
 def _font_profile(selected: dict[str, object]) -> FontProfile:
     return FontProfile(
         families=tuple(str(item) for item in selected.get("families", ())),
@@ -1223,7 +1423,6 @@ def _network_profile(seed: int, platform_name: str) -> NetworkProfile:
     the same RTT/downlink pair instead of being selected independently.
     """
 
-    del platform_name
     rng = random.Random(seed ^ 0x4E4554574F524B)
     rtt = rng.randint(0, 12) * 50
     downlink = rng.randint(1, 200) / 20.0
@@ -1236,11 +1435,28 @@ def _network_profile(seed: int, platform_name: str) -> NetworkProfile:
     else:
         effective_type = "4g"
     save_data = rng.random() < 0.12
+    connection_type = (
+        rng.choices(
+            ("wifi", "cellular", "ethernet", "bluetooth"),
+            weights=(55, 40, 4, 1),
+            k=1,
+        )[0]
+        if platform_name == "android"
+        else rng.choices(
+            ("wifi", "ethernet", "cellular", "bluetooth"),
+            weights=(55, 40, 4, 1),
+            k=1,
+        )[0]
+    )
     return NetworkProfile(
         effective_type=effective_type,
         rtt=rtt,
         downlink=downlink,
         save_data=save_data,
+        connection_type=connection_type,
+        # Pixel/Chromium HTTPS evidence exposes Infinity for this legacy ECT
+        # property when the maximum link speed is not known.
+        downlink_max=float("inf"),
     )
 
 
@@ -1299,11 +1515,10 @@ def _media_preference_values(
         if platform_name == "macos"
         else "standard"
     )
-    posture = (
-        "folded"
-        if platform_name == "android" and "foldable" in tags and rng.random() < 0.30
-        else "continuous"
-    )
+    # A folded posture changes the active screen/hinge geometry.  Until the
+    # selected catalog row materializes that alternate geometry, expose only
+    # the coherent continuous posture even for fold-capable hardware.
+    posture = "continuous"
     return (
         {
             "color_scheme": rng.choices(("light", "dark"), weights=(68, 32), k=1)[0],
@@ -1635,18 +1850,32 @@ def get_random_fp_details(
             if isinstance(ua_data_raw, dict)
             else ""
         )
+        frozen_android_ua = bool(user_agent_profile.get("androidUaIsFrozen"))
         try:
-            requested_android_major = int(
+            parsed_android_major = int(
                 requested_android_version.split(".", 1)[0]
             )
         except ValueError as error:
             raise ValueError("Android UA has no numeric platform version") from error
+        requested_android_major = None if frozen_android_ua else parsed_android_major
+        requested_device_model = None if frozen_android_ua else requested_model
         device = choose_android_device_profile(
             rng,
             get_android_device_profiles(
-                requested_model,
+                requested_device_model,
                 android_version=requested_android_major,
+                minimum_android_version=10,
             ),
+        )
+        selected_android_major = choose_android_version_for_device(
+            rng,
+            device,
+            requested_android_major,
+            minimum_android_version=10,
+        )
+        device = materialize_android_device_profile(
+            device,
+            selected_android_major,
         )
         memory_choices = tuple(
             int(item) for item in device.get("physicalMemoryChoicesGb", ())
@@ -1673,7 +1902,11 @@ def get_random_fp_details(
             "tags": (*tuple(device.get("tags", ())), "android", "touch"),
         }
         screen = device
-        selected_fonts = build_android_font_profile(languages[0])
+        selected_fonts = build_android_font_profile(
+            languages[0],
+            selected_android_major,
+            str(device.get("oem", "aosp")),
+        )
     if platform_name == "macos":
         speech = {
             "id": (
@@ -1681,6 +1914,14 @@ def get_random_fp_details(
                 if str(user_agent_profile.get("browser", "")) == "chrome"
                 else "macos-chromium150-local-voices"
             )
+        }
+    elif platform_name == "android":
+        # A clean Android Chromium document can have an empty voice list until
+        # the platform speech service reports voices. Do not inject Windows
+        # Microsoft voices into that lifecycle state.
+        speech = {
+            "id": "android-clean-profile-empty-voices",
+            "voices": (),
         }
     else:
         speech = choose_speech_synthesis_voice_profile(
@@ -1712,12 +1953,21 @@ def get_random_fp_details(
             }
         )
     elif platform_name == "android":
+        android_platform_version = str(device.get("androidVersion", ""))
+        android_version_parts = android_platform_version.split(".")[:3]
+        if android_platform_version:
+            android_platform_version = ".".join(
+                android_version_parts + ["0"] * (3 - len(android_version_parts))
+            )
         ua_data_values.update(
             {
                 "platform": "Android",
-                "architecture": "arm",
-                "bitness": "64",
+                # Android Chromium 151 returns empty architecture/bitness in
+                # UA-CH high entropy values on the Pixel 4 HTTPS capture.
+                "architecture": "",
+                "bitness": "",
                 "model": str(screen.get("model", "")),
+                "platformVersion": android_platform_version,
                 "wow64": False,
                 "mobile": True,
                 "formFactors": ("Mobile",),
@@ -1779,7 +2029,7 @@ def get_random_fp_details(
         cookie_enabled=True,
         on_line=True,
         webdriver=False,
-        pdf_viewer_enabled=True,
+        pdf_viewer_enabled=platform_name != "android",
         do_not_track=None,
         user_activation_has_been_active=has_been_active,
         user_activation_is_active=is_active,
@@ -1854,6 +2104,10 @@ def get_random_fp_details(
         physical_memory_gb,
         platform_name,
     )
+    if platform_name == "android" and device.get("jsHeapSizeLimit") is not None:
+        # Preserve the connected-device value only for that exact device row;
+        # other Android devices continue through the V8 memory calculation.
+        heap_limit = int(device["jsHeapSizeLimit"])
     canvas_profile = replace(
         base_profile.canvas,
         data_url_salt=canvas_salt,
@@ -1881,7 +2135,12 @@ def get_random_fp_details(
                 int(user_agent_profile.get("chromiumMajor", 150)),
             )
             if platform_name == "windows"
-            else base_profile.css
+            else _android_css_for_device(
+                base_profile.css,
+                screen,
+                languages[0],
+                int(user_agent_profile.get("chromiumMajor", 150)),
+            )
         ),
         document=(
             DocumentProfile(
@@ -1915,6 +2174,11 @@ def get_random_fp_details(
         ),
         speech=speech_profile,
         fonts=_font_profile(selected_fonts),
+        plugins=(
+            replace(base_profile.plugins, plugins=())
+            if platform_name == "android"
+            else base_profile.plugins
+        ),
         media=replace(
             base_profile.media,
             devices=_media_devices(platform_name, hardware),
@@ -2088,6 +2352,12 @@ def get_random_fp_details(
             ),
         )
     else:
+        android_webgl_capabilities, android_webgpu_capabilities = (
+            build_android_graphics_capabilities(
+                device,
+                int(user_agent_profile.get("chromiumMajor", 150)),
+            )
+        )
         profile = replace(
             shared_profile,
             id=f"random-android-{country.lower()}-{resolved_seed:016x}",
@@ -2095,42 +2365,49 @@ def get_random_fp_details(
                 base_profile.webgl,
                 unmasked_vendor=str(webgl_data.get("unmaskedVendor", "")),
                 unmasked_renderer=str(webgl_data.get("unmaskedRenderer", "")),
-                webgl1_extensions=_ANDROID_WEBGL1_EXTENSIONS,
-                webgl2_extensions=_ANDROID_WEBGL2_EXTENSIONS,
-                compressed_texture_formats=tuple(
-                    int(item) for item in _ANDROID_COMPRESSED_TEXTURE_FORMATS
-                ),
-                webgl2_max_samples=4,
-                aliased_point_size_max=1024.0,
+                **android_webgl_capabilities,
             ),
             webgpu=replace(
                 base_profile.webgpu,
-                available=bool(device.get("webgpuSupported", False)),
-                vendor=str(gpu.get("vendor", "")),
-                architecture=str(gpu.get("webgpuArchitecture", "")),
-                # Keep the adapter identity internally so the native profile
-                # remains valid. developer_features=False masks device and
-                # description from JavaScript, as on the desktop branches.
-                device=str(gpu.get("model", "")),
-                description=str(gpu.get("model", "")),
-                developer_features=False,
-                subgroup_min_size=32,
-                subgroup_max_size=32,
-                is_fallback_adapter=False,
-                features=(
-                    "bgra8unorm-storage",
-                    "texture-compression-etc2",
-                    "texture-compression-astc",
-                ),
-                max_compute_workgroup_storage_size=16_384,
+                **android_webgpu_capabilities,
             ),
             audio=replace(
                 shared_profile.audio,
                 sample_rate=48_000.0,
                 max_channel_count=2,
-                base_latency=0.01,
+                base_latency=0.0026666666666666666,
                 output_latency=0.0,
             ),
+            media=_android_media_profile(
+                shared_profile.media,
+                device,
+                int(user_agent_profile.get("chromiumMajor", 150)),
+            ),
+            permissions=replace(
+                shared_profile.permissions,
+                # Untouched Pixel 4 Chromium 151 HTTPS permission states.
+                # Sensor permissions are granted, user-data permissions stay
+                # prompt, and unsupported/invalid descriptors preserve their
+                # browser rejection branches.
+                accelerometer="granted",
+                background_sync="granted",
+                camera="prompt",
+                clipboard_read="prompt",
+                clipboard_write="granted",
+                geolocation="prompt",
+                gyroscope="granted",
+                magnetometer="granted",
+                microphone="prompt",
+                midi="prompt",
+                notifications="prompt",
+                payment_handler="granted",
+                persistent_storage="prompt",
+                speaker_selection="unsupported",
+                storage_access="granted",
+                top_level_storage_access="invalid-origin",
+                window_management="denied",
+            ),
+            sensors=replace(shared_profile.sensors, available=True),
             media_preferences=replace(
                 shared_profile.media_preferences,
                 color_gamut="srgb",
@@ -2155,8 +2432,8 @@ def get_random_fp_details(
         )
     elif platform_name == "android":
         headers["sec-ch-ua-platform"] = '"Android"'
-        headers["sec-ch-ua-arch"] = '"arm"'
-        headers["sec-ch-ua-bitness"] = '"64"'
+        headers["sec-ch-ua-arch"] = '""'
+        headers["sec-ch-ua-bitness"] = '""'
         headers["sec-ch-ua-model"] = f'"{ua_data_values["model"]}"'
         headers["sec-ch-ua-platform-version"] = (
             f'"{ua_data_values["platformVersion"]}"'

@@ -9,10 +9,22 @@ fn replace(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(old) = super::dom_token_list::validate_token(scope, arguments.get(0)) else {
+    if arguments.length() < 2 {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'replace' on 'DOMTokenList': 2 arguments required, but only {} present.",
+                arguments.length()
+            ),
+        );
+        return;
+    }
+    let Some(old) = super::dom_token_list::validate_token(scope, arguments.get(0), "replace")
+    else {
         return;
     };
-    let Some(new) = super::dom_token_list::validate_token(scope, arguments.get(1)) else {
+    let Some(new) = super::dom_token_list::validate_token(scope, arguments.get(1), "replace")
+    else {
         return;
     };
     let mut replaced = false;

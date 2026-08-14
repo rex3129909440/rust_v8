@@ -296,6 +296,13 @@ fn record(
         .cloned()
 }
 
+pub(crate) fn native_framebuffer_scale_factor(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<f64> {
+    record(scope, object).map(|session| if session.ended { 0.0 } else { 1.0 })
+}
+
 fn text(scope: &mut v8::PinScope<'_, '_>, value: &str, mut result: v8::ReturnValue<'_>) {
     if let Some(value) = v8::String::new(scope, value) {
         result.set(value.into())
@@ -532,7 +539,7 @@ fn end(
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "XRSession", "end", result);
         return;
     };
     session.ended = true;
@@ -566,6 +573,10 @@ fn request_animation_frame(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "callback must be a function");
         return;
@@ -671,7 +682,12 @@ fn request_hit_test_source(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "XRSession",
+            "requestHitTestSource",
+            result,
+        );
         return;
     }
     match super::xr_hit_test_source::create(scope) {
@@ -686,7 +702,12 @@ fn request_transient_hit_test_source(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "XRSession",
+            "requestHitTestSourceForTransientInput",
+            result,
+        );
         return;
     }
     match super::xr_transient_input_hit_test_source::create(scope) {
@@ -701,7 +722,12 @@ fn request_light_probe(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "XRSession",
+            "requestLightProbe",
+            result,
+        );
         return;
     }
     match super::xr_light_probe::create(scope) {
@@ -716,7 +742,12 @@ fn request_reference_space(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "XRSession",
+            "requestReferenceSpace",
+            result,
+        );
         return;
     }
     match super::xr_reference_space::create(scope) {
@@ -800,6 +831,11 @@ fn initiate_room_capture(
     if record(scope, arguments.this()).is_some() {
         resolve_undefined(scope, result)
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "XRSession",
+            "initiateRoomCapture",
+            result,
+        )
     }
 }

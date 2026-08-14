@@ -10,11 +10,25 @@ fn item(
     mut result: v8::ReturnValue<'_>,
 ) {
     super::html_collection::refresh_live(scope, arguments.this());
-    let index = arguments.get(0).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     let Some(record) = super::html_collection::record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'item' on 'HTMLCollection': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    if arguments.get(0).is_symbol() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'item' on 'HTMLCollection': Cannot convert a Symbol value to a number",
+        );
+        return;
+    }
+    let index = arguments.get(0).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     if let Some(item) = record.get(index) {
         result.set(v8::Local::new(scope, item).into());
     } else {

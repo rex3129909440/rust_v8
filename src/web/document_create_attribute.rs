@@ -14,12 +14,27 @@ fn create_attribute(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let input = crate::webidl::value_to_string(scope, arguments.get(0));
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createAttribute' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(input) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'createAttribute' on 'Document'",
+    ) else {
+        return;
+    };
     if !super::document::valid_xml_name(&input) {
         super::node::throw_dom_exception(
             scope,
             "InvalidCharacterError",
-            "The attribute name is not a valid XML name",
+            &format!(
+                "Failed to execute 'createAttribute' on 'Document': The localName provided ('{input}') contains an invalid character."
+            ),
         );
         return;
     }

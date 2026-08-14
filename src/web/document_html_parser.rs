@@ -75,6 +75,8 @@ pub(crate) fn parse_fragment(
     context: v8::Local<'_, v8::Object>,
     source: &str,
 ) -> Result<Vec<v8::Global<v8::Object>>, String> {
+    let registry_id = super::custom_element_registry::registry_id_for_context(scope, context);
+    let defer_shadow_upgrades = super::custom_element_registry::is_shadow_context(scope, context);
     let document = if super::document::is_document(scope, context) {
         context
     } else {
@@ -104,14 +106,23 @@ pub(crate) fn parse_fragment(
             )
         })
         .ok_or_else(|| "The HTML fragment parser did not produce a root element".to_owned())?;
-    fragment_root
+    super::custom_element_registry::begin_registry_override(scope, registry_id);
+    if defer_shadow_upgrades {
+        super::custom_element_registry::begin_suppress_upgrades(scope);
+    }
+    let result = fragment_root
         .children()
         .filter_map(snapshot_node)
         .map(|node| {
             let document = v8::Local::new(scope, &document);
             materialize_node(scope, document, &node).map(|node| v8::Global::new(scope, node))
         })
-        .collect()
+        .collect();
+    if defer_shadow_upgrades {
+        super::custom_element_registry::end_suppress_upgrades(scope);
+    }
+    super::custom_element_registry::end_registry_override(scope);
+    result
 }
 
 fn fragment_context(
@@ -292,6 +303,7 @@ fn materialize_node<'s>(
         }
     };
     super::node::set_owner_document(scope, node, document);
+    super::custom_element_registry::try_upgrade(scope, node, false);
     Ok(node)
 }
 

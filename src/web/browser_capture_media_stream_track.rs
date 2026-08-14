@@ -61,6 +61,7 @@ fn resolved(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
+    method_name: &str,
 ) {
     let valid = scope
         .get_slot::<BrowserCaptureMediaStreamTrackStore>()
@@ -70,7 +71,12 @@ fn resolved(
                 .contains(&arguments.this().get_identity_hash().get())
         });
     if !valid {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BrowserCaptureMediaStreamTrack",
+            method_name,
+            result,
+        );
         return;
     }
     if let Some(resolver) = v8::PromiseResolver::new(scope) {
@@ -85,12 +91,12 @@ fn crop_to(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    resolved(s, a, r);
+    resolved(s, a, r, "cropTo");
 }
 fn restrict_to(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    resolved(s, a, r);
+    resolved(s, a, r, "restrictTo");
 }

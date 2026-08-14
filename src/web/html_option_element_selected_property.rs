@@ -24,6 +24,10 @@ fn set_selected(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = arguments.get(0).boolean_value(scope);
     update(scope, arguments.this(), |record| {
         record.selected = value;

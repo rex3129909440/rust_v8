@@ -101,18 +101,6 @@ pub(crate) fn serialize(
         return None;
     }
     let condition = super::css_condition_rule::condition(scope, object)?;
-    let list = super::css_grouping_rule::list(scope, object)?;
-    let list = v8::Local::new(scope, &list);
-    let rules = super::css_rule_list::rules(scope, list)?;
-    let mut body = String::new();
-    for rule in rules {
-        let rule = v8::Local::new(scope, &rule);
-        if let Some(text) = super::css_rule::serialized(scope, rule) {
-            if !body.is_empty() {
-                body.push(' ');
-            }
-            body.push_str(&text);
-        }
-    }
-    Some(format!("@supports {} {{ {} }}", condition, body))
+    let body = super::css_grouping_rule::serialized_body(scope, object)?;
+    Some(format!("@supports {condition} {{\n{body}}}"))
 }

@@ -14,7 +14,11 @@ fn collapse_to_start(
         return;
     };
     let Some(range) = v.ranges.first() else {
-        super::node::throw_dom_exception(scope, "InvalidStateError", "The Selection has no Range");
+        super::node::throw_dom_exception(
+            scope,
+            "InvalidStateError",
+            "Failed to execute 'collapseToStart' on 'Selection': there is no selection.",
+        );
         return;
     };
     let range = v8::Local::new(scope, range);

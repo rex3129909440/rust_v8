@@ -13,6 +13,8 @@ fn collapse(
         super::selection::update(scope, a.this(), |v| {
             v.anchor = None;
             v.focus = None;
+            v.anchor_offset = 0;
+            v.focus_offset = 0;
             v.ranges.clear();
             v.direction = "none".to_owned();
         });
@@ -24,7 +26,14 @@ fn collapse(
     };
     let offset = a.get(1).uint32_value(scope).unwrap_or(0);
     if !super::selection::valid_offset(scope, node, offset) {
-        super::node::throw_dom_exception(scope, "IndexSizeError", "The offset is out of bounds");
+        let length = super::range::boundary_length(scope, node).unwrap_or(0);
+        super::node::throw_dom_exception(
+            scope,
+            "IndexSizeError",
+            &format!(
+                "Failed to execute 'collapse' on 'Selection': The offset {offset} is larger than the node's length ({length})."
+            ),
+        );
         return;
     }
     let range = super::selection::selection_range(scope, node, offset, node, offset);

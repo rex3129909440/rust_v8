@@ -35,6 +35,7 @@ struct SpeechRecognitionRecord {
     onstart: Option<v8::Global<v8::Value>>,
     onend: Option<v8::Global<v8::Value>>,
     started: bool,
+    unspoken_punctuation: bool,
     quality: String,
     process_locally: bool,
     phrases: v8::Global<v8::Value>,
@@ -147,6 +148,13 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "abort", 0, abort)?;
     crate::webidl::define_method(scope, prototype, "start", 0, start)?;
     crate::webidl::define_method(scope, prototype, "stop", 0, stop)?;
+    crate::webidl::define_accessor(
+        scope,
+        prototype,
+        "unspokenPunctuation",
+        get_unspoken_punctuation,
+        set_unspoken_punctuation,
+    )?;
     crate::webidl::define_accessor(scope, prototype, "quality", get_quality, set_quality)?;
     crate::webidl::define_accessor(
         scope,
@@ -208,6 +216,7 @@ fn construct(
         onstart: None,
         onend: None,
         started: false,
+        unspoken_punctuation: false,
         quality: "command".to_owned(),
         process_locally: false,
         phrases: v8::Global::new(scope, phrases_value),
@@ -264,6 +273,10 @@ fn set_grammars(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(value) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "grammars must be a SpeechGrammarList");
         return;
@@ -376,6 +389,23 @@ fn get_process_locally(
     r: v8::ReturnValue<'_>,
 ) {
     bool_get(s, a, r, |record| record.process_locally)
+}
+fn get_unspoken_punctuation(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    bool_get(s, a, r, |record| record.unspoken_punctuation)
+}
+fn set_unspoken_punctuation(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let value = arguments.get(0).boolean_value(scope);
+    update(scope, arguments.this(), |record| {
+        record.unspoken_punctuation = value
+    });
 }
 fn set_process_locally(
     scope: &mut v8::PinScope<'_, '_>,

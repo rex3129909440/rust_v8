@@ -116,9 +116,19 @@ fn construct(
         return;
     }
     let Ok(context) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "Audio context must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'BiquadFilterNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     };
+    if !super::base_audio_context::is_context(scope, context) {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'BiquadFilterNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
+        return;
+    }
     let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
     let filter_type = options
         .and_then(|options| option(scope, options, "type"))
@@ -237,6 +247,10 @@ fn set_type(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     if !valid_type(&value) {
         return;

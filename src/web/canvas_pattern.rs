@@ -107,6 +107,10 @@ fn set_transform(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !is_pattern(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let matrix = if arguments.get(0).is_undefined() {
         [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
     } else {

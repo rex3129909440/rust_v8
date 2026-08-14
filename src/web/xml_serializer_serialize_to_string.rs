@@ -16,12 +16,29 @@ fn serialize_to_string(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if !super::xml_serializer::is_instance(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 {
-        crate::webidl::throw_type_error(scope, "serializeToString requires a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'serializeToString' on 'XMLSerializer': 1 argument required, but only 0 present.",
+        );
         return;
     }
     let Ok(node) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The provided value is not a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'serializeToString' on 'XMLSerializer': parameter 1 is not of type 'Node'.",
+        );
+        return;
+    };
+    if super::node::record(scope, node).is_none() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'serializeToString' on 'XMLSerializer': parameter 1 is not of type 'Node'.",
+        );
         return;
     };
     match super::dom_html::serialize_xml_node(scope, node) {

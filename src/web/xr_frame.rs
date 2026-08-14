@@ -194,7 +194,7 @@ fn create_anchor(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "XRFrame", "createAnchor", result);
         return;
     }
     match super::xr_anchor::create(scope) {

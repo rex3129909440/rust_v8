@@ -154,7 +154,10 @@ fn construct(
         return;
     }
     let Ok(context) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'PannerNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     };
     let valid = scope.get_slot::<PannerNodeStore>().is_some_and(|store| {
@@ -163,7 +166,10 @@ fn construct(
             .contains(&context.get_identity_hash().get())
     });
     if !valid {
-        crate::webidl::throw_type_error(scope, "parameter 1 is not of type 'BaseAudioContext'");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'PannerNode': parameter 1 is not of type 'BaseAudioContext'.",
+        );
         return;
     }
     let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
@@ -515,6 +521,10 @@ fn set_panning_model(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     set_string(
         scope,
         a,
@@ -527,6 +537,10 @@ fn set_distance_model(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     set_string(
         scope,
         a,

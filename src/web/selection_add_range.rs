@@ -9,6 +9,10 @@ fn add_range(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if super::selection::record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(range) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "addRange requires a Range");
         return;
@@ -18,17 +22,26 @@ fn add_range(
         crate::webidl::throw_type_error(scope, "addRange requires a Range");
         return;
     }
+    if let (Some(document), Some(boundary)) = (
+        super::selection::associated_document(scope, a.this()),
+        boundary.as_ref(),
+    ) {
+        let start = v8::Local::new(scope, &boundary.start_container);
+        if !super::node::root_node(scope, start).strict_equals(document.into()) {
+            return;
+        }
+    }
     let range_global = v8::Global::new(scope, range);
     super::selection::update(scope, a.this(), |v| {
         if v.ranges.is_empty() {
             v.ranges.push(range_global);
-        }
-        if let Some(b) = boundary {
-            v.anchor = Some(b.start_container);
-            v.anchor_offset = b.start_offset;
-            v.focus = Some(b.end_container);
-            v.focus_offset = b.end_offset;
-            v.direction = "forward".to_owned();
+            if let Some(b) = boundary {
+                v.anchor = Some(b.start_container);
+                v.anchor_offset = b.start_offset;
+                v.focus = Some(b.end_container);
+                v.focus_offset = b.end_offset;
+                v.direction = "forward".to_owned();
+            }
         }
     })
 }

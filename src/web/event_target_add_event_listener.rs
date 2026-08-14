@@ -12,6 +12,10 @@ fn add_event_listener(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !is_event_target(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
     if arguments.get(1).is_null() || arguments.get(1).is_undefined() {
         return;
@@ -23,9 +27,18 @@ fn add_event_listener(
         );
         return;
     };
-    let Some(options) = listener_options(scope, arguments.get(2)) else {
+    let Some(mut options) = listener_options(scope, arguments.get(2)) else {
         return;
     };
+    if !options.passive_specified
+        && matches!(
+            event_type.as_str(),
+            "touchstart" | "touchmove" | "wheel" | "mousewheel"
+        )
+        && default_passive_target(scope, arguments.this())
+    {
+        options.passive = true;
+    }
     let identity = callback.get_identity_hash().get();
     let callback = v8::Global::new(scope, callback);
     let target_id = target_record_id(scope, arguments.this());
@@ -63,4 +76,13 @@ fn add_event_listener(
             passive: options.passive,
             signal_identity: options.signal,
         });
+}
+
+fn default_passive_target(
+    scope: &mut v8::PinScope<'_, '_>,
+    target: v8::Local<'_, v8::Object>,
+) -> bool {
+    super::window_event_handler_support::is_window(scope, target)
+        || super::document::serialize_if_document(scope, target).is_some()
+        || super::node::record(scope, target).is_some_and(|record| record.node_name == "BODY")
 }

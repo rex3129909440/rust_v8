@@ -664,6 +664,8 @@ def mac_edge_150_profile(
             allow_unknown_families=allow_unknown_font_families,
             local_fonts=resolved_local_fonts,
             metrics=resolved_font_metrics,
+            use_system_fonts=False,
+            binary_sources=(),
         ),
         css=mac_css_for_device_pixel_ratio(device_pixel_ratio),
         document=DocumentProfile(

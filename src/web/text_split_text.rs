@@ -14,13 +14,40 @@ fn split_text(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'splitText' on 'Text': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let units: Vec<u16> = data.encode_utf16().collect();
-    let offset = arguments.get(0).uint32_value(scope).unwrap_or(0) as usize;
+    let value = arguments.get(0);
+    if value.is_symbol() || value.is_big_int() {
+        let kind = if value.is_symbol() {
+            "Symbol"
+        } else {
+            "BigInt"
+        };
+        crate::webidl::throw_type_error(
+            scope,
+            &format!(
+                "Failed to execute 'splitText' on 'Text': Cannot convert a {kind} value to a number"
+            ),
+        );
+        return;
+    }
+    let Some(offset) = value.uint32_value(scope) else {
+        return;
+    };
+    let offset = offset as usize;
     if offset > units.len() {
         super::node::throw_dom_exception(
             scope,
             "IndexSizeError",
-            "The offset is larger than the data length",
+            &format!(
+                "Failed to execute 'splitText' on 'Text': The offset {offset} is larger than the Text node's length."
+            ),
         );
         return;
     }

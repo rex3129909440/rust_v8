@@ -13,7 +13,7 @@ fn get_all(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "CookieStore", "getAll", result);
         return;
     }
     let name = requested_name(scope, arguments.get(0));

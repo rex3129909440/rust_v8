@@ -105,7 +105,13 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLAnchorElement".to_owned());
     }
     super::html_element::attach(scope, o, "A");
-    let rel_list = super::dom_token_list::create_bound(scope, "", o, "rel")?;
+    let rel_list = super::dom_token_list::create_bound_with_support(
+        scope,
+        "",
+        o,
+        "rel",
+        super::dom_token_list::DomTokenSupport::HyperlinkRel,
+    )?;
     let rel_list = v8::Global::new(scope, rel_list);
     scope
         .get_slot_mut::<HtmlAnchorElementStore>()

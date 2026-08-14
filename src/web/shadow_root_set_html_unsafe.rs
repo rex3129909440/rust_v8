@@ -13,7 +13,20 @@ fn set_html_unsafe(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let value = crate::webidl::value_to_string(scope, a.get(0));
+    if a.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'setHTMLUnsafe' on 'ShadowRoot': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(value) = crate::webidl::dom_string_with_context(
+        scope,
+        a.get(0),
+        "Failed to execute 'setHTMLUnsafe' on 'ShadowRoot'",
+    ) else {
+        return;
+    };
     if let Err(message) = super::dom_html::replace_children_with_html(scope, a.this(), &value) {
         crate::webidl::throw_type_error(scope, &message);
     }

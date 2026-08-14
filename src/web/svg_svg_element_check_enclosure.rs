@@ -12,8 +12,10 @@ fn check_enclosure(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let valid = record(scope, arguments.this()).is_some()
-        && arguments.get(0).is_object()
-        && arguments.get(1).is_object();
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let valid = arguments.get(0).is_object() && arguments.get(1).is_object();
     result.set(v8::Boolean::new(scope, valid).into());
 }

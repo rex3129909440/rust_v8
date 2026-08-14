@@ -209,6 +209,10 @@ fn set_mode(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let mode = crate::webidl::value_to_string(scope, arguments.get(0));
     if !matches!(mode.as_str(), "disabled" | "hidden" | "showing") {
         crate::webidl::throw_type_error(scope, "Invalid TextTrack mode");

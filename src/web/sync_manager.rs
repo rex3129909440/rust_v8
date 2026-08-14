@@ -79,7 +79,7 @@ fn get_tags(
         .and_then(|s| s.records.get(&a.this().get_identity_hash().get()))
         .cloned()
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "SyncManager", "getTags", r);
         return;
     };
     let mut tags: Vec<_> = tags.into_iter().collect();
@@ -99,6 +99,14 @@ fn register(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if scope.get_slot::<SyncManagerStore>().is_none_or(|store| {
+        !store
+            .records
+            .contains_key(&a.this().get_identity_hash().get())
+    }) {
+        crate::webidl::reject_illegal_invocation_promise(scope, "SyncManager", "register", r);
+        return;
+    }
     if a.length() < 1 {
         crate::webidl::throw_type_error(scope, "register requires a tag");
         return;
@@ -112,7 +120,6 @@ fn register(
         .get_slot_mut::<SyncManagerStore>()
         .and_then(|s| s.records.get_mut(&a.this().get_identity_hash().get()))
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
     tags.insert(tag);

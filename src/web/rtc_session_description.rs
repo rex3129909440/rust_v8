@@ -176,6 +176,10 @@ fn set_type(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     if !valid_type(&value) {
         crate::webidl::throw_type_error(scope, "The provided value is not a valid RTCSdpType");

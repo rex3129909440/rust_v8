@@ -10,10 +10,20 @@ fn append_data(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Some(mut data) = super::character_data::data_if_character(scope, arguments.this()) else {
+    let Some(data) = super::character_data::data_if_character(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    data.push_str(&crate::webidl::value_to_string(scope, arguments.get(0)));
-    let _ = super::character_data::set_data_if_character(scope, arguments.this(), data);
+    if !super::character_data::require_arguments(scope, &arguments, "appendData", 1) {
+        return;
+    }
+    let Some(value) = super::character_data::string_argument(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'appendData' on 'CharacterData'",
+    ) else {
+        return;
+    };
+    let length = data.encode_utf16().count() as u32;
+    let _ = super::character_data::replace_data_units(scope, arguments.this(), length, 0, &value);
 }

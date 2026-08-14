@@ -62,11 +62,33 @@ pub(crate) fn construct(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !a.is_construct_call() || a.length() < 2 {
-        crate::webidl::throw_type_error(s, "2 arguments required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PresentationConnectionCloseEvent': 2 arguments required, but only 1 present.",
+        );
         return;
     }
-    let t = crate::webidl::value_to_string(s, a.get(0));
+    let Some(t) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
+    if !a.get(1).is_object() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PresentationConnectionCloseEvent': The provided value is not of type 'PresentationConnectionCloseEventInit'.",
+        );
+        return;
+    }
     let init = v8::Local::<v8::Object>::try_from(a.get(1)).ok();
+    if init
+        .and_then(|init| member(s, init, "reason"))
+        .is_none_or(|value| value.is_undefined())
+    {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PresentationConnectionCloseEvent': Failed to read the 'reason' property from 'PresentationConnectionCloseEventInit': Required member is undefined.",
+        );
+        return;
+    }
     let reason = init
         .and_then(|o| member(s, o, "reason"))
         .map(|v| crate::webidl::value_to_string(s, v))

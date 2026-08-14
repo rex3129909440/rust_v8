@@ -14,26 +14,45 @@ fn import_node(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'importNode' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let Ok(node) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The provided value is not a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.",
+        );
         return;
     };
     let Some(record) = super::node::record(scope, node) else {
-        crate::webidl::throw_type_error(scope, "The provided value is not a Node");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.",
+        );
         return;
     };
-    if record.node_type == super::node::DOCUMENT_NODE
-        || super::shadow_root::host(scope, node).is_some()
-    {
+    if record.node_type == super::node::DOCUMENT_NODE {
         super::node::throw_dom_exception(
             scope,
             "NotSupportedError",
-            "Document and ShadowRoot nodes cannot be imported",
+            "Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.",
+        );
+        return;
+    }
+    if super::shadow_root::host(scope, node).is_some() {
+        super::node::throw_dom_exception(
+            scope,
+            "NotSupportedError",
+            "Failed to execute 'importNode' on 'Document': The node provided is a shadow root, which may not be imported.",
         );
         return;
     }
     let deep = arguments.get(1).boolean_value(scope);
-    match super::node::clone_object(scope, node, deep) {
+    match super::node::clone_object_without_custom_upgrade(scope, node, deep) {
         Ok(clone) => {
             super::node::set_owner_document_recursive(scope, clone, arguments.this());
             result.set(clone.into());

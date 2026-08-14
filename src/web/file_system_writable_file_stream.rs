@@ -105,15 +105,25 @@ fn seek(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    let identity = a.this().get_identity_hash().get();
+    if s.get_slot::<FileSystemWritableFileStreamStore>()
+        .is_none_or(|x| !x.records.contains_key(&identity))
+    {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemWritableFileStream",
+            "seek",
+            r,
+        );
+        return;
+    }
     let position = a.get(0).integer_value(s).unwrap_or(0).max(0) as usize;
     if let Some(v) = s
         .get_slot_mut::<FileSystemWritableFileStreamStore>()
-        .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
+        .and_then(|x| x.records.get_mut(&identity))
     {
         v.position = position;
         resolve(s, r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn truncate(
@@ -121,16 +131,26 @@ fn truncate(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    let identity = a.this().get_identity_hash().get();
+    if s.get_slot::<FileSystemWritableFileStreamStore>()
+        .is_none_or(|x| !x.records.contains_key(&identity))
+    {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemWritableFileStream",
+            "truncate",
+            r,
+        );
+        return;
+    }
     let size = a.get(0).integer_value(s).unwrap_or(0).max(0) as usize;
     if let Some(v) = s
         .get_slot_mut::<FileSystemWritableFileStreamStore>()
-        .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
+        .and_then(|x| x.records.get_mut(&identity))
     {
         v.bytes.resize(size, 0);
         v.position = v.position.min(size);
         resolve(s, r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn write(
@@ -138,10 +158,22 @@ fn write(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    let identity = a.this().get_identity_hash().get();
+    if s.get_slot::<FileSystemWritableFileStreamStore>()
+        .is_none_or(|x| !x.records.contains_key(&identity))
+    {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "FileSystemWritableFileStream",
+            "write",
+            r,
+        );
+        return;
+    }
     let bytes = crate::webidl::value_to_string(s, a.get(0)).into_bytes();
     if let Some(v) = s
         .get_slot_mut::<FileSystemWritableFileStreamStore>()
-        .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
+        .and_then(|x| x.records.get_mut(&identity))
     {
         let end = v.position + bytes.len();
         if v.bytes.len() < end {
@@ -150,8 +182,6 @@ fn write(
         v.bytes[v.position..end].copy_from_slice(&bytes);
         v.position = end;
         resolve(s, r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 

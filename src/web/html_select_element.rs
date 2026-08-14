@@ -90,7 +90,17 @@ pub(crate) fn create<'s>(
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     let c = ensure_constructor(scope)?;
     let p = crate::webidl::prototype(scope, c)?;
-    let o = v8::Object::new(scope);
+    let template = v8::ObjectTemplate::new(scope);
+    template.set_indexed_property_handler(
+        v8::IndexedPropertyHandlerConfiguration::new()
+            .getter(indexed_getter)
+            .setter(indexed_setter)
+            .query(indexed_query)
+            .enumerator(indexed_enumerator),
+    );
+    let o = template
+        .new_instance(scope)
+        .ok_or_else(|| "cannot create HTMLSelectElement exotic object".to_owned())?;
     if crate::webidl::set_platform_prototype(scope, o, p.into()) != Some(true) {
         return Err("cannot create HTMLSelectElement".to_owned());
     }
@@ -259,14 +269,24 @@ pub(crate) fn refresh(scope: &mut v8::PinScope<'_, '_>, select: v8::Local<'_, v8
         return;
     };
     let options = options_snapshot(scope, select);
-    if !snapshot.multiple
-        && !snapshot.selection_explicit
-        && !options.is_empty()
-        && !options
+    if !snapshot.multiple {
+        let selected = options
             .iter()
-            .any(|o| super::html_option_element::option_selected(scope, *o).unwrap_or(false))
-    {
-        let _ = super::html_option_element::set_option_selected(scope, options[0], true);
+            .copied()
+            .filter(|option| {
+                super::html_option_element::option_selected(scope, *option).unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if selected.len() > 1 {
+            let retained = *selected.last().expect("selected option");
+            for option in selected {
+                if !option.strict_equals(retained.into()) {
+                    let _ = super::html_option_element::set_option_selected(scope, option, false);
+                }
+            }
+        } else if selected.is_empty() && !snapshot.selection_explicit && !options.is_empty() {
+            let _ = super::html_option_element::set_option_selected(scope, options[0], true);
+        }
     }
     let options = options_snapshot(scope, select);
     let selected = options
@@ -279,6 +299,72 @@ pub(crate) fn refresh(scope: &mut v8::PinScope<'_, '_>, select: v8::Local<'_, v8
     let selected_collection = v8::Local::new(scope, &snapshot.selected_options);
     let _ = super::html_collection::replace(scope, selected_collection, selected);
 }
+
+fn indexed_getter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "get", index, None);
+    let Some(option) = options_snapshot(scope, arguments.holder())
+        .get(index as usize)
+        .copied()
+    else {
+        return v8::Intercepted::kNo;
+    };
+    result.set(option.into());
+    v8::Intercepted::kYes
+}
+
+fn indexed_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "has", index, None);
+    if record(scope, arguments.holder()).is_some()
+        && (index as usize) < options_snapshot(scope, arguments.holder()).len()
+    {
+        result.set_int32(0);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
+    }
+}
+
+fn indexed_setter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    value: v8::Local<'_, v8::Value>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "set", index, Some(value));
+    let Some(select) = record(scope, arguments.holder()) else {
+        return v8::Intercepted::kNo;
+    };
+    let options = v8::Local::new(scope, &select.options);
+    if !super::html_options_collection::set_indexed_value(scope, options, index as usize, value) {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(true);
+    v8::Intercepted::kYes
+}
+
+fn indexed_enumerator(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Array>,
+) {
+    crate::trace::record_native_enumeration(scope, &arguments);
+    let length = options_snapshot(scope, arguments.holder()).len();
+    let indices = (0..length)
+        .map(|index| v8::Integer::new_from_unsigned(scope, index as u32).into())
+        .collect::<Vec<v8::Local<v8::Value>>>();
+    result.set(v8::Array::new_with_elements(scope, &indices));
+}
 pub(crate) fn add_option_value(
     scope: &mut v8::PinScope<'_, '_>,
     select: v8::Local<'_, v8::Object>,
@@ -290,41 +376,76 @@ pub(crate) fn add_option_value(
         return;
     }
     let Ok(option) = v8::Local::<v8::Object>::try_from(value) else {
-        crate::webidl::throw_type_error(scope, "The element must be an option or optgroup");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'add' on 'HTMLOptionsCollection': The provided value is not of type '(HTMLOptGroupElement or HTMLOptionElement)'.",
+        );
         return;
     };
     if !super::html_option_element::is_option(scope, option)
         && !super::html_opt_group_element::is_opt_group(scope, option)
     {
-        crate::webidl::throw_type_error(scope, "The element must be an option or optgroup");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'add' on 'HTMLOptionsCollection': The provided value is not of type '(HTMLOptGroupElement or HTMLOptionElement)'.",
+        );
         return;
     }
     let options = options_snapshot(scope, select);
-    let index = if before.is_undefined() || before.is_null() {
-        options.len()
-    } else if let Some(i) = before.int32_value(scope) {
-        if i < 0 {
+    let direct_reference = v8::Local::<v8::Object>::try_from(before)
+        .ok()
+        .filter(|before| {
+            super::html_option_element::is_option(scope, *before)
+                || super::html_opt_group_element::is_opt_group(scope, *before)
+        });
+    let (parent, raw_index) = if let Some(reference) = direct_reference {
+        let Some(parent) = super::node::parent(scope, reference) else {
+            super::node::throw_dom_exception(
+                scope,
+                "NotFoundError",
+                "Failed to execute 'add' on 'HTMLOptionsCollection': The node before which the new node is to be inserted is not a child of this node.",
+            );
+            return;
+        };
+        if !parent.strict_equals(select.into()) {
+            super::node::throw_dom_exception(
+                scope,
+                "NotFoundError",
+                "Failed to execute 'add' on 'HTMLOptionsCollection': The node before which the new node is to be inserted is not a child of this node.",
+            );
+            return;
+        }
+        let children = super::node::children(scope, select);
+        let raw_index = children
+            .iter()
+            .position(|child| child.strict_equals(reference.into()))
+            .unwrap_or(children.len());
+        (select, raw_index)
+    } else {
+        let index = if before.is_undefined() || before.is_null() {
             options.len()
         } else {
-            (i as usize).min(options.len())
+            let index = before.int32_value(scope).unwrap_or(0);
+            if index < 0 {
+                options.len()
+            } else {
+                (index as usize).min(options.len())
+            }
+        };
+        if index == options.len() {
+            (select, super::node::children(scope, select).len())
+        } else {
+            let reference = options[index];
+            let parent = super::node::parent(scope, reference).unwrap_or(select);
+            let children = super::node::children(scope, parent);
+            let raw_index = children
+                .iter()
+                .position(|child| child.strict_equals(reference.into()))
+                .unwrap_or(children.len());
+            (parent, raw_index)
         }
-    } else if let Ok(before) = v8::Local::<v8::Object>::try_from(before) {
-        options
-            .iter()
-            .position(|o| o.strict_equals(before.into()))
-            .unwrap_or(options.len())
-    } else {
-        options.len()
     };
-    let raw_index = if index == options.len() {
-        super::node::children(scope, select).len()
-    } else {
-        super::node::children(scope, select)
-            .iter()
-            .position(|o| o.strict_equals(options[index].into()))
-            .unwrap_or(super::node::children(scope, select).len())
-    };
-    let _ = super::node::insert_child(scope, select, option, raw_index);
+    let _ = super::node::insert_child(scope, parent, option, raw_index);
     refresh(scope, select)
 }
 pub(crate) fn remove_option_index(
@@ -821,7 +942,11 @@ pub(crate) fn check_validity(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(x) = record(scope, a.this()) {
-        r.set(v8::Boolean::new(scope, x.disabled || !invalid(scope, a.this())).into())
+        let valid = x.disabled || !invalid(scope, a.this());
+        if !valid {
+            super::html_form_element::dispatch_invalid_event(scope, a.this());
+        }
+        r.set(v8::Boolean::new(scope, valid).into())
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation")
     }

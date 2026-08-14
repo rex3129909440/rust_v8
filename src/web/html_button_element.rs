@@ -137,10 +137,10 @@ pub(crate) fn create<'s>(
 
 pub(crate) fn illegal_constructor(
     scope: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    crate::webidl::throw_type_error(scope, "Illegal constructor");
+    super::custom_element_registry::html_constructor(scope, arguments, result, Some("button"));
 }
 
 pub(crate) fn record(
@@ -181,6 +181,9 @@ pub(crate) fn attribute_changed(
         update(scope, object, |record| record.interest_for = None);
     } else if name.eq_ignore_ascii_case("popovertarget") {
         update(scope, object, |record| record.popover_target = None);
+    } else if name.eq_ignore_ascii_case("disabled") {
+        let disabled = super::element::attribute_value(scope, object, "disabled").is_some();
+        update(scope, object, |record| record.disabled = disabled);
     }
 }
 
@@ -213,8 +216,9 @@ pub(crate) fn get_disabled(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(scope, a.this()) {
-        r.set(v8::Boolean::new(scope, x.disabled).into())
+    if record(scope, a.this()).is_some() {
+        let disabled = super::element::attribute_value(scope, a.this(), "disabled").is_some();
+        r.set(v8::Boolean::new(scope, disabled).into())
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation")
     }
@@ -225,7 +229,7 @@ pub(crate) fn set_disabled(
     _: v8::ReturnValue<'_>,
 ) {
     let value = a.get(0).boolean_value(scope);
-    update(scope, a.this(), |x| x.disabled = value);
+    super::element::set_reflected_boolean(scope, a.this(), "disabled", value);
 }
 pub(crate) fn get_form(
     scope: &mut v8::PinScope<'_, '_>,
@@ -581,7 +585,11 @@ pub(crate) fn check_validity(
     mut r: v8::ReturnValue<'_>,
 ) {
     if let Some(x) = record(scope, a.this()) {
-        r.set(v8::Boolean::new(scope, !is_candidate(&x) || x.custom_validity.is_empty()).into())
+        let valid = !is_candidate(&x) || x.custom_validity.is_empty();
+        if !valid {
+            super::html_form_element::dispatch_invalid_event(scope, a.this());
+        }
+        r.set(v8::Boolean::new(scope, valid).into())
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation")
     }

@@ -362,7 +362,12 @@ fn get_stats(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "RTCRtpReceiver",
+            "getStats",
+            result,
+        );
         return;
     }
     if let Ok(report) = super::rtc_stats_report::create(scope, Vec::new()) {

@@ -17,6 +17,9 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
+    if crate::browser_surface::restore_staged_window_property(scope, "XSLTProcessor")? {
+        return Ok(());
+    }
     let constructor = ensure_constructor(scope)?;
     crate::webidl::define_global(scope, "XSLTProcessor", constructor.into())
 }
@@ -187,6 +190,10 @@ fn import_stylesheet(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(scope, "importStylesheet requires a Node");
         return;
@@ -229,12 +236,12 @@ fn transform_to_document(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(source) = source_document(scope, &arguments, 0) else {
-        crate::webidl::throw_type_error(scope, "transformToDocument requires a Node");
-        return;
-    };
     let Some(processor) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Some(source) = source_document(scope, &arguments, 0) else {
+        crate::webidl::throw_type_error(scope, "transformToDocument requires a Node");
         return;
     };
     let output = apply_stylesheet(scope, &source, &processor);
@@ -248,12 +255,12 @@ fn transform_to_fragment(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(source) = source_document(scope, &arguments, 0) else {
-        crate::webidl::throw_type_error(scope, "transformToFragment requires a Node");
-        return;
-    };
     let Some(processor) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Some(source) = source_document(scope, &arguments, 0) else {
+        crate::webidl::throw_type_error(scope, "transformToFragment requires a Node");
         return;
     };
     let output = apply_stylesheet(scope, &source, &processor);

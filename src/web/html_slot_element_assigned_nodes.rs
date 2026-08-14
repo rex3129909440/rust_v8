@@ -12,10 +12,19 @@ pub(crate) fn assigned_nodes(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    let Some(nodes) = selected_nodes(scope, a.this(), a.get(0)) else {
+    if record(scope, a.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
+    }
+    let Some(flatten) = flatten_requested(scope, a.get(0)) else {
+        return;
     };
+    let nodes = if flatten {
+        flattened_nodes(scope, a.this())
+    } else {
+        current_nodes(scope, a.this())
+    }
+    .unwrap_or_default();
     let arr = v8::Array::new(scope, nodes.len() as i32);
     for (i, n) in nodes.iter().enumerate() {
         let _ = arr.set_index(scope, i as u32, (*n).into());

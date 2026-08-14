@@ -87,20 +87,27 @@ fn resolve(
         result.set(promise.into());
     }
 }
+fn valid(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    scope
+        .get_slot::<CredentialsContainerStore>()
+        .is_some_and(|store| {
+            store
+                .records
+                .contains_key(&object.get_identity_hash().get())
+        })
+}
 fn create_credential(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    if !scope
-        .get_slot::<CredentialsContainerStore>()
-        .is_some_and(|store| {
-            store
-                .records
-                .contains_key(&arguments.this().get_identity_hash().get())
-        })
-    {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CredentialsContainer",
+            "create",
+            result,
+        );
         return;
     }
     resolve(scope, v8::null(scope).into(), result);
@@ -110,6 +117,15 @@ fn get(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CredentialsContainer",
+            "get",
+            result,
+        );
+        return;
+    }
     let credential = scope
         .get_slot::<CredentialsContainerStore>()
         .and_then(|store| {
@@ -132,6 +148,15 @@ fn store(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CredentialsContainer",
+            "store",
+            result,
+        );
+        return;
+    }
     let Ok(credential) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "CredentialsContainer.store requires a Credential");
         return;
@@ -145,7 +170,12 @@ fn store(
                 .get_mut(&arguments.this().get_identity_hash().get())
         })
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CredentialsContainer",
+            "store",
+            result,
+        );
         return;
     };
     credentials.push(stored);
@@ -156,15 +186,13 @@ fn prevent_silent_access(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    if !scope
-        .get_slot::<CredentialsContainerStore>()
-        .is_some_and(|store| {
-            store
-                .records
-                .contains_key(&arguments.this().get_identity_hash().get())
-        })
-    {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    if !valid(scope, arguments.this()) {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CredentialsContainer",
+            "preventSilentAccess",
+            result,
+        );
         return;
     }
     resolve(scope, v8::undefined(scope).into(), result);

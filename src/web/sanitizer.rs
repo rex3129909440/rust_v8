@@ -334,6 +334,18 @@ fn update(
     true
 }
 
+fn require_receiver(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    let valid = scope.get_slot::<SanitizerStore>().is_some_and(|store| {
+        store
+            .records
+            .contains_key(&object.get_identity_hash().get())
+    });
+    if !valid {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
+    valid
+}
+
 fn require_name(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: &v8::FunctionCallbackArguments<'_>,
@@ -357,6 +369,9 @@ fn allow_element(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_receiver(scope, arguments.this()) {
+        return;
+    }
     let Some(name) = require_name(scope, &arguments, "allowElement", true) else {
         return;
     };
@@ -374,6 +389,9 @@ fn remove_element(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_receiver(scope, arguments.this()) {
+        return;
+    }
     let Some(name) = require_name(scope, &arguments, "removeElement", true) else {
         return;
     };
@@ -392,6 +410,9 @@ fn replace_element_with_children(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_receiver(scope, arguments.this()) {
+        return;
+    }
     let Some(name) = require_name(scope, &arguments, "replaceElementWithChildren", true) else {
         return;
     };
@@ -409,6 +430,9 @@ fn allow_attribute(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_receiver(scope, arguments.this()) {
+        return;
+    }
     let Some(name) = require_name(scope, &arguments, "allowAttribute", false) else {
         return;
     };
@@ -425,6 +449,9 @@ fn remove_attribute(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_receiver(scope, arguments.this()) {
+        return;
+    }
     let Some(name) = require_name(scope, &arguments, "removeAttribute", false) else {
         return;
     };
@@ -442,6 +469,9 @@ fn allow_processing_instruction(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_receiver(scope, arguments.this()) {
+        return;
+    }
     let Some(name) = require_name(scope, &arguments, "allowProcessingInstruction", false) else {
         return;
     };
@@ -458,6 +488,9 @@ fn remove_processing_instruction(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if !require_receiver(scope, arguments.this()) {
+        return;
+    }
     let Some(name) = require_name(scope, &arguments, "removeProcessingInstruction", false) else {
         return;
     };

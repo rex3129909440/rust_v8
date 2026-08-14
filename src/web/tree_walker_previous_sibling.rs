@@ -13,23 +13,10 @@ fn previous_sibling(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let current = v8::Local::new(scope, &record.current);
-    let candidate = match super::tree_walker::visible_parent(scope, &record, current) {
-        Ok(Some(parent)) => {
-            let parent = v8::Local::new(scope, &parent);
-            let Ok(values) = super::tree_walker::visible_children(scope, &record, parent) else {
-                return;
-            };
-            let index = values
-                .iter()
-                .position(|value| v8::Local::new(scope, value).strict_equals(current.into()));
-            index
-                .and_then(|index| index.checked_sub(1))
-                .and_then(|position| values.get(position))
-                .map(|value| v8::Local::new(scope, value))
-        }
-        Ok(None) => None,
-        Err(()) => return,
-    };
+    let candidate =
+        match super::tree_walker::traverse_siblings(scope, &record, false, "previousSibling") {
+            Ok(candidate) => candidate.map(|value| v8::Local::new(scope, &value)),
+            Err(()) => return,
+        };
     super::tree_walker::return_candidate(scope, arguments.this(), candidate, result);
 }

@@ -2,7 +2,14 @@ pub(crate) fn define(
     s: &mut v8::PinScope<'_, '_>,
     p: v8::Local<'_, v8::Object>,
 ) -> Result<(), String> {
-    crate::webidl::define_readonly_accessor(s, p, "fullscreen", get_fullscreen)
+    crate::webidl::define_accessor(s, p, "fullscreen", get_fullscreen, set_fullscreen)
+}
+fn set_fullscreen(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    _: v8::ReturnValue<'_>,
+) {
+    let _ = super::document_property_support::ensure(s, a.this());
 }
 fn get_fullscreen(
     s: &mut v8::PinScope<'_, '_>,

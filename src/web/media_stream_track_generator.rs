@@ -65,6 +65,26 @@ fn construct(
         );
         return;
     }
+    if arguments.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'MediaStreamTrackGenerator': The provided value is not of type 'MediaStreamTrackGeneratorInit'.",
+        );
+        return;
+    }
+    if let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(0)) {
+        let kind_key = v8::String::new(scope, "kind").expect("kind key");
+        if init
+            .get(scope, kind_key.into())
+            .is_none_or(|value| value.is_undefined())
+        {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'MediaStreamTrackGenerator': Failed to read the 'kind' property from 'MediaStreamTrackGeneratorInit': Required member is undefined.",
+            );
+            return;
+        }
+    }
     let kind = generator_kind(scope, arguments.get(0));
     if kind != "audio" && kind != "video" {
         crate::webidl::throw_type_error(

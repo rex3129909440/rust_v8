@@ -1,12 +1,25 @@
 use std::collections::HashMap;
 
+#[derive(Clone, Copy, Default)]
+pub(crate) enum DomTokenSupport {
+    #[default]
+    None,
+    HyperlinkRel,
+    LinkRel,
+    Sandbox,
+    Blocking,
+    MediaControls,
+}
+
 #[derive(Default)]
 pub(crate) struct DomTokenListStore {
     constructor: crate::webidl::RealmConstructor,
     next_group: u64,
     objects: HashMap<i32, u64>,
     values: HashMap<u64, Vec<String>>,
+    raw_values: HashMap<u64, String>,
     bindings: HashMap<i32, (v8::Global<v8::Object>, String)>,
+    support: HashMap<i32, DomTokenSupport>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -67,9 +80,17 @@ pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     initial: &str,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
+    create_with_support(scope, initial, DomTokenSupport::None)
+}
+
+pub(crate) fn create_with_support<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    initial: &str,
+    support: DomTokenSupport,
+) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
-    let object = v8::Object::new(scope);
+    let object = new_exotic_list(scope)?;
     if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
         return Err("cannot create DOMTokenList".to_owned());
     }
@@ -80,13 +101,108 @@ pub(crate) fn create<'s>(
         store.next_group += 1;
         let group = store.next_group;
         store.values.insert(group, parse_tokens(initial));
+        store.raw_values.insert(group, initial.to_owned());
         store
             .objects
             .insert(object.get_identity_hash().get(), group);
+        store
+            .support
+            .insert(object.get_identity_hash().get(), support);
         group
     };
     let _ = group;
     Ok(object)
+}
+
+fn new_exotic_list<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let template = v8::ObjectTemplate::new(scope);
+    template.set_indexed_property_handler(
+        v8::IndexedPropertyHandlerConfiguration::new()
+            .getter(indexed_getter)
+            .setter(indexed_setter)
+            .query(indexed_query)
+            .deleter(indexed_deleter)
+            .enumerator(indexed_enumerator),
+    );
+    template
+        .new_instance(scope)
+        .ok_or_else(|| "cannot create DOMTokenList exotic object".to_owned())
+}
+
+fn indexed_getter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "get", index, None);
+    let Some(value) = list(scope, arguments.holder())
+        .and_then(|values| values.get(index as usize).cloned())
+        .and_then(|value| v8::String::new(scope, &value))
+    else {
+        return v8::Intercepted::kNo;
+    };
+    result.set(value.into());
+    v8::Intercepted::kYes
+}
+
+fn indexed_setter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    value: v8::Local<'_, v8::Value>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "set", index, Some(value));
+    if list(scope, arguments.holder()).is_none_or(|values| (index as usize) >= values.len()) {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn indexed_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "has", index, None);
+    if list(scope, arguments.holder()).is_some_and(|values| (index as usize) < values.len()) {
+        result.set_int32(1);
+        v8::Intercepted::kYes
+    } else {
+        v8::Intercepted::kNo
+    }
+}
+
+fn indexed_deleter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Boolean>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "delete", index, None);
+    if list(scope, arguments.holder()).is_none_or(|values| (index as usize) >= values.len()) {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(false);
+    v8::Intercepted::kYes
+}
+
+fn indexed_enumerator(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, v8::Array>,
+) {
+    crate::trace::record_native_enumeration(scope, &arguments);
+    let length = list(scope, arguments.holder()).map_or(0, |values| values.len());
+    let indices = (0..length)
+        .map(|index| v8::Integer::new_from_unsigned(scope, index as u32).into())
+        .collect::<Vec<v8::Local<v8::Value>>>();
+    result.set(v8::Array::new_with_elements(scope, &indices));
 }
 
 pub(crate) fn create_bound<'s>(
@@ -95,7 +211,17 @@ pub(crate) fn create_bound<'s>(
     element: v8::Local<'_, v8::Object>,
     attribute: &str,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
-    let list = create(scope, initial)?;
+    create_bound_with_support(scope, initial, element, attribute, DomTokenSupport::None)
+}
+
+pub(crate) fn create_bound_with_support<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    initial: &str,
+    element: v8::Local<'_, v8::Object>,
+    attribute: &str,
+    support: DomTokenSupport,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let list = create_with_support(scope, initial, support)?;
     let binding = (v8::Global::new(scope, element), attribute.to_owned());
     scope
         .get_slot_mut::<DomTokenListStore>()
@@ -105,13 +231,24 @@ pub(crate) fn create_bound<'s>(
     Ok(list)
 }
 
+pub(crate) fn support(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<DomTokenSupport> {
+    scope
+        .get_slot::<DomTokenListStore>()?
+        .support
+        .get(&object.get_identity_hash().get())
+        .copied()
+}
+
 pub(crate) fn string_value(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> Option<String> {
     let store = scope.get_slot::<DomTokenListStore>()?;
     let group = store.objects.get(&object.get_identity_hash().get())?;
-    Some(store.values.get(group)?.join(" "))
+    store.raw_values.get(group).cloned()
 }
 
 pub(crate) fn set_string_value(
@@ -130,6 +267,7 @@ pub(crate) fn set_string_value(
         return false;
     };
     store.values.insert(group, parse_tokens(value));
+    store.raw_values.insert(group, value.to_owned());
     true
 }
 
@@ -170,6 +308,7 @@ pub(crate) fn sync_binding_for_attribute(
     if let Some(store) = scope.get_slot_mut::<DomTokenListStore>() {
         for group in groups {
             store.values.insert(group, tokens.clone());
+            store.raw_values.insert(group, value.to_owned());
         }
     }
 }
@@ -219,10 +358,14 @@ pub(crate) fn update(
     else {
         return false;
     };
-    let Some(values) = store.values.get_mut(&group) else {
-        return false;
+    let raw_value = {
+        let Some(values) = store.values.get_mut(&group) else {
+            return false;
+        };
+        change(values);
+        values.join(" ")
     };
-    change(values);
+    store.raw_values.insert(group, raw_value);
     true
 }
 
@@ -247,16 +390,28 @@ pub(crate) fn commit_binding(scope: &mut v8::PinScope<'_, '_>, object: v8::Local
 pub(crate) fn validate_token(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
+    method: &str,
 ) -> Option<String> {
     let token = crate::webidl::value_to_string(scope, value);
     if token.is_empty() {
-        super::node::throw_dom_exception(scope, "SyntaxError", "The token must not be empty");
+        super::node::throw_dom_exception(
+            scope,
+            "SyntaxError",
+            &format!(
+                "Failed to execute '{method}' on 'DOMTokenList': The token provided must not be empty."
+            ),
+        );
         None
-    } else if token.chars().any(char::is_whitespace) {
+    } else if token
+        .chars()
+        .any(|character| matches!(character, '\t' | '\n' | '\u{000c}' | '\r' | ' '))
+    {
         super::node::throw_dom_exception(
             scope,
             "InvalidCharacterError",
-            "The token must not contain whitespace",
+            &format!(
+                "Failed to execute '{method}' on 'DOMTokenList': The token provided ('{token}') contains HTML space characters, which are not valid in tokens."
+            ),
         );
         None
     } else {

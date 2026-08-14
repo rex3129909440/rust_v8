@@ -15,6 +15,9 @@ pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(ProfilerStore::default());
 }
 pub(crate) fn install(s: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
+    if crate::browser_surface::restore_staged_window_property(s, "Profiler")? {
+        return Ok(());
+    }
     let c = ensure(s)?;
     crate::webidl::define_global(s, "Profiler", c.into())
 }
@@ -61,7 +64,26 @@ fn construct(
         );
         return;
     }
+    if !a.get(0).is_object() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'Profiler': The provided value is not of type 'ProfilerInitOptions'.",
+        );
+        return;
+    }
     let init = v8::Local::<v8::Object>::try_from(a.get(0)).ok();
+    let max_buffer_size_missing = init
+        .and_then(|init| {
+            v8::String::new(s, "maxBufferSize").and_then(|key| init.get(s, key.into()))
+        })
+        .is_none_or(|value| value.is_undefined());
+    if max_buffer_size_missing {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'Profiler': Failed to read the 'maxBufferSize' property from 'ProfilerInitOptions': Required member is undefined.",
+        );
+        return;
+    }
     let interval = property_number(s, init, "sampleInterval").unwrap_or(10.0);
     super::event_target::attach(s, a.this());
     let started = super::performance::now_for_current_realm(s).unwrap_or(0.0);
@@ -114,7 +136,7 @@ fn stop(
     mut r: v8::ReturnValue<'_>,
 ) {
     let Some(mut x) = record(s, a.this()) else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "Profiler", "stop", r);
         return;
     };
     x.stopped = true;

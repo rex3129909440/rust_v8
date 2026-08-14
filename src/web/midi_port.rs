@@ -177,11 +177,11 @@ fn get_onstatechange(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.onstatechange),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.onstatechange, r)
 }
 fn set_onstatechange(
     s: &mut v8::PinScope<'_, '_>,
@@ -203,6 +203,7 @@ fn transition(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
     state: &str,
+    method_name: &str,
 ) {
     if let Some(record) = s
         .get_slot_mut::<MidiPortStore>()
@@ -214,7 +215,7 @@ fn transition(
             r.set(promise.into())
         }
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(s, "MIDIPort", method_name, r)
     }
 }
 fn open(
@@ -222,12 +223,12 @@ fn open(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    transition(s, a, r, "open")
+    transition(s, a, r, "open", "open")
 }
 fn close(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    transition(s, a, r, "closed")
+    transition(s, a, r, "closed", "close")
 }

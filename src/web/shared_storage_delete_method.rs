@@ -63,7 +63,19 @@ fn construct(
         );
         return;
     }
-    let key = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(key) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
+    if key.is_empty() {
+        if let Ok(exception) = super::dom_exception::create(
+            scope,
+            "Failed to construct 'SharedStorageDeleteMethod': Length of the \"key\" parameter is not valid".to_owned(),
+            "DataError".to_owned(),
+        ) {
+            scope.throw_exception(exception.into());
+        }
+        return;
+    }
     let with_lock =
         super::shared_storage_modifier_method::option_string(scope, arguments.get(1), "withLock");
     super::shared_storage_modifier_method::attach(

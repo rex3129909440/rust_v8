@@ -27,11 +27,5 @@ pub(crate) fn set_name(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let v = crate::webidl::value_to_string(scope, a.get(0));
-    if record(scope, a.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    } else {
-        super::element::set_attribute_value(scope, a.this(), "name".to_owned(), v);
-        dispatch_slotchange(scope, a.this());
-    }
+    set_name_impl(scope, a);
 }

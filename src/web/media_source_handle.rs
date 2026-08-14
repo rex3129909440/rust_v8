@@ -42,6 +42,18 @@ fn ensure_constructor<'s>(
     Ok(constructor)
 }
 
+pub(crate) fn create<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let object = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
+        return Err("cannot create MediaSourceHandle".to_owned());
+    }
+    Ok(object)
+}
+
 fn illegal_constructor(
     scope: &mut v8::PinScope<'_, '_>,
     _: v8::FunctionCallbackArguments<'_>,

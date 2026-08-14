@@ -30,4 +30,5 @@ jobs:
       - run: python tests/python_mac_graphics_capability_catalog.py
       - run: python tests/python_windows_profile_catalog.py
       - run: python tests/python_android_profile_catalog.py
+      - run: python tests/python_browser_version_surface.py
       - run: python tests/python_blackbox_profile_repairs.py

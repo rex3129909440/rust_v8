@@ -112,7 +112,7 @@ fn construct<'s>(
     if sdp_mid.is_none() && sdp_m_line_index.is_none() {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'RTCIceCandidate': sdpMid and sdpMLineIndex are both null",
+            "Failed to construct 'RTCIceCandidate': sdpMid and sdpMLineIndex are both null.",
         );
         return;
     }

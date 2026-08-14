@@ -77,6 +77,23 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSSkew requires ax and ay");
         return;
     }
+    if arguments.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSSkew': parameter 1 is not of type 'CSSNumericValue'.",
+        );
+        return;
+    }
+    let valid_ax = v8::Local::<v8::Object>::try_from(arguments.get(0))
+        .ok()
+        .is_some_and(|object| super::css_numeric_value::is_numeric(scope, object));
+    if !valid_ax {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSSkew': parameter 1 is not of type 'CSSNumericValue'.",
+        );
+        return;
+    }
     let Some(ax) = angle(scope, arguments.get(0)) else {
         return;
     };
@@ -126,6 +143,10 @@ fn set_angle(
     value: v8::Local<'_, v8::Value>,
     select_ax: bool,
 ) {
+    if record(scope, object).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(value) = angle(scope, value) else {
         return;
     };

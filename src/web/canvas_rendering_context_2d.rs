@@ -172,6 +172,12 @@ fn draw_focus_if_needed(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if super::offscreen_canvas_rendering_context_2d::pixel_snapshot(scope, arguments.this())
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if arguments.length() < 1 || !arguments.get(0).is_object() {
         crate::webidl::throw_type_error(scope, "drawFocusIfNeeded requires an Element");
         return;

@@ -123,7 +123,12 @@ fn connect(
         v.connected = true;
         resolve(s, a.this().into(), r)
     } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTServer",
+            "connect",
+            r,
+        )
     }
 }
 fn disconnect(
@@ -158,6 +163,15 @@ fn get_primary_service<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTServer",
+            "getPrimaryService",
+            r,
+        );
+        return;
+    }
     match service(s, a) {
         Ok(v) => resolve(s, v.into(), r),
         Err(e) => crate::webidl::throw_type_error(s, &e),
@@ -168,6 +182,15 @@ fn get_primary_services<'s>(
     a: v8::FunctionCallbackArguments<'s>,
     r: v8::ReturnValue<'s>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            s,
+            "BluetoothRemoteGATTServer",
+            "getPrimaryServices",
+            r,
+        );
+        return;
+    }
     match service(s, a) {
         Ok(v) => {
             let array = v8::Array::new(s, 1);

@@ -73,6 +73,15 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    let valid = s.get_slot::<MidiInputStore>().is_some_and(|store| {
+        store
+            .handlers
+            .contains_key(&a.this().get_identity_hash().get())
+    });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let handler = s
         .get_slot::<MidiInputStore>()
         .and_then(|store| store.handlers.get(&a.this().get_identity_hash().get()))

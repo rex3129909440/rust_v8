@@ -112,6 +112,25 @@ fn construct(
         crate::webidl::throw_type_error(scope, "2 arguments required");
         return;
     }
+    if arguments.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'XRWebGLBinding': parameter 1 is not of type 'XRSession'.",
+        );
+        return;
+    }
+    let valid_session = v8::Local::<v8::Object>::try_from(arguments.get(0))
+        .ok()
+        .is_some_and(|object| {
+            super::structured_clone::inherits_platform_interface(scope, object, "XRSession")
+        });
+    if !valid_session {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'XRWebGLBinding': parameter 1 is not of type 'XRSession'.",
+        );
+        return;
+    }
     let record = BindingRecord {
         session: v8::Global::new(scope, arguments.get(0)),
         context: v8::Global::new(scope, arguments.get(1)),

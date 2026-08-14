@@ -38,6 +38,9 @@ fn ensure_constructor<'s>(
     crate::webidl::define_readonly_accessor(s, p, "coords", get_coords)?;
     crate::webidl::define_readonly_accessor(s, p, "timestamp", get_timestamp)?;
     crate::webidl::define_method(s, p, "toJSON", 0, to_json)?;
+    // Experimental Android-only accessor observed on HTTPS in Chromium
+    // 146-148. Version reconciliation removes it everywhere else.
+    crate::webidl::define_readonly_accessor(s, p, "accuracyMode", get_accuracy_mode)?;
     crate::webidl::finish_constructor(s, p, c)?;
     let realm_id = crate::webidl::realm_id(s);
     let realm_constructor = v8::Global::new(s, c);
@@ -101,6 +104,19 @@ fn get_timestamp(
         r.set(v8::Number::new(s, x.timestamp).into())
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation")
+    }
+}
+fn get_accuracy_mode(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
+    if let Some(value) = v8::String::new(s, "precise") {
+        r.set(value.into());
     }
 }
 fn to_json(

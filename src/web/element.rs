@@ -199,6 +199,7 @@ pub(crate) fn ensure_constructor<'s>(
     super::element_active_view_transition::define(scope, prototype)?;
     super::element_aria_col_index_text::define(scope, prototype)?;
     super::element_aria_row_index_text::define(scope, prototype)?;
+    super::element_aria_actions_elements::define(scope, prototype)?;
     super::element_aria_active_descendant_element::define(scope, prototype)?;
     super::element_aria_controls_elements::define(scope, prototype)?;
     super::element_aria_described_by_elements::define(scope, prototype)?;
@@ -301,6 +302,11 @@ pub(crate) fn clone_shallow<'s>(
         namespace => create(scope, record.tag_name.clone(), namespace.map(str::to_owned))?,
     };
     set_qualified_name(scope, clone, record.tag_name.clone());
+    super::custom_element_registry::set_candidate_is(
+        scope,
+        clone,
+        super::custom_element_registry::candidate_is(scope, source),
+    );
     for attribute in attributes_snapshot(scope, source).unwrap_or_default() {
         set_attribute_full(
             scope,
@@ -309,6 +315,14 @@ pub(crate) fn clone_shallow<'s>(
             attribute.value,
             attribute.namespace_uri,
         );
+    }
+    super::html_input_element::copy_clone_state(scope, source, clone);
+    super::html_text_area_element::copy_clone_state(scope, source, clone);
+    super::html_canvas_element::copy_clone_state(scope, source, clone);
+    for attribute in attributes_snapshot(scope, source).unwrap_or_default() {
+        if attribute.name.to_ascii_lowercase().starts_with("on") {
+            super::html_element::clear_content_attribute_handler(scope, clone, &attribute.name);
+        }
     }
     Ok(clone)
 }
@@ -521,6 +535,7 @@ pub(crate) fn set_shadow_root(
     host: v8::Local<'_, v8::Object>,
     root: v8::Local<'_, v8::Object>,
 ) {
+    super::element_internals::set_shadow_root_for_target(scope, host, root);
     let root = v8::Global::new(scope, root);
     if let Some(record) = scope
         .get_slot_mut::<ElementStore>()
@@ -743,6 +758,10 @@ pub(crate) fn set_attribute_full(
     value: String,
     namespace_uri: Option<String>,
 ) -> bool {
+    let previous_form = name
+        .eq_ignore_ascii_case("form")
+        .then(|| super::html_form_element::ancestor_form(scope, object))
+        .flatten();
     let dataset_name = name.clone();
     let dataset_value = value.clone();
     let old_value = {
@@ -793,10 +812,26 @@ pub(crate) fn set_attribute_full(
     super::mutation_observer::enqueue_attribute_change(
         scope,
         object,
-        name,
-        namespace_uri,
-        old_value,
+        name.clone(),
+        namespace_uri.clone(),
+        old_value.clone(),
     );
+    super::custom_element_registry::attribute_changed(
+        scope,
+        object,
+        &name,
+        old_value.as_deref(),
+        Some(&dataset_value),
+        namespace_uri.as_deref(),
+    );
+    if dataset_name.eq_ignore_ascii_case("form") {
+        super::custom_element_registry::form_attribute_changed(scope, object, previous_form);
+    }
+    if dataset_name.eq_ignore_ascii_case("disabled")
+        && super::custom_element_registry::is_form_associated(scope, object)
+    {
+        super::custom_element_registry::notify_form_disabled(scope, object, true);
+    }
     if dataset_name.eq_ignore_ascii_case("slot") || dataset_name.eq_ignore_ascii_case("name") {
         super::html_slot_element::notify_assignment_change(scope, object);
     }
@@ -843,6 +878,20 @@ pub(crate) fn set_attribute_full(
         &dataset_name,
         Some(&dataset_value),
     );
+    if let Some(event_type) = dataset_name
+        .to_ascii_lowercase()
+        .strip_prefix("on")
+        .filter(|event_type| !event_type.is_empty())
+        .map(str::to_owned)
+    {
+        super::event_target::set_attribute_handler(scope, object, &event_type, true);
+        super::html_element::set_content_attribute_handler(
+            scope,
+            object,
+            &dataset_name,
+            &dataset_value,
+        );
+    }
     super::html_anchor_element::attribute_changed(scope, object, &dataset_name);
     super::html_button_element::attribute_changed(scope, object, &dataset_name);
     super::html_area_element::attribute_changed(scope, object, &dataset_name);
@@ -859,6 +908,10 @@ pub(crate) fn remove_attribute_full(
     namespace_uri: Option<&str>,
     requested_name: &str,
 ) -> bool {
+    let previous_form = requested_name
+        .eq_ignore_ascii_case("form")
+        .then(|| super::html_form_element::ancestor_form(scope, object))
+        .flatten();
     let snapshot = attributes_snapshot(scope, object);
     let Some(snapshot) = snapshot else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
@@ -896,10 +949,26 @@ pub(crate) fn remove_attribute_full(
     super::mutation_observer::enqueue_attribute_change(
         scope,
         object,
-        matched.name,
-        matched.namespace_uri,
-        Some(matched.value),
+        matched.name.clone(),
+        matched.namespace_uri.clone(),
+        Some(matched.value.clone()),
     );
+    super::custom_element_registry::attribute_changed(
+        scope,
+        object,
+        &matched.name,
+        Some(&matched.value),
+        None,
+        matched.namespace_uri.as_deref(),
+    );
+    if matched.name.eq_ignore_ascii_case("form") {
+        super::custom_element_registry::form_attribute_changed(scope, object, previous_form);
+    }
+    if matched.name.eq_ignore_ascii_case("disabled")
+        && super::custom_element_registry::is_form_associated(scope, object)
+    {
+        super::custom_element_registry::notify_form_disabled(scope, object, false);
+    }
     if matched_name.eq_ignore_ascii_case("slot") || matched_name.eq_ignore_ascii_case("name") {
         super::html_slot_element::notify_assignment_change(scope, object);
     }
@@ -911,6 +980,15 @@ pub(crate) fn remove_attribute_full(
     super::html_option_element::attribute_changed(scope, object, &matched_name, None);
     super::html_image_element::attribute_changed(scope, object, &matched_name, None);
     super::html_media_element::attribute_changed(scope, object, &matched_name, None);
+    if let Some(event_type) = matched_name
+        .to_ascii_lowercase()
+        .strip_prefix("on")
+        .filter(|event_type| !event_type.is_empty())
+        .map(str::to_owned)
+    {
+        super::html_element::clear_content_attribute_handler(scope, object, &matched_name);
+        super::event_target::set_attribute_handler(scope, object, &event_type, false);
+    }
     super::html_anchor_element::attribute_changed(scope, object, &matched_name);
     super::html_button_element::attribute_changed(scope, object, &matched_name);
     super::html_area_element::attribute_changed(scope, object, &matched_name);

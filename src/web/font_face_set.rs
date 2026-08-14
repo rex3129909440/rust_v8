@@ -8,6 +8,7 @@ pub(crate) struct FontFaceSetStore {
 
 #[derive(Clone)]
 struct Record {
+    realm_id: i32,
     faces: Vec<v8::Global<v8::Object>>,
     face_ids: Vec<i32>,
     ready: v8::Global<v8::Promise>,
@@ -57,8 +58,8 @@ fn ensure_constructor<'s>(
         get_onloading_error,
         set_onloading_error,
     )?;
-    crate::webidl::define_readonly_accessor(scope, prototype, "status", get_status)?;
     crate::webidl::define_readonly_accessor(scope, prototype, "ready", get_ready)?;
+    crate::webidl::define_readonly_accessor(scope, prototype, "status", get_status)?;
     crate::webidl::define_readonly_accessor(scope, prototype, "size", get_size)?;
     crate::webidl::define_method(scope, prototype, "check", 1, check)?;
     crate::webidl::define_method(scope, prototype, "load", 1, load)?;
@@ -86,6 +87,12 @@ fn ensure_constructor<'s>(
     }
     let parent = super::event_target::ensure_constructor(scope)?;
     crate::webidl::inherit(scope, constructor, parent)?;
+    if crate::browser_surface::current_version(scope).major() <= 150 {
+        let constructor_key = crate::webidl::string(scope, "constructor")?;
+        if prototype.delete(scope, constructor_key.into()) != Some(true) {
+            return Err("cannot remove private FontFaceSet prototype constructor".to_owned());
+        }
+    }
     let realm_id = crate::webidl::realm_id(scope);
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
@@ -108,6 +115,12 @@ fn attach(
     object: v8::Local<'_, v8::Object>,
     faces: Vec<v8::Global<v8::Object>>,
 ) -> Result<(), String> {
+    for face in &faces {
+        let face = v8::Local::new(scope, face);
+        if !super::font_face::is_font_face(scope, face) {
+            return Err("FontFaceSet requires FontFace entries".to_owned());
+        }
+    }
     let resolver = v8::PromiseResolver::new(scope)
         .ok_or_else(|| "cannot create FontFaceSet.ready".to_owned())?;
     let promise = resolver.get_promise(scope);
@@ -117,6 +130,7 @@ fn attach(
         .iter()
         .map(|face| v8::Local::new(scope, face).get_identity_hash().get())
         .collect();
+    let realm_id = crate::webidl::realm_id(scope);
     super::event_target::attach(scope, object);
     scope
         .get_slot_mut::<FontFaceSetStore>()
@@ -125,12 +139,21 @@ fn attach(
         .insert(
             object.get_identity_hash().get(),
             Record {
+                realm_id,
                 faces,
                 face_ids,
                 ready,
                 handlers: HashMap::new(),
             },
         );
+    let registered = scope
+        .get_slot::<FontFaceSetStore>()
+        .and_then(|store| store.records.get(&object.get_identity_hash().get()))
+        .map(|record| record.faces.clone())
+        .unwrap_or_default();
+    for face in registered {
+        super::font_face::register_with_shaper(scope, realm_id, v8::Local::new(scope, &face))?;
+    }
     Ok(())
 }
 
@@ -280,13 +303,37 @@ fn add(
         crate::webidl::throw_type_error(scope, "FontFaceSet.add requires a FontFace");
         return;
     };
+    if !super::font_face::is_font_face(scope, face) {
+        crate::webidl::throw_type_error(scope, "FontFaceSet.add requires a FontFace");
+        return;
+    }
     let identity = face.get_identity_hash().get();
+    let set_identity = arguments.this().get_identity_hash().get();
+    if !scope
+        .get_slot::<FontFaceSetStore>()
+        .is_some_and(|store| store.records.contains_key(&set_identity))
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let already_present = scope
+        .get_slot::<FontFaceSetStore>()
+        .and_then(|store| store.records.get(&set_identity))
+        .is_some_and(|record| record.face_ids.contains(&identity));
+    let realm_id = record(scope, arguments.this())
+        .map(|record| record.realm_id)
+        .unwrap_or_else(|| crate::webidl::realm_id(scope));
+    if !already_present
+        && let Err(message) = super::font_face::register_with_shaper(scope, realm_id, face)
+    {
+        crate::webidl::throw_type_error(scope, &message);
+        return;
+    }
     let face = v8::Global::new(scope, face);
-    let Some(record) = scope.get_slot_mut::<FontFaceSetStore>().and_then(|store| {
-        store
-            .records
-            .get_mut(&arguments.this().get_identity_hash().get())
-    }) else {
+    let Some(record) = scope
+        .get_slot_mut::<FontFaceSetStore>()
+        .and_then(|store| store.records.get_mut(&set_identity))
+    else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
@@ -302,16 +349,23 @@ fn clear(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    match scope.get_slot_mut::<FontFaceSetStore>().and_then(|store| {
+    let (realm_id, removed) = match scope.get_slot_mut::<FontFaceSetStore>().and_then(|store| {
         store
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) {
         Some(record) => {
+            let removed = std::mem::take(&mut record.face_ids);
             record.faces.clear();
-            record.face_ids.clear();
+            (record.realm_id, removed)
         }
-        None => crate::webidl::throw_type_error(scope, "Illegal invocation"),
+        None => {
+            crate::webidl::throw_type_error(scope, "Illegal invocation");
+            return;
+        }
+    };
+    for identity in removed {
+        super::font_face::unregister_with_shaper(scope, realm_id, identity);
     }
 }
 
@@ -331,14 +385,40 @@ fn delete(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let removed = identity
+    let realm_id = record.realm_id;
+    let removed_identity = identity
         .and_then(|identity| record.face_ids.iter().position(|face| *face == identity))
         .map(|index| {
-            record.face_ids.remove(index);
-            record.faces.remove(index)
+            let identity = record.face_ids.remove(index);
+            record.faces.remove(index);
+            identity
+        });
+    if let Some(identity) = removed_identity {
+        super::font_face::unregister_with_shaper(scope, realm_id, identity);
+    }
+    result.set(v8::Boolean::new(scope, removed_identity.is_some()).into());
+}
+
+pub(crate) fn cleanup_realm(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {
+    let removed = scope
+        .get_slot_mut::<FontFaceSetStore>()
+        .map(|store| {
+            let identities = store
+                .records
+                .iter()
+                .filter_map(|(identity, record)| (record.realm_id == realm_id).then_some(*identity))
+                .collect::<Vec<_>>();
+            identities
+                .into_iter()
+                .filter_map(|identity| store.records.remove(&identity))
+                .flat_map(|record| record.face_ids)
+                .collect::<Vec<_>>()
         })
-        .is_some();
-    result.set(v8::Boolean::new(scope, removed).into());
+        .unwrap_or_default();
+    for identity in removed {
+        super::font_face::unregister_with_shaper(scope, realm_id, identity);
+    }
+    crate::font_shaping::cleanup_realm(scope, realm_id);
 }
 
 fn has(

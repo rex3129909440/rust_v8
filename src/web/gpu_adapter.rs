@@ -150,7 +150,12 @@ fn request_device(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "GPUAdapter",
+            "requestDevice",
+            result,
+        );
         return;
     }
     if let Ok(device) = super::gpu_device::create(scope)

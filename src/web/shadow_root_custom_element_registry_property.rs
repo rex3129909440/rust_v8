@@ -20,6 +20,12 @@ fn get_custom_element_registry(
     };
     if let Some(registry) = v.registry {
         r.set(v8::Local::new(scope, &registry).into())
+    } else if !v.registry_is_null
+        && let Some(document) = super::node::owner_document(scope, a.this())
+        && let Some(registry) =
+            super::custom_element_registry::registry_for_document(scope, document)
+    {
+        r.set(registry.into())
     } else {
         r.set(v8::null(scope).into())
     }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import struct
 from dataclasses import dataclass
@@ -20,9 +21,9 @@ except ImportError:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ABI_VERSION = 1
-PROFILE_SCHEMA_VERSION = 11
-OPTIONS_SCHEMA_VERSION = 2
+ABI_VERSION = 2
+PROFILE_SCHEMA_VERSION = 13
+OPTIONS_SCHEMA_VERSION = 3
 
 DEMO_JAVASCRIPT = r"""
 (() => {
@@ -513,6 +514,12 @@ class EdgeSandbox:
             buffer_pointer,
         ]
         library.edge_sandbox_options_clear_page.restype = ctypes.c_bool
+        library.edge_sandbox_options_set_cross_origin_isolated.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_bool,
+            buffer_pointer,
+        ]
+        library.edge_sandbox_options_set_cross_origin_isolated.restype = ctypes.c_bool
         library.edge_sandbox_options_clear_network_replay.argtypes = [
             ctypes.c_void_p,
             buffer_pointer,
@@ -743,6 +750,21 @@ class EdgeSandbox:
             buffer_pointer,
         ]
         library.edge_sandbox_profile_append_font_metric.restype = ctypes.c_bool
+        library.edge_sandbox_profile_clear_font_binary_sources.argtypes = [
+            ctypes.c_void_p,
+            buffer_pointer,
+        ]
+        library.edge_sandbox_profile_clear_font_binary_sources.restype = ctypes.c_bool
+        library.edge_sandbox_profile_append_font_binary_source.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            buffer_pointer,
+        ]
+        library.edge_sandbox_profile_append_font_binary_source.restype = ctypes.c_bool
 
         library.edge_sandbox_profile_clear_media_devices.argtypes = [
             ctypes.c_void_p,
@@ -1058,6 +1080,106 @@ class EdgeSandbox:
             buffer_pointer,
         ]
         library.edge_sandbox_evaluate_with_source_url.restype = ctypes.c_bool
+        library.edge_sandbox_dispatch_host_click.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int16,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.POINTER(ctypes.c_uint8),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_dispatch_host_click.restype = ctypes.c_bool
+        library.edge_sandbox_dispatch_host_keyboard.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint8,
+            ctypes.c_uint32,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.POINTER(ctypes.c_uint8),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_dispatch_host_keyboard.restype = ctypes.c_bool
+        library.edge_sandbox_dispatch_host_wheel.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_uint32,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.POINTER(ctypes.c_uint8),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_dispatch_host_wheel.restype = ctypes.c_bool
+        library.edge_sandbox_dispatch_host_drag.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_size_t,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.POINTER(ctypes.c_uint8),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_dispatch_host_drag.restype = ctypes.c_bool
+        library.edge_sandbox_dispatch_host_touch.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_int32,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.POINTER(ctypes.c_uint8),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_dispatch_host_touch.restype = ctypes.c_bool
+        library.edge_sandbox_dispatch_host_pen.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int32,
+            ctypes.c_int32,
+            ctypes.c_uint32,
+            ctypes.c_int16,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.POINTER(ctypes.c_uint8),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_dispatch_host_pen.restype = ctypes.c_bool
 
         library.edge_sandbox_enable_native_trace.argtypes = [
             ctypes.c_void_p,
@@ -1419,6 +1541,15 @@ class EdgeSandbox:
                 )
                 self._profile_set_bool(
                     handle, field.NETWORK_SAVE_DATA, network.save_data
+                )
+                self._profile_set_string(
+                    handle, field.NETWORK_CONNECTION_TYPE, network.connection_type
+                )
+                self._profile_set_number(
+                    "edge_sandbox_profile_set_f64",
+                    handle,
+                    field.NETWORK_DOWNLINK_MAX,
+                    network.downlink_max,
                 )
 
         screen = profile.screen
@@ -2362,6 +2493,11 @@ class EdgeSandbox:
                 field.FONT_ALLOW_UNKNOWN_FAMILIES,
                 fonts.allow_unknown_families,
             )
+            self._profile_set_bool(
+                handle,
+                field.FONT_USE_SYSTEM_FONTS,
+                fonts.use_system_fonts,
+            )
             if fonts.local_fonts is not None:
                 self._profile_call(
                     "edge_sandbox_profile_clear_local_fonts", handle
@@ -2396,6 +2532,22 @@ class EdgeSandbox:
                         len(family),
                         metric.width_scale,
                         metric.monospace,
+                    )
+            if fonts.binary_sources is not None:
+                self._profile_call(
+                    "edge_sandbox_profile_clear_font_binary_sources", handle
+                )
+                for source in fonts.binary_sources:
+                    family = source.family.encode("utf-8")
+                    path = source.path.encode("utf-8")
+                    self._profile_call(
+                        "edge_sandbox_profile_append_font_binary_source",
+                        handle,
+                        family,
+                        len(family),
+                        path,
+                        len(path),
+                        source.face_index,
                     )
 
         css = profile.css
@@ -3417,6 +3569,12 @@ class EdgeSandbox:
                 )
 
             self._profile_call(
+                "edge_sandbox_options_set_cross_origin_isolated",
+                options_handle,
+                options.cross_origin_isolated,
+            )
+
+            self._profile_call(
                 "edge_sandbox_options_clear_iframe_hooks",
                 options_handle,
             )
@@ -3587,6 +3745,367 @@ class EdgeSandbox:
 
         self._consume_buffer(error)
         return self._consume_buffer(result)
+
+    def dispatch_host_click(
+        self,
+        client_x: float,
+        client_y: float,
+        *,
+        button: int = 0,
+        ctrl_key: bool = False,
+        shift_key: bool = False,
+        alt_key: bool = False,
+        meta_key: bool = False,
+    ) -> bool:
+        """Dispatch one trusted browser click through the isolated Worker.
+
+        This host-only API performs hit testing and emits the normal pointer
+        and mouse click sequence. JavaScript ``dispatchEvent`` and
+        ``element.click()`` remain synthetic and untrusted.
+        """
+
+        if isinstance(client_x, bool) or not isinstance(client_x, (int, float)):
+            raise TypeError("client_x must be a finite number")
+        if isinstance(client_y, bool) or not isinstance(client_y, (int, float)):
+            raise TypeError("client_y must be a finite number")
+        if not math.isfinite(float(client_x)) or not math.isfinite(float(client_y)):
+            raise ValueError("host click coordinates must be finite")
+        if isinstance(button, bool) or not isinstance(button, int) or not 0 <= button <= 4:
+            raise ValueError("button must be an integer between 0 and 4")
+        dispatched = ctypes.c_uint8()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_dispatch_host_click(
+            self._require_handle(),
+            float(client_x),
+            float(client_y),
+            button,
+            int(bool(ctrl_key)),
+            int(bool(shift_key)),
+            int(bool(alt_key)),
+            int(bool(meta_key)),
+            ctypes.byref(dispatched),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return bool(dispatched.value)
+
+    def dispatch_host_keyboard(
+        self,
+        key: str,
+        *,
+        code: str | None = None,
+        text: str | None = None,
+        location: int = 0,
+        repeat: bool = False,
+        ctrl_key: bool = False,
+        shift_key: bool = False,
+        alt_key: bool = False,
+        meta_key: bool = False,
+    ) -> bool:
+        """Dispatch one trusted key press sequence to ``document.activeElement``."""
+
+        if not isinstance(key, str) or not key:
+            raise ValueError("key must be a non-empty string")
+        if code is None:
+            if len(key) == 1 and key.isascii() and key.isalpha():
+                code = f"Key{key.upper()}"
+            elif len(key) == 1 and key.isascii() and key.isdigit():
+                code = f"Digit{key}"
+            else:
+                code = {
+                    " ": "Space",
+                    "Enter": "Enter",
+                    "Tab": "Tab",
+                    "Backspace": "Backspace",
+                    "Delete": "Delete",
+                    "Escape": "Escape",
+                    "ArrowLeft": "ArrowLeft",
+                    "ArrowRight": "ArrowRight",
+                    "ArrowUp": "ArrowUp",
+                    "ArrowDown": "ArrowDown",
+                    "Home": "Home",
+                    "End": "End",
+                    "PageUp": "PageUp",
+                    "PageDown": "PageDown",
+                }.get(key, "")
+        if not isinstance(code, str):
+            raise TypeError("code must be a string or None")
+        if text is None and len(key) == 1 and not (ctrl_key or alt_key or meta_key):
+            text = key
+        if text is not None and not isinstance(text, str):
+            raise TypeError("text must be a string or None")
+        if isinstance(location, bool) or not isinstance(location, int) or not 0 <= location <= 3:
+            raise ValueError("location must be an integer between 0 and 3")
+        key_bytes = key.encode("utf-8")
+        code_bytes = code.encode("utf-8")
+        text_bytes = b"" if text is None else text.encode("utf-8")
+        dispatched = ctypes.c_uint8()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_dispatch_host_keyboard(
+            self._require_handle(),
+            key_bytes,
+            len(key_bytes),
+            code_bytes,
+            len(code_bytes),
+            text_bytes,
+            len(text_bytes),
+            int(text is not None),
+            location,
+            int(bool(repeat)),
+            int(bool(ctrl_key)),
+            int(bool(shift_key)),
+            int(bool(alt_key)),
+            int(bool(meta_key)),
+            ctypes.byref(dispatched),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return bool(dispatched.value)
+
+    def dispatch_host_wheel(
+        self,
+        client_x: float,
+        client_y: float,
+        delta_x: float,
+        delta_y: float,
+        *,
+        delta_z: float = 0.0,
+        delta_mode: int = 0,
+        ctrl_key: bool = False,
+        shift_key: bool = False,
+        alt_key: bool = False,
+        meta_key: bool = False,
+    ) -> bool:
+        """Dispatch one trusted wheel event and its scrolling default action."""
+
+        values = (client_x, client_y, delta_x, delta_y, delta_z)
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+            raise TypeError("wheel coordinates and deltas must be finite numbers")
+        if not all(math.isfinite(float(value)) for value in values):
+            raise ValueError("wheel coordinates and deltas must be finite")
+        if isinstance(delta_mode, bool) or not isinstance(delta_mode, int) or not 0 <= delta_mode <= 2:
+            raise ValueError("delta_mode must be an integer between 0 and 2")
+        dispatched = ctypes.c_uint8()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_dispatch_host_wheel(
+            self._require_handle(),
+            float(client_x),
+            float(client_y),
+            float(delta_x),
+            float(delta_y),
+            float(delta_z),
+            delta_mode,
+            int(bool(ctrl_key)),
+            int(bool(shift_key)),
+            int(bool(alt_key)),
+            int(bool(meta_key)),
+            ctypes.byref(dispatched),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return bool(dispatched.value)
+
+    def dispatch_host_drag(
+        self,
+        points: Iterable[tuple[float, float]],
+        *,
+        ctrl_key: bool = False,
+        shift_key: bool = False,
+        alt_key: bool = False,
+        meta_key: bool = False,
+    ) -> bool:
+        """Dispatch one trusted HTML drag gesture through viewport points.
+
+        The first point identifies the draggable source. Subsequent points are
+        hit-tested in order; cancelling the final ``dragover`` enables
+        ``drop``, matching Chromium's drag-and-drop default-action contract.
+        """
+
+        if isinstance(points, (str, bytes)):
+            raise TypeError("points must be an iterable of coordinate pairs")
+        coordinates = tuple(points)
+        if not 2 <= len(coordinates) <= 4096:
+            raise ValueError("host drag requires between 2 and 4096 points")
+        normalized: list[tuple[float, float]] = []
+        for index, point in enumerate(coordinates):
+            if not isinstance(point, (tuple, list)) or len(point) != 2:
+                raise TypeError(f"points[{index}] must be a two-item coordinate pair")
+            client_x, client_y = point
+            if (
+                isinstance(client_x, bool)
+                or isinstance(client_y, bool)
+                or not isinstance(client_x, (int, float))
+                or not isinstance(client_y, (int, float))
+            ):
+                raise TypeError(f"points[{index}] coordinates must be finite numbers")
+            client_x = float(client_x)
+            client_y = float(client_y)
+            if not math.isfinite(client_x) or not math.isfinite(client_y):
+                raise ValueError(f"points[{index}] coordinates must be finite")
+            normalized.append((client_x, client_y))
+
+        coordinate_array = ctypes.c_double * len(normalized)
+        client_x_values = coordinate_array(*(point[0] for point in normalized))
+        client_y_values = coordinate_array(*(point[1] for point in normalized))
+        dispatched = ctypes.c_uint8()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_dispatch_host_drag(
+            self._require_handle(),
+            client_x_values,
+            client_y_values,
+            len(normalized),
+            int(bool(ctrl_key)),
+            int(bool(shift_key)),
+            int(bool(alt_key)),
+            int(bool(meta_key)),
+            ctypes.byref(dispatched),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return bool(dispatched.value)
+
+    def dispatch_host_touch(
+        self,
+        phase: str,
+        identifier: int,
+        client_x: float,
+        client_y: float,
+        *,
+        radius_x: float = 1.0,
+        radius_y: float = 1.0,
+        rotation_angle: float = 0.0,
+        force: float = 1.0,
+        ctrl_key: bool = False,
+        shift_key: bool = False,
+        alt_key: bool = False,
+        meta_key: bool = False,
+    ) -> bool:
+        """Dispatch one trusted phase of a stateful touch stream.
+
+        ``phase`` is ``start``, ``move``, ``end`` or ``cancel``. Distinct
+        identifiers may be interleaved to drive multi-touch in one Worker.
+        """
+
+        phases = {"start": 0, "move": 1, "end": 2, "cancel": 3}
+        if not isinstance(phase, str) or phase not in phases:
+            raise ValueError("phase must be 'start', 'move', 'end', or 'cancel'")
+        if isinstance(identifier, bool) or not isinstance(identifier, int):
+            raise TypeError("identifier must be an integer")
+        if not -(2**31) <= identifier < 2**31:
+            raise ValueError("identifier must fit a signed 32-bit integer")
+        values = (client_x, client_y, radius_x, radius_y, rotation_angle, force)
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+            raise TypeError("touch coordinates and geometry must be finite numbers")
+        normalized = tuple(float(value) for value in values)
+        if not all(math.isfinite(value) for value in normalized):
+            raise ValueError("touch coordinates and geometry must be finite")
+        client_x, client_y, radius_x, radius_y, rotation_angle, force = normalized
+        if radius_x < 0 or radius_y < 0:
+            raise ValueError("touch radii cannot be negative")
+        if not 0 <= force <= 1:
+            raise ValueError("touch force must be between 0 and 1")
+        dispatched = ctypes.c_uint8()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_dispatch_host_touch(
+            self._require_handle(),
+            phases[phase],
+            identifier,
+            client_x,
+            client_y,
+            radius_x,
+            radius_y,
+            rotation_angle,
+            force,
+            int(bool(ctrl_key)),
+            int(bool(shift_key)),
+            int(bool(alt_key)),
+            int(bool(meta_key)),
+            ctypes.byref(dispatched),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return bool(dispatched.value)
+
+    def dispatch_host_pen(
+        self,
+        phase: str,
+        client_x: float,
+        client_y: float,
+        *,
+        width: float = 1.0,
+        height: float = 1.0,
+        pressure: float = 0.0,
+        tangential_pressure: float = 0.0,
+        tilt_x: int = 0,
+        tilt_y: int = 0,
+        twist: int = 0,
+        button: int = 0,
+        ctrl_key: bool = False,
+        shift_key: bool = False,
+        alt_key: bool = False,
+        meta_key: bool = False,
+    ) -> bool:
+        """Dispatch one trusted pen hover/contact phase."""
+
+        phases = {"hover": 0, "down": 1, "move": 2, "up": 3, "cancel": 4}
+        if not isinstance(phase, str) or phase not in phases:
+            raise ValueError("phase must be 'hover', 'down', 'move', 'up', or 'cancel'")
+        values = (client_x, client_y, width, height, pressure, tangential_pressure)
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+            raise TypeError("pen coordinates and geometry must be finite numbers")
+        normalized = tuple(float(value) for value in values)
+        if not all(math.isfinite(value) for value in normalized):
+            raise ValueError("pen coordinates and geometry must be finite")
+        client_x, client_y, width, height, pressure, tangential_pressure = normalized
+        if width < 0 or height < 0:
+            raise ValueError("pen width and height cannot be negative")
+        if not 0 <= pressure <= 1:
+            raise ValueError("pen pressure must be between 0 and 1")
+        if not -1 <= tangential_pressure <= 1:
+            raise ValueError("pen tangential_pressure must be between -1 and 1")
+        for name, value in (("tilt_x", tilt_x), ("tilt_y", tilt_y)):
+            if isinstance(value, bool) or not isinstance(value, int) or not -90 <= value <= 90:
+                raise ValueError(f"{name} must be an integer between -90 and 90")
+        if isinstance(twist, bool) or not isinstance(twist, int) or not 0 <= twist <= 359:
+            raise ValueError("twist must be an integer between 0 and 359")
+        if isinstance(button, bool) or not isinstance(button, int) or not 0 <= button <= 5:
+            raise ValueError("button must be an integer between 0 and 5")
+        dispatched = ctypes.c_uint8()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_dispatch_host_pen(
+            self._require_handle(),
+            phases[phase],
+            client_x,
+            client_y,
+            width,
+            height,
+            pressure,
+            tangential_pressure,
+            tilt_x,
+            tilt_y,
+            twist,
+            button,
+            int(bool(ctrl_key)),
+            int(bool(shift_key)),
+            int(bool(alt_key)),
+            int(bool(meta_key)),
+            ctypes.byref(dispatched),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return bool(dispatched.value)
 
     def _trace_control(self, native_name: str) -> None:
         error = _NativeBuffer()

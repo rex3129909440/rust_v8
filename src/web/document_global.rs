@@ -80,6 +80,13 @@ pub(crate) fn execute_parser_inserted_scripts(scope: &mut v8::PinScope<'_, '_>) 
     }
 }
 
+pub(crate) fn current<'s>(scope: &v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
+    scope
+        .get_slot::<DocumentGlobalStore>()
+        .and_then(|store| store.document.as_ref())
+        .map(|document| v8::Local::new(scope, document))
+}
+
 pub(crate) fn install_existing(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     let getter = crate::webidl::create_function(
         scope,
@@ -131,7 +138,7 @@ pub(crate) fn create_document<'s>(
     Ok(document)
 }
 
-fn define_location(
+pub(crate) fn define_location(
     scope: &mut v8::PinScope<'_, '_>,
     document: v8::Local<'_, v8::Object>,
 ) -> Result<(), String> {
@@ -162,9 +169,15 @@ fn define_location(
 
 fn get_location(
     scope: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if super::document::is_document(scope, arguments.this())
+        && super::document::stored_value(scope, arguments.this(), "defaultView").is_none()
+    {
+        result.set(v8::null(scope).into());
+        return;
+    }
     let global = scope.get_current_context().global(scope);
     if let Some(key) = v8::String::new(scope, "location")
         && let Some(location) = global.get(scope, key.into())
@@ -178,6 +191,11 @@ fn set_location(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if super::document::is_document(scope, arguments.this())
+        && super::document::stored_value(scope, arguments.this(), "defaultView").is_none()
+    {
+        return;
+    }
     let global = scope.get_current_context().global(scope);
     let Some(key) = v8::String::new(scope, "location") else {
         return;

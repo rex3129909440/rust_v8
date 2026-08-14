@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Clone)]
 struct FontFaceRecord {
@@ -18,6 +19,8 @@ struct FontFaceRecord {
     status: String,
     loaded: v8::Global<v8::Promise>,
     resolver: Option<v8::Global<v8::PromiseResolver>>,
+    bytes: Option<Arc<Vec<u8>>>,
+    registered_sets: usize,
 }
 
 #[derive(Default)]
@@ -136,26 +139,36 @@ fn construct(
         return;
     }
     let family = crate::webidl::value_to_string(scope, arguments.get(0));
-    if family.trim().is_empty() {
-        if let Ok(exception) = super::dom_exception::create(
-            scope,
-            "The font family is empty".to_owned(),
-            "SyntaxError".to_owned(),
-        ) {
-            scope.throw_exception(exception.into());
-        }
-        return;
-    }
+    let invalid_family = family.trim().is_empty();
     let descriptors = v8::Local::<v8::Object>::try_from(arguments.get(2)).ok();
     let resolver = match v8::PromiseResolver::new(scope) {
         Some(value) => value,
         None => return,
     };
     let loaded = resolver.get_promise(scope);
-    let binary_source = arguments.get(1).is_array_buffer()
-        || v8::Local::<v8::ArrayBufferView>::try_from(arguments.get(1)).is_ok();
-    let status = if binary_source { "loaded" } else { "unloaded" };
-    if binary_source {
+    let binary_source = source_bytes(arguments.get(1));
+    let invalid_binary = binary_source
+        .as_ref()
+        .is_some_and(|bytes| rustybuzz::Face::from_slice(bytes, 0).is_none());
+    let status = if invalid_family || invalid_binary {
+        "error"
+    } else if binary_source.is_some() {
+        "loaded"
+    } else {
+        "unloaded"
+    };
+    if invalid_family || invalid_binary {
+        let message = if invalid_family {
+            "The font family is empty"
+        } else {
+            "Invalid font data in ArrayBuffer."
+        };
+        if let Ok(exception) =
+            super::dom_exception::create(scope, message.to_owned(), "SyntaxError".to_owned())
+        {
+            let _ = resolver.reject(scope, exception.into());
+        }
+    } else if binary_source.is_some() {
         let _ = resolver.resolve(scope, arguments.this().into());
     }
     let record = FontFaceRecord {
@@ -174,7 +187,13 @@ fn construct(
         variation_settings: option_string(scope, descriptors, "variationSettings", "normal"),
         status: status.to_owned(),
         loaded: v8::Global::new(scope, loaded),
-        resolver: (!binary_source).then(|| v8::Global::new(scope, resolver)),
+        resolver: (binary_source.is_none() && !invalid_family)
+            .then(|| v8::Global::new(scope, resolver)),
+        bytes: (!invalid_binary)
+            .then_some(binary_source)
+            .flatten()
+            .map(Arc::new),
+        registered_sets: 0,
     };
     scope
         .get_slot_mut::<FontFaceStore>()
@@ -182,6 +201,79 @@ fn construct(
         .records
         .insert(arguments.this().get_identity_hash().get(), record);
     result.set(arguments.this().into());
+}
+
+fn source_bytes(value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+    if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
+        let mut output = vec![0_u8; view.byte_length()];
+        let copied = view.copy_contents(&mut output);
+        output.truncate(copied);
+        return Some(output);
+    }
+    let buffer = v8::Local::<v8::ArrayBuffer>::try_from(value).ok()?;
+    let backing = buffer.get_backing_store();
+    let data = backing.data()?;
+    Some(
+        unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), backing.byte_length()) }
+            .to_vec(),
+    )
+}
+
+pub(crate) fn is_font_face(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> bool {
+    record(scope, object).is_some()
+}
+
+pub(crate) fn register_with_shaper(
+    scope: &mut v8::PinScope<'_, '_>,
+    realm_id: i32,
+    object: v8::Local<'_, v8::Object>,
+) -> Result<(), String> {
+    let identity = object.get_identity_hash().get();
+    let Some(record) = record(scope, object) else {
+        return Err("FontFaceSet.add requires a FontFace".to_owned());
+    };
+    if let Some(bytes) = record.bytes {
+        crate::font_shaping::register_dynamic(
+            scope,
+            realm_id,
+            identity,
+            &record.family,
+            &record.style,
+            &record.weight,
+            &record.stretch,
+            bytes,
+        )?;
+    }
+    if let Some(record) = scope
+        .get_slot_mut::<FontFaceStore>()
+        .and_then(|store| store.records.get_mut(&identity))
+    {
+        record.registered_sets = record.registered_sets.saturating_add(1);
+    }
+    Ok(())
+}
+
+pub(crate) fn unregister_with_shaper(
+    scope: &mut v8::PinScope<'_, '_>,
+    realm_id: i32,
+    identity: i32,
+) {
+    let has_binary = scope
+        .get_slot::<FontFaceStore>()
+        .and_then(|store| store.records.get(&identity))
+        .is_some_and(|record| record.bytes.is_some());
+    if has_binary {
+        crate::font_shaping::unregister_dynamic(scope, realm_id, identity);
+    }
+    if let Some(record) = scope
+        .get_slot_mut::<FontFaceStore>()
+        .and_then(|store| store.records.get_mut(&identity))
+    {
+        record.registered_sets = record.registered_sets.saturating_sub(1);
+    }
 }
 
 fn option_string(
@@ -238,14 +330,29 @@ fn string_set(
     assign: impl FnOnce(&mut FontFaceRecord, String),
 ) {
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
-    if let Some(record) = scope.get_slot_mut::<FontFaceStore>().and_then(|store| {
+    let refresh = if let Some(record) = scope.get_slot_mut::<FontFaceStore>().and_then(|store| {
         store
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) {
         assign(record, value);
+        (record.registered_sets > 0).then(|| record.clone())
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    if let Some(record) = refresh
+        && let Some(bytes) = record.bytes
+    {
+        let _ = crate::font_shaping::refresh_dynamic(
+            scope,
+            arguments.this().get_identity_hash().get(),
+            &record.family,
+            &record.style,
+            &record.weight,
+            &record.stretch,
+            bytes,
+        );
     }
 }
 
@@ -306,7 +413,12 @@ fn get_loaded(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.loaded).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'loaded' property from 'FontFace': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }
 
@@ -317,7 +429,7 @@ fn load(
 ) {
     let id = arguments.this().get_identity_hash().get();
     let Some(mut record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "FontFace", "load", result);
         return;
     };
     if record.status != "loaded" {

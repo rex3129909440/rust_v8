@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub(crate) struct CreateMonitorStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
     handlers: HashMap<i32, v8::Global<v8::Value>>,
 }
 
@@ -71,6 +72,11 @@ pub(crate) fn create<'s>(
         return Err("cannot create CreateMonitor".to_owned());
     }
     super::event_target::attach(scope, object);
+    scope
+        .get_slot_mut::<CreateMonitorStore>()
+        .ok_or_else(|| "CreateMonitor state was not prepared".to_owned())?
+        .instances
+        .insert(object.get_identity_hash().get());
     Ok(object)
 }
 fn get_handler(
@@ -78,6 +84,14 @@ fn get_handler(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    let identity = arguments.this().get_identity_hash().get();
+    let valid = scope
+        .get_slot::<CreateMonitorStore>()
+        .is_some_and(|store| store.instances.contains(&identity));
+    if !valid {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let handler = scope
         .get_slot::<CreateMonitorStore>()
         .and_then(|store| {
@@ -94,6 +108,13 @@ fn set_handler(
     _: v8::ReturnValue<'_>,
 ) {
     let identity = arguments.this().get_identity_hash().get();
+    let valid = scope
+        .get_slot::<CreateMonitorStore>()
+        .is_some_and(|store| store.instances.contains(&identity));
+    if !valid {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let handler = super::window_event_handler_support::handler_value(scope, arguments.get(0));
     if let Some(store) = scope.get_slot_mut::<CreateMonitorStore>() {
         if let Some(handler) = handler {

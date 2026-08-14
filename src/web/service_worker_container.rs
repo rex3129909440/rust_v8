@@ -160,7 +160,11 @@ pub(crate) fn get_ready(
 ) {
     let id = arguments.this().get_identity_hash().get();
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        let message =
+            "Failed to read the 'ready' property from 'ServiceWorkerContainer': Illegal invocation";
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(scope, message) {
+            result.set(promise.into());
+        }
         return;
     };
     if let Some(registration) = record.registrations.first() {
@@ -187,7 +191,12 @@ pub(crate) fn get_registration(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerContainer",
+            "getRegistration",
+            result,
+        );
         return;
     };
     let value = record
@@ -204,7 +213,12 @@ pub(crate) fn get_registrations(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerContainer",
+            "getRegistrations",
+            result,
+        );
         return;
     };
     let array = v8::Array::new(scope, record.registrations.len() as i32);
@@ -220,16 +234,21 @@ pub(crate) fn register(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "ServiceWorkerContainer",
+            "register",
+            result,
+        );
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(scope, "Failed to execute 'register': 1 argument required");
         return;
     }
     let container = arguments.this();
     let container_id = container.get_identity_hash().get();
-    if record(scope, container).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let input = crate::webidl::value_to_string(scope, arguments.get(0));
     let options = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
     let worker_type = option_string(scope, options, "type").unwrap_or_else(|| "classic".to_owned());
@@ -386,11 +405,15 @@ pub(crate) fn get_handler(
     kind: HandlerKind,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| match kind {
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let handler = match kind {
         HandlerKind::ControllerChange => record.on_controller,
         HandlerKind::Message => record.on_message,
         HandlerKind::MessageError => record.on_message_error,
-    });
+    };
     super::window_event_handler_support::return_handler(scope, handler, result);
 }
 

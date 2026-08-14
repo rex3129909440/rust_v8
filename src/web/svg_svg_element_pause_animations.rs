@@ -12,7 +12,12 @@ fn pause_animations(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let current_time = current_time(scope, arguments.this());
     update(scope, arguments.this(), |record| {
-        record.animations_paused = true
+        if let Some(current_time) = current_time {
+            record.current_time = current_time;
+        }
+        record.timeline_started_ms = None;
+        record.animations_paused = true;
     });
 }

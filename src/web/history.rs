@@ -153,6 +153,10 @@ fn set_scroll_restoration(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
     if value != "auto" && value != "manual" {
         crate::webidl::throw_type_error(scope, "Invalid scroll restoration mode");
@@ -225,12 +229,12 @@ fn push_state(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let state = v8::Global::new(scope, arguments.get(0));
+    let Some(state) = clone_history_state(scope, arguments.get(0), "pushState") else {
+        return;
+    };
     let title = crate::webidl::value_to_string(scope, arguments.get(1));
-    let url = if arguments.get(2).is_undefined() {
-        String::new()
-    } else {
-        crate::webidl::value_to_string(scope, arguments.get(2))
+    let Some(url) = history_url(scope, arguments.get(2), "pushState") else {
+        return;
     };
     if let Some(record) = scope.get_slot_mut::<HistoryStore>().and_then(|store| {
         store
@@ -238,11 +242,16 @@ fn push_state(
             .get_mut(&arguments.this().get_identity_hash().get())
     }) {
         record.entries.truncate(record.current + 1);
-        record.entries.push(HistoryEntry { state, title, url });
+        record.entries.push(HistoryEntry {
+            state,
+            title,
+            url: url.clone(),
+        });
         record.current = record.entries.len() - 1;
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
+    apply_history_url(scope, &url);
 }
 
 fn replace_state(
@@ -250,20 +259,109 @@ fn replace_state(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let state = v8::Global::new(scope, arguments.get(0));
+    let Some(state) = clone_history_state(scope, arguments.get(0), "replaceState") else {
+        return;
+    };
     let title = crate::webidl::value_to_string(scope, arguments.get(1));
-    let url = if arguments.get(2).is_undefined() {
-        String::new()
-    } else {
-        crate::webidl::value_to_string(scope, arguments.get(2))
+    let Some(url) = history_url(scope, arguments.get(2), "replaceState") else {
+        return;
     };
     if let Some(record) = scope.get_slot_mut::<HistoryStore>().and_then(|store| {
         store
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) {
-        record.entries[record.current] = HistoryEntry { state, title, url };
+        record.entries[record.current] = HistoryEntry {
+            state,
+            title,
+            url: url.clone(),
+        };
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
+    apply_history_url(scope, &url);
+}
+
+fn clone_history_state(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    method: &str,
+) -> Option<v8::Global<v8::Value>> {
+    let description = if let Ok(symbol) = v8::Local::<v8::Symbol>::try_from(value) {
+        let description = symbol.description(scope).to_rust_string_lossy(scope);
+        format!("Symbol({description})")
+    } else {
+        crate::webidl::value_to_string(scope, value)
+    };
+    let context = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let context = v8::Local::new(scope, &context);
+    match super::structured_clone::clone_into(
+        scope,
+        context,
+        value,
+        super::structured_clone::TransferList::default(),
+    ) {
+        Ok(output) => Some(output.value),
+        Err(_) => {
+            super::structured_clone::throw_data_clone_error(
+                scope,
+                &format!(
+                    "Failed to execute '{method}' on 'History': {description} could not be cloned."
+                ),
+            );
+            None
+        }
+    }
+}
+
+fn history_url(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    method: &str,
+) -> Option<String> {
+    let location = super::location_global::value(scope)?;
+    let current = super::location::current_url(scope, location)?;
+    if value.is_undefined() {
+        return Some(current.as_str().to_owned());
+    }
+    let requested = crate::webidl::value_to_string(scope, value);
+    let Ok(resolved) = ::url::Url::parse(&requested).or_else(|_| current.join(&requested)) else {
+        super::node::throw_dom_exception(
+            scope,
+            "SecurityError",
+            &format!(
+                "Failed to execute '{method}' on 'History': A history state object with URL '{requested}' cannot be created in a document with origin '{}' and URL '{}'.",
+                current.origin().ascii_serialization(),
+                current.as_str()
+            ),
+        );
+        return None;
+    };
+    if resolved.origin() != current.origin() {
+        super::node::throw_dom_exception(
+            scope,
+            "SecurityError",
+            &format!(
+                "Failed to execute '{method}' on 'History': A history state object with URL '{}' cannot be created in a document with origin '{}' and URL '{}'.",
+                resolved.as_str(),
+                current.origin().ascii_serialization(),
+                current.as_str()
+            ),
+        );
+        return None;
+    }
+    Some(resolved.as_str().to_owned())
+}
+
+fn apply_history_url(scope: &mut v8::PinScope<'_, '_>, url: &str) {
+    let Ok(parsed) = ::url::Url::parse(url) else {
+        return;
+    };
+    if let Some(location) = super::location_global::value(scope) {
+        let _ = super::location::replace_url(scope, location, parsed);
+    }
+    if let Some(document) = super::document_global::value(scope) {
+        super::document::set_string_value(scope, document, "URL", url);
+        super::document::set_string_value(scope, document, "documentURI", url);
     }
 }

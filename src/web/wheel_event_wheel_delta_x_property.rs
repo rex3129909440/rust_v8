@@ -12,7 +12,5 @@ fn get_wheel_delta_x(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_number(s, a, r, |record| {
-        legacy_delta(record.delta_x, record.delta_mode)
-    });
+    return_number(s, a, r, |record| record.wheel_delta_x);
 }

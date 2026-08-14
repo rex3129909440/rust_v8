@@ -94,7 +94,12 @@ fn fetch(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !valid_this(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BackgroundFetchManager",
+            "fetch",
+            result,
+        );
         return;
     }
     if arguments.length() < 2 {
@@ -161,7 +166,12 @@ fn get(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !valid_this(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BackgroundFetchManager",
+            "get",
+            result,
+        );
         return;
     }
     if arguments.length() < 1 {
@@ -190,7 +200,12 @@ fn get_ids(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !valid_this(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BackgroundFetchManager",
+            "getIds",
+            result,
+        );
         return;
     }
     let ids = scope

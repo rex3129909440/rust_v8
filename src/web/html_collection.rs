@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub(crate) struct HtmlCollectionStore {
     constructor: crate::webidl::RealmConstructor,
     records: HashMap<i32, HtmlCollectionRecord>,
+    live_cache: HashMap<(i32, HtmlCollectionQuery), v8::Global<v8::Object>>,
     form_owners: HashMap<i32, v8::Global<v8::Object>>,
     data_list_owners: HashMap<i32, v8::Global<v8::Object>>,
 }
@@ -18,7 +19,7 @@ enum HtmlCollectionRecord {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub(crate) enum HtmlCollectionQuery {
     Children,
     TagName(String),
@@ -26,7 +27,10 @@ pub(crate) enum HtmlCollectionQuery {
         namespace: Option<String>,
         local_name: String,
     },
-    ClassNames(Vec<String>),
+    ClassNames {
+        names: Vec<String>,
+        source: String,
+    },
     Name(String),
     Legacy(String),
 }
@@ -105,6 +109,14 @@ pub(crate) fn create_live<'s>(
     root: v8::Local<'_, v8::Object>,
     query: HtmlCollectionQuery,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
+    let cache_key = (root.get_identity_hash().get(), query.clone());
+    if let Some(collection) = scope
+        .get_slot::<HtmlCollectionStore>()
+        .and_then(|store| store.live_cache.get(&cache_key))
+        .cloned()
+    {
+        return Ok(v8::Local::new(scope, &collection));
+    }
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
     let collection = new_exotic_collection(scope)?;
@@ -113,18 +125,19 @@ pub(crate) fn create_live<'s>(
     }
     let initial = resolve_query(scope, root, &query);
     let root = v8::Global::new(scope, root);
-    scope
+    let collection_global = v8::Global::new(scope, collection);
+    let store = scope
         .get_slot_mut::<HtmlCollectionStore>()
-        .ok_or_else(|| "HTMLCollection state was not prepared".to_owned())?
-        .records
-        .insert(
-            collection.get_identity_hash().get(),
-            HtmlCollectionRecord::Live {
-                root,
-                query,
-                materialized_length: initial.len(),
-            },
-        );
+        .ok_or_else(|| "HTMLCollection state was not prepared".to_owned())?;
+    store.records.insert(
+        collection.get_identity_hash().get(),
+        HtmlCollectionRecord::Live {
+            root,
+            query,
+            materialized_length: initial.len(),
+        },
+    );
+    store.live_cache.insert(cache_key, collection_global);
     Ok(collection)
 }
 
@@ -135,6 +148,7 @@ fn new_exotic_collection<'s>(
     template.set_indexed_property_handler(
         v8::IndexedPropertyHandlerConfiguration::new()
             .getter(indexed_getter)
+            .setter(indexed_setter)
             .query(indexed_query)
             .enumerator(indexed_enumerator),
     );
@@ -341,7 +355,7 @@ fn resolve_query<'s>(
                                 .unwrap_or(&record.tag_name)
                                 .eq_ignore_ascii_case(local_name))
                 }
-                HtmlCollectionQuery::ClassNames(names) => {
+                HtmlCollectionQuery::ClassNames { names, .. } => {
                     let classes = super::element::attribute_value(scope, *element, "class")
                         .unwrap_or_default();
                     names.iter().all(|wanted| {
@@ -400,11 +414,37 @@ fn indexed_query(
 ) -> v8::Intercepted {
     crate::trace::record_indexed_native_intercept(scope, &arguments, "has", index, None);
     if record(scope, arguments.holder()).is_some_and(|values| (index as usize) < values.len()) {
-        result.set_int32(1);
+        result.set_int32(
+            if super::html_options_collection::is_options_collection(scope, arguments.holder()) {
+                0
+            } else {
+                1
+            },
+        );
         v8::Intercepted::kYes
     } else {
         v8::Intercepted::kNo
     }
+}
+
+fn indexed_setter(
+    scope: &mut v8::PinScope<'_, '_>,
+    index: u32,
+    value: v8::Local<'_, v8::Value>,
+    arguments: v8::PropertyCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    crate::trace::record_indexed_native_intercept(scope, &arguments, "set", index, Some(value));
+    if !super::html_options_collection::set_indexed_value(
+        scope,
+        arguments.holder(),
+        index as usize,
+        value,
+    ) {
+        return v8::Intercepted::kNo;
+    }
+    result.set_bool(true);
+    v8::Intercepted::kYes
 }
 
 fn indexed_enumerator(
@@ -448,7 +488,18 @@ fn named_query(
         return v8::Intercepted::kNo;
     };
     if named_value(scope, arguments.holder(), &name).is_some() {
-        result.set_int32(1);
+        result.set_int32(
+            if super::html_options_collection::is_options_collection(scope, arguments.holder())
+                || super::html_form_controls_collection::is_form_controls_collection(
+                    scope,
+                    arguments.holder(),
+                )
+            {
+                1
+            } else {
+                3
+            },
+        );
         v8::Intercepted::kYes
     } else {
         v8::Intercepted::kNo
@@ -493,7 +544,7 @@ fn property_name(scope: &v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>) -> 
 }
 
 fn named_value<'s>(
-    scope: &v8::PinScope<'s, '_>,
+    scope: &mut v8::PinScope<'s, '_>,
     collection: v8::Local<'_, v8::Object>,
     name: &str,
 ) -> Option<v8::Local<'s, v8::Object>> {
@@ -503,11 +554,27 @@ fn named_value<'s>(
     ) {
         return None;
     }
-    record(scope, collection)?.into_iter().find_map(|item| {
-        let item = v8::Local::new(scope, &item);
-        let matched = ["id", "name"].into_iter().any(|attribute| {
-            super::element::attribute_value(scope, item, attribute).as_deref() == Some(name)
-        });
-        matched.then_some(item)
-    })
+    let items = record(scope, collection)?;
+    if super::html_form_controls_collection::is_form_controls_collection(scope, collection) {
+        return super::html_form_controls_collection::named_value(scope, collection, items, name);
+    }
+    named_match(scope, items, name)
+}
+
+pub(crate) fn named_match<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    items: Vec<v8::Global<v8::Object>>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Object>> {
+    for attribute in ["id", "name"] {
+        if let Some(item) = items.iter().find_map(|item| {
+            let item = v8::Local::new(scope, item);
+            let matched =
+                super::element::attribute_value(scope, item, attribute).as_deref() == Some(name);
+            matched.then_some(item)
+        }) {
+            return Some(item);
+        }
+    }
+    None
 }

@@ -196,17 +196,8 @@ pub(crate) fn serialize(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> Option<String> {
+    let _record = record(scope, object)?;
     let condition = super::css_condition_rule::condition(scope, object)?;
-    let list = super::css_grouping_rule::list(scope, object)?;
-    let rules = super::css_rule_list::rules(scope, v8::Local::new(scope, &list))?;
-    let mut body = String::new();
-    for rule in rules {
-        if let Some(text) = super::css_rule::serialized(scope, v8::Local::new(scope, &rule)) {
-            if !body.is_empty() {
-                body.push(' ');
-            }
-            body.push_str(&text);
-        }
-    }
-    Some(format!("@container {condition} {{ {body} }}"))
+    let body = super::css_grouping_rule::serialized_body(scope, object)?;
+    Some(format!("@container {condition} {{\n{body}}}"))
 }

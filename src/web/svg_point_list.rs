@@ -130,6 +130,10 @@ fn append_item(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if values(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(value) = input(scope, arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "appendItem requires an SVGPoint");
         return;
@@ -184,6 +188,10 @@ fn initialize(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if values(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(value) = input(scope, arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "initialize requires an SVGPoint");
         return;
@@ -206,6 +214,10 @@ fn insert_item_before(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if values(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(value) = input(scope, arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "insertItemBefore requires an SVGPoint");
         return;
@@ -251,6 +263,10 @@ fn replace_item(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if values(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(value) = input(scope, arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "replaceItem requires an SVGPoint");
         return;

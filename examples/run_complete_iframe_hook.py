@@ -71,6 +71,10 @@ CHROME_150_USER_AGENT = (
     "Chrome/150.0.0.0 Safari/537.36"
 )
 
+PARSER_SCRIPT_SRC = "xxx"
+PAGE_URL = "https://www.wizzair.com/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/fp?x-kpsdk-v=j-1.2.543"
+PARSER_SCRIPT_URL = PAGE_URL.rsplit("/", 1)[0] + "/" + PARSER_SCRIPT_SRC
+
 
 IFRAME_XHR_HOOK = IframeHook(
     name="iframe-xhr-hook",
@@ -376,29 +380,60 @@ def build_fingerprint() -> EdgeProfile:
             scripting="enabled",
         ),
         memory=MemoryProfile(
-            performance_js_heap_size_limit=4_294_705_152,
-            performance_total_js_heap_size=13061022,
-            performance_used_js_heap_size=12562246,
-            console_js_heap_size_limit=4_294_705_152,
-            console_total_js_heap_size=13061022,
-            console_used_js_heap_size=12562246,
+            performance_js_heap_size_limit=4_395_630_592,
+            performance_total_js_heap_size=98_833_423,
+            performance_used_js_heap_size=62_981_207,
+            console_js_heap_size_limit=4_395_630_592,
+            console_total_js_heap_size=98_833_423,
+            console_used_js_heap_size=62_981_207,
         ),
     )
 
 
-def build_runtime_options() -> EdgeRunOptions:
+def build_runtime_options(
+    *, parser_script_body: bytes | str = b""
+) -> EdgeRunOptions:
     """Return page, replay, hook, deterministic and process-limit settings."""
+
+    parser_script_bytes = (
+        parser_script_body.encode("utf-8")
+        if isinstance(parser_script_body, str)
+        else bytes(parser_script_body)
+    )
+    parser_script_tag = (
+        f'<script src="{PARSER_SCRIPT_SRC}"></script>'
+        if parser_script_bytes
+        else ""
+    )
+    parser_replay = (
+        (
+            NetworkReplayEntry(
+                url=PARSER_SCRIPT_URL,
+                method="GET",
+                status=200,
+                status_text="OK",
+                headers=(("content-type", "text/javascript; charset=utf-8"),),
+                body=parser_script_bytes,
+            ),
+        )
+        if parser_script_bytes
+        else ()
+    )
 
     return EdgeRunOptions(
         page=PageInit(
-            url="https://www.wizzair.com/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/fp?x-kpsdk-v=j-1.2.543",
+            url=PAGE_URL,
             html=(
-                    '<!DOCTYPE html><html><head></head><body><script>window.KPSDK={};KPSDK.now=typeof performance!==\'undefined\'&&performance.now?performance.now.bind(performance):Date.now.bind(Date);KPSDK.start=KPSDK.now();</script><script></script></body></html>'
+                '<!DOCTYPE html><html><head></head><body>'
+                '<script>window.KPSDK={};KPSDK.now=typeof performance!==\'undefined\'&&performance.now?performance.now.bind(performance):Date.now.bind(Date);KPSDK.start=KPSDK.now();</script>'
+                f'{parser_script_tag}'
+                '</body></html>'
             ),
             referrer="https://www.wizzair.com",
             content_type="text/html; charset=utf-8",
         ),
         network_replay=(
+            *parser_replay,
             NetworkReplayEntry(
                 url="https://demo.example.test/api/bootstrap",
                 method="GET",
@@ -416,8 +451,9 @@ def build_runtime_options() -> EdgeRunOptions:
                 body=b"",
             ),
         ),
-        # iframe_hooks=(IFRAME_XHR_HOOK, IFRAME_TEXT_ENCODER_HOOK, IFRAME_DEBUG_HOOK),
-        iframe_hooks=(IFRAME_DEBUG_HOOK, IFRAME_JSON_HOOK),
+        iframe_hooks=(IFRAME_XHR_HOOK, IFRAME_TEXT_ENCODER_HOOK),
+        # iframe_hooks=(IFRAME_DEBUG_HOOK, IFRAME_JSON_HOOK),
+        # iframe_hooks=(),
         deterministic=DeterministicExecution(
             clock_epoch_ms=1_893_456_000_000,
             clock_step_ms=1,

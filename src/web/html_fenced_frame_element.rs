@@ -72,7 +72,11 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLFencedFrameElement".to_owned());
     }
     super::html_element::attach(scope, element, "FENCEDFRAME");
-    let sandbox = super::dom_token_list::create(scope, "")?;
+    let sandbox = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::Sandbox,
+    )?;
     let record = HtmlFencedFrameElementRecord {
         width: String::new(),
         height: String::new(),

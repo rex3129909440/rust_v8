@@ -9,6 +9,15 @@ pub(crate) struct DragEventStore {
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
     isolate.set_slot(DragEventStore::default());
 }
+
+pub(crate) fn is_instance(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    scope.get_slot::<DragEventStore>().is_some_and(|store| {
+        store
+            .data_transfers
+            .contains_key(&object.get_identity_hash().get())
+    })
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     let c = ensure_constructor(scope)?;
     crate::webidl::define_global(scope, "DragEvent", c.into())
@@ -55,6 +64,28 @@ pub(crate) fn create<'s>(
         .ok_or_else(|| "cannot create DragEvent".to_owned())
 }
 
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: &str,
+    mouse_data: super::mouse_event::MouseEventData,
+    transfer: v8::Local<'s, v8::Object>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create DragEvent".to_owned());
+    }
+    super::mouse_event::attach(scope, event, event_type.to_owned(), mouse_data);
+    let transfer = v8::Global::new(scope, transfer);
+    scope
+        .get_slot_mut::<DragEventStore>()
+        .ok_or_else(|| "DragEvent state was not prepared".to_owned())?
+        .data_transfers
+        .insert(event.get_identity_hash().get(), Some(transfer));
+    Ok(event)
+}
+
 pub(crate) fn construct(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
@@ -66,14 +97,33 @@ pub(crate) fn construct(
     }
     let event_type = crate::webidl::value_to_string(s, a.get(0));
     let data = super::mouse_event::read_init(s, a.get(1));
-    let transfer = v8::Local::<v8::Object>::try_from(a.get(1))
+    let transfer_value = v8::Local::<v8::Object>::try_from(a.get(1))
         .ok()
         .and_then(|init| {
             let key = v8::String::new(s, "dataTransfer")?;
             init.get(s, key.into())
-        })
-        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-        .map(|value| v8::Global::new(s, value));
+        });
+    let transfer = match transfer_value {
+        None => None,
+        Some(value) if value.is_null() || value.is_undefined() => None,
+        Some(value) => {
+            let Ok(value) = v8::Local::<v8::Object>::try_from(value) else {
+                crate::webidl::throw_type_error(
+                    s,
+                    "Failed to convert DragEventInit.dataTransfer to DataTransfer",
+                );
+                return;
+            };
+            if !super::data_transfer::is_instance(s, value) {
+                crate::webidl::throw_type_error(
+                    s,
+                    "Failed to convert DragEventInit.dataTransfer to DataTransfer",
+                );
+                return;
+            }
+            Some(v8::Global::new(s, value))
+        }
+    };
     super::mouse_event::attach(s, a.this(), event_type, data);
     s.get_slot_mut::<DragEventStore>()
         .expect("DragEvent state")

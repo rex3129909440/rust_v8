@@ -18,6 +18,10 @@ fn get_rotation_of_char(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     if character_index(scope, &arguments).is_some() {
         result.set(v8::Number::new(scope, 0.0).into());
     } else {

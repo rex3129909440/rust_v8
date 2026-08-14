@@ -122,9 +122,11 @@ fn time_remaining(
         return;
     };
     let now = crate::determinism::monotonic_snapshot_milliseconds(scope);
-    let clamped_deadline =
-        crate::determinism::high_resolution_milliseconds(scope, record.deadline_monotonic_ms);
-    let clamped_now = crate::determinism::high_resolution_milliseconds(scope, now);
-    let remaining = (clamped_deadline - clamped_now).clamp(0.0, 50.0);
+    let remaining = crate::determinism::relative_high_resolution_milliseconds(
+        scope,
+        record.deadline_monotonic_ms,
+        now,
+    )
+    .clamp(0.0, 50.0);
     result.set(v8::Number::new(scope, remaining).into());
 }

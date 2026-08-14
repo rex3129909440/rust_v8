@@ -54,20 +54,26 @@ fn ensure<'s>(s: &mut v8::PinScope<'s, '_>) -> Result<v8::Local<'s, v8::Function
     crate::webidl::define_readonly_accessor(s, p, "configurations", configurations)?;
     crate::webidl::define_readonly_accessor(s, p, "opened", opened)?;
     crate::webidl::define_method(s, p, "claimInterface", 1, claim_interface)?;
-    crate::webidl::define_method(s, p, "clearHalt", 2, void_method)?;
+    crate::webidl::define_method(s, p, "clearHalt", 2, clear_halt)?;
     crate::webidl::define_method(s, p, "close", 0, close)?;
-    crate::webidl::define_method(s, p, "controlTransferIn", 2, control_in)?;
-    crate::webidl::define_method(s, p, "controlTransferOut", 1, control_out)?;
-    crate::webidl::define_method(s, p, "forget", 0, close)?;
+    crate::webidl::define_method(s, p, "controlTransferIn", 2, control_transfer_in)?;
+    crate::webidl::define_method(s, p, "controlTransferOut", 1, control_transfer_out)?;
+    crate::webidl::define_method(s, p, "forget", 0, forget)?;
     crate::webidl::define_method(s, p, "isochronousTransferIn", 2, iso_in)?;
     crate::webidl::define_method(s, p, "isochronousTransferOut", 3, iso_out)?;
     crate::webidl::define_method(s, p, "open", 0, open)?;
     crate::webidl::define_method(s, p, "releaseInterface", 1, release_interface)?;
-    crate::webidl::define_method(s, p, "reset", 0, void_method)?;
-    crate::webidl::define_method(s, p, "selectAlternateInterface", 2, void_method)?;
-    crate::webidl::define_method(s, p, "selectConfiguration", 1, void_method)?;
-    crate::webidl::define_method(s, p, "transferIn", 2, control_in)?;
-    crate::webidl::define_method(s, p, "transferOut", 2, control_out)?;
+    crate::webidl::define_method(s, p, "reset", 0, reset)?;
+    crate::webidl::define_method(
+        s,
+        p,
+        "selectAlternateInterface",
+        2,
+        select_alternate_interface,
+    )?;
+    crate::webidl::define_method(s, p, "selectConfiguration", 1, select_configuration)?;
+    crate::webidl::define_method(s, p, "transferIn", 2, transfer_in)?;
+    crate::webidl::define_method(s, p, "transferOut", 2, transfer_out)?;
     crate::webidl::finish_constructor(s, p, c)?;
     let realm_constructor = v8::Global::new(s, c);
     s.get_slot_mut::<UsbDeviceStore>()
@@ -125,6 +131,23 @@ fn valid(s: &mut v8::PinScope<'_, '_>, o: v8::Local<'_, v8::Object>) -> bool {
         true
     } else {
         crate::webidl::throw_type_error(s, "Illegal invocation");
+        false
+    }
+}
+
+fn require_promise_receiver(
+    s: &mut v8::PinScope<'_, '_>,
+    o: v8::Local<'_, v8::Object>,
+    method: &str,
+    result: &mut v8::ReturnValue<'_>,
+) -> bool {
+    if record(s, o).is_some() {
+        true
+    } else {
+        let message = format!("Failed to execute '{method}' on 'USBDevice': Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(s, &message) {
+            result.set(promise.into());
+        }
         false
     }
 }
@@ -302,9 +325,13 @@ fn opened(
 fn set_open(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
+    method: &str,
     value: bool,
 ) {
+    if !require_promise_receiver(s, a.this(), method, &mut r) {
+        return;
+    }
     if let Some(v) = s
         .get_slot_mut::<UsbDeviceStore>()
         .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
@@ -312,8 +339,6 @@ fn set_open(
         v.opened = value;
         let x = v8::undefined(s);
         promise(s, x.into(), r)
-    } else {
-        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn open(
@@ -321,49 +346,95 @@ fn open(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_open(s, a, r, true)
+    set_open(s, a, r, "open", true)
 }
 fn close(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    set_open(s, a, r, false)
+    set_open(s, a, r, "close", false)
 }
-fn void_method(
+fn forget(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if valid(s, a.this()) {
-        let x = v8::undefined(s);
-        promise(s, x.into(), r)
+    set_open(s, a, r, "forget", false)
+}
+fn void_operation(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+    method: &str,
+) {
+    if !require_promise_receiver(s, a.this(), method, &mut r) {
+        return;
     }
+    let x = v8::undefined(s);
+    promise(s, x.into(), r)
+}
+fn clear_halt(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    void_operation(s, a, r, "clearHalt")
+}
+fn reset(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    void_operation(s, a, r, "reset")
+}
+fn select_alternate_interface(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    void_operation(s, a, r, "selectAlternateInterface")
+}
+fn select_configuration(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    void_operation(s, a, r, "selectConfiguration")
 }
 fn claim_interface(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_promise_receiver(s, a.this(), "claimInterface", &mut r) {
+        return;
+    }
     let n = a.get(0).uint32_value(s).unwrap_or(0);
     super::usb_interface::set_claimed(s, n, true);
-    void_method(s, a, r)
+    let x = v8::undefined(s);
+    promise(s, x.into(), r)
 }
 fn release_interface(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
 ) {
+    if !require_promise_receiver(s, a.this(), "releaseInterface", &mut r) {
+        return;
+    }
     let n = a.get(0).uint32_value(s).unwrap_or(0);
     super::usb_interface::set_claimed(s, n, false);
-    void_method(s, a, r)
+    let x = v8::undefined(s);
+    promise(s, x.into(), r)
 }
-fn control_in(
+fn control_in_operation(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
+    method: &str,
 ) {
-    if !valid(s, a.this()) {
+    if !require_promise_receiver(s, a.this(), method, &mut r) {
         return;
     }
     let length = a.get(1).uint32_value(s).unwrap_or(0) as usize;
@@ -372,12 +443,27 @@ fn control_in(
         Err(e) => crate::webidl::throw_type_error(s, &e),
     }
 }
-fn control_out(
+fn control_transfer_in(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if !valid(s, a.this()) {
+    control_in_operation(s, a, r, "controlTransferIn")
+}
+fn transfer_in(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    control_in_operation(s, a, r, "transferIn")
+}
+fn control_out_operation(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+    method: &str,
+) {
+    if !require_promise_receiver(s, a.this(), method, &mut r) {
         return;
     }
     match super::usb_out_transfer_result::create(s, 0, "ok".to_owned()) {
@@ -385,12 +471,26 @@ fn control_out(
         Err(e) => crate::webidl::throw_type_error(s, &e),
     }
 }
-fn iso_in(
+fn control_transfer_out(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    if !valid(s, a.this()) {
+    control_out_operation(s, a, r, "controlTransferOut")
+}
+fn transfer_out(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    r: v8::ReturnValue<'_>,
+) {
+    control_out_operation(s, a, r, "transferOut")
+}
+fn iso_in(
+    s: &mut v8::PinScope<'_, '_>,
+    a: v8::FunctionCallbackArguments<'_>,
+    mut r: v8::ReturnValue<'_>,
+) {
+    if !require_promise_receiver(s, a.this(), "isochronousTransferIn", &mut r) {
         return;
     }
     let packet =
@@ -409,9 +509,9 @@ fn iso_in(
 fn iso_out(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    r: v8::ReturnValue<'_>,
+    mut r: v8::ReturnValue<'_>,
 ) {
-    if !valid(s, a.this()) {
+    if !require_promise_receiver(s, a.this(), "isochronousTransferOut", &mut r) {
         return;
     }
     let packet = match super::usb_isochronous_out_transfer_packet::create(s, 0, "ok".to_owned()) {

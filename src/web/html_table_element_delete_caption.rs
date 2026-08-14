@@ -10,7 +10,7 @@ pub(crate) fn define(
 fn delete_caption(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    delete_special(scope, arguments.this(), SpecialChild::Caption);
+    super::html_table_element::delete_caption(scope, arguments, result);
 }

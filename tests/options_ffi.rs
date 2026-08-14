@@ -7,8 +7,8 @@ use edge_sandbox::ffi::{
     edge_sandbox_options_append_network_replay, edge_sandbox_options_append_network_replay_header,
     edge_sandbox_options_clear_network_replay, edge_sandbox_options_create,
     edge_sandbox_options_destroy, edge_sandbox_options_schema_version,
-    edge_sandbox_options_set_deterministic, edge_sandbox_options_set_limits,
-    edge_sandbox_options_set_page, edge_sandbox_options_validate,
+    edge_sandbox_options_set_cross_origin_isolated, edge_sandbox_options_set_deterministic,
+    edge_sandbox_options_set_limits, edge_sandbox_options_set_page, edge_sandbox_options_validate,
 };
 
 fn take_buffer(buffer: &mut EdgeSandboxBuffer) -> String {
@@ -53,7 +53,7 @@ fn evaluate(runtime: *mut edge_sandbox::ffi::EdgeSandboxHandle, source: &str) ->
 
 #[test]
 fn complete_typed_options_cross_ffi_and_binary_worker_boundaries() {
-    assert_eq!(edge_sandbox_options_schema_version(), 2);
+    assert_eq!(edge_sandbox_options_schema_version(), 3);
     let mut error = EdgeSandboxBuffer::default();
     let options = edge_sandbox_options_create(&mut error);
     assert!(!options.is_null(), "{}", take_buffer(&mut error));
@@ -80,6 +80,11 @@ fn complete_typed_options_cross_ffi_and_binary_worker_boundaries() {
                 &mut error,
             )
         },
+        &mut error,
+    );
+
+    assert_native_call(
+        unsafe { edge_sandbox_options_set_cross_origin_isolated(options, true, &mut error) },
         &mut error,
     );
 

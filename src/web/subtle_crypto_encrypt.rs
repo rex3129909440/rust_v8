@@ -10,7 +10,7 @@ fn encrypt(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if !super::subtle_crypto_support::require_receiver(scope, &arguments)
+    if !super::subtle_crypto_support::require_receiver(scope, &arguments, "encrypt", &mut result)
         || !super::subtle_crypto_support::require_arguments(scope, &arguments, 3, "encrypt")
     {
         return;

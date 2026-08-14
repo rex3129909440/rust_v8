@@ -167,6 +167,9 @@ pub(crate) fn ensure_constructor<'s>(
     super::svg_element_focus_group_start_property::define(scope, prototype)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     super::svg_element_onpointerrawupdate_property::define(scope, prototype)?;
+    for name in ["ontouchcancel", "ontouchend", "ontouchmove", "ontouchstart"] {
+        super::svg_element_touch_handlers::define(scope, prototype, name)?;
+    }
     let parent = super::element::ensure_constructor(scope)?;
     crate::webidl::inherit(scope, constructor, parent)?;
     let realm_id = crate::webidl::realm_id(scope);

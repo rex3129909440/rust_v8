@@ -80,13 +80,19 @@ pub(crate) fn dataset_name(attribute_name: &str) -> String {
         .strip_prefix("data-")
         .unwrap_or(attribute_name);
     let mut output = String::new();
-    let mut uppercase = false;
-    for character in source.chars() {
-        if character == '-' {
-            uppercase = true;
-        } else if uppercase {
-            output.extend(character.to_uppercase());
-            uppercase = false;
+    let mut characters = source.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '-'
+            && characters
+                .peek()
+                .is_some_and(|next| next.is_ascii_lowercase())
+        {
+            output.push(
+                characters
+                    .next()
+                    .expect("peeked dataset character")
+                    .to_ascii_uppercase(),
+            );
         } else {
             output.push(character);
         }
@@ -112,6 +118,15 @@ fn attribute_name(property_name: &str) -> Result<String, ()> {
         }
     }
     Ok(output)
+}
+
+fn valid_attribute_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.chars().any(|character| {
+            character == '\0'
+                || character.is_ascii_whitespace()
+                || matches!(character, '"' | '\'' | '>' | '/' | '=')
+        })
 }
 
 fn owner<'s>(
@@ -175,10 +190,22 @@ fn named_setter(
         super::node::throw_dom_exception(
             scope,
             "SyntaxError",
-            "The dataset property name contains an invalid hyphen sequence",
+            &format!(
+                "Failed to set a named property '{property}' on 'DOMStringMap': '{property}' is not a valid property name."
+            ),
         );
         return v8::Intercepted::kYes;
     };
+    if !valid_attribute_name(&attribute) {
+        super::node::throw_dom_exception(
+            scope,
+            "InvalidCharacterError",
+            &format!(
+                "Failed to set a named property '{property}' on 'DOMStringMap': '{attribute}' is not a valid attribute name."
+            ),
+        );
+        return v8::Intercepted::kYes;
+    }
     let value = crate::webidl::value_to_string(scope, value);
     super::element::set_attribute_full(scope, owner, attribute, value, None);
     result.set_bool(true);

@@ -116,6 +116,7 @@ pub(crate) fn enable_native_trace_for_existing_realms(
         let context = v8::Local::new(scope, &context);
         let child_scope = &mut v8::ContextScope::new(scope, context);
         let global = v8::Local::new(child_scope, &global);
+        crate::trace::relabel_json_intrinsic_trace(child_scope, &worklet_trace_label(kind, id))?;
         crate::trace::label_native_value(
             child_scope,
             global.into(),
@@ -663,6 +664,8 @@ fn ensure_realm(scope: &mut v8::PinScope<'_, '_>, worklet_id: i32) -> Result<(),
         .ok_or_else(|| "Illegal invocation".to_owned())?;
     {
         let child_scope = &mut v8::ContextScope::new(scope, context);
+        let trace_label = worklet_trace_label(kind, worklet_id);
+        crate::trace::install_json_intrinsic_trace(child_scope, &trace_label)?;
         let prototype = match kind {
             WorkletKind::Audio => super::audio_worklet_global_scope::install(child_scope)?,
             WorkletKind::Paint => super::paint_worklet_global_scope::install(child_scope)?,
@@ -678,11 +681,7 @@ fn ensure_realm(scope: &mut v8::PinScope<'_, '_>, worklet_id: i32) -> Result<(),
         crate::locale_runtime::install(child_scope)?;
         crate::determinism::install(child_scope)?;
         if crate::trace::is_enabled(child_scope) {
-            crate::trace::label_native_value(
-                child_scope,
-                global.into(),
-                &worklet_trace_label(kind, worklet_id),
-            );
+            crate::trace::label_native_value(child_scope, global.into(), &trace_label);
         }
     }
     Ok(())
@@ -705,7 +704,7 @@ fn add_module(
         .get_slot::<WorkletStore>()
         .is_some_and(|store| store.records.contains_key(&worklet_id))
     {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Worklet", "addModule", result);
         return;
     }
     let input = crate::webidl::value_to_string(scope, arguments.get(0));

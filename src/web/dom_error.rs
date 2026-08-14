@@ -65,6 +65,13 @@ fn construct(
         );
         return;
     }
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'DOMError': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let name = crate::webidl::value_to_string(scope, arguments.get(0));
     let message = if arguments.get(1).is_undefined() {
         String::new()

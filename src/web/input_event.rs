@@ -217,6 +217,47 @@ pub(crate) fn record(
         .cloned()
 }
 
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: &str,
+    data: Option<String>,
+    input_type: &str,
+    cancelable: bool,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create InputEvent".to_owned());
+    }
+    super::ui_event::attach(
+        scope,
+        event,
+        event_type.to_owned(),
+        true,
+        cancelable,
+        true,
+        None,
+        0,
+        None,
+    );
+    scope
+        .get_slot_mut::<InputEventStore>()
+        .ok_or_else(|| "InputEvent state was not prepared".to_owned())?
+        .records
+        .insert(
+            event.get_identity_hash().get(),
+            InputEventRecord {
+                data,
+                is_composing: false,
+                input_type: sanitize_input_type(input_type),
+                data_transfer: None,
+                target_ranges: Vec::new(),
+            },
+        );
+    Ok(event)
+}
+
 pub(crate) fn get_data(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

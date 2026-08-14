@@ -12,6 +12,13 @@ fn item(
     let Some(items) = super::node_list::list_or_throw(scope, arguments.this()) else {
         return;
     };
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'item' on 'NodeList': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
     let index = arguments.get(0).uint32_value(scope).unwrap_or(0) as usize;
     if let Some(item) = items.get(index) {
         result.set((*item).into());

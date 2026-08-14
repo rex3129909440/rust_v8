@@ -406,6 +406,10 @@ pub(crate) fn get_onchange(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if !valid(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let handler = scope
         .get_slot::<CookieStoreStore>()
         .and_then(|store| {

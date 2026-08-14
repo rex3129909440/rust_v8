@@ -54,7 +54,10 @@ fn construct(
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "callback must be callable");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'FileSystemObserver': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     let callback = v8::Global::new(s, callback);
@@ -89,22 +92,23 @@ fn observe(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    let Ok(target) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(s, "target must be a FileSystemHandle");
-        return;
-    };
+    let observer_identity = a.this().get_identity_hash().get();
     let Some(record) = s
         .get_slot::<FileSystemObserverStore>()
-        .and_then(|x| x.records.get(&a.this().get_identity_hash().get()))
+        .and_then(|x| x.records.get(&observer_identity))
         .cloned()
     else {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "FileSystemObserver", "observe", r);
+        return;
+    };
+    let Ok(target) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
+        crate::webidl::throw_type_error(s, "target must be a FileSystemHandle");
         return;
     };
     let target = v8::Global::new(s, target);
     if let Some(v) = s
         .get_slot_mut::<FileSystemObserverStore>()
-        .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
+        .and_then(|x| x.records.get_mut(&observer_identity))
     {
         v.targets.push(target);
     }

@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 #[derive(Default)]
 pub(crate) struct XrCpuDepthInformationStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: HashSet<i32>,
 }
 pub(crate) fn prepare(i: &mut v8::OwnedIsolate) {
     i.set_slot(XrCpuDepthInformationStore::default());
@@ -48,17 +51,23 @@ fn illegal(
 }
 fn data(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     let b = v8::ArrayBuffer::new(s, 1280 * 720 * 2);
     r.set(b.into())
 }
 fn depth(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if !require(s, &a) {
+        return;
+    }
     r.set(v8::Number::new(s, 1.0).into())
 }
 
@@ -71,5 +80,23 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(s, o, p.into()) != Some(true) {
         return Err("cannot create XRCPUDepthInformation".to_owned());
     }
+    super::xr_depth_information::attach(s, o);
+    s.get_slot_mut::<XrCpuDepthInformationStore>()
+        .expect("XRCPUDepthInformation state")
+        .instances
+        .insert(o.get_identity_hash().get());
     Ok(o)
+}
+fn require(s: &mut v8::PinScope<'_, '_>, a: &v8::FunctionCallbackArguments<'_>) -> bool {
+    let valid = s
+        .get_slot::<XrCpuDepthInformationStore>()
+        .is_some_and(|store| {
+            store
+                .instances
+                .contains(&a.this().get_identity_hash().get())
+        });
+    if !valid {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+    }
+    valid
 }

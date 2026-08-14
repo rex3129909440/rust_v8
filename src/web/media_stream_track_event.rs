@@ -60,8 +60,14 @@ pub(crate) fn construct(
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "The event initializer must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'MediaStreamTrackEvent': The provided value is not of type 'MediaStreamTrackEventInit'.",
+        );
         return;
     };
     let Some(key) = v8::String::new(scope, "track") else {
@@ -85,7 +91,6 @@ pub(crate) fn construct(
         crate::webidl::throw_type_error(scope, "track is not a MediaStreamTrack");
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
     let bubbles = super::event::boolean_property(scope, init, "bubbles");
     let cancelable = super::event::boolean_property(scope, init, "cancelable");
     let composed = super::event::boolean_property(scope, init, "composed");

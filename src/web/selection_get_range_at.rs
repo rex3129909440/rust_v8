@@ -17,6 +17,10 @@ fn get_range_at(
     if let Some(range) = v.ranges.get(i) {
         r.set(v8::Local::new(scope, range).into())
     } else {
-        super::node::throw_dom_exception(scope, "IndexSizeError", "Range index out of bounds")
+        super::node::throw_dom_exception(
+            scope,
+            "IndexSizeError",
+            &format!("Failed to execute 'getRangeAt' on 'Selection': {i} is not a valid index."),
+        )
     }
 }

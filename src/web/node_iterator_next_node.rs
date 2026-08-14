@@ -13,29 +13,47 @@ fn next_node(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
-    let root = v8::Local::new(scope, &snapshot.root);
-    let reference = v8::Local::new(scope, &snapshot.reference);
-    let mut nodes = Vec::new();
-    super::node_iterator::collect_nodes(scope, root, &mut nodes);
-    let mut index = nodes
-        .iter()
-        .position(|node| node.strict_equals(reference.into()))
-        .unwrap_or(0);
-    if !snapshot.pointer_before_reference_node {
-        index = index.saturating_add(1);
-    }
-    while index < nodes.len() {
-        let node = nodes[index];
+    let original_reference = snapshot.reference.clone();
+    let original_before = snapshot.pointer_before_reference_node;
+    loop {
+        let Some(current) = super::node_iterator::record(scope, arguments.this()) else {
+            return;
+        };
+        let root = v8::Local::new(scope, &current.root);
+        let reference = v8::Local::new(scope, &current.reference);
+        let candidate = if current.pointer_before_reference_node {
+            Some(reference)
+        } else {
+            super::node_iterator::following_node(scope, reference, root)
+        };
+        let Some(node) = candidate else {
+            let original = v8::Local::new(scope, &original_reference);
+            super::node_iterator::update_position(
+                scope,
+                arguments.this(),
+                original,
+                original_before,
+            );
+            result.set(v8::null(scope).into());
+            return;
+        };
         super::node_iterator::update_position(scope, arguments.this(), node, false);
-        match super::node_iterator::accepts(scope, &snapshot, node) {
+        match super::node_iterator::accepts(scope, &snapshot, node, "nextNode") {
             Ok(true) => {
                 result.set(node.into());
                 return;
             }
             Ok(false) => {}
-            Err(()) => return,
+            Err(()) => {
+                let original = v8::Local::new(scope, &original_reference);
+                super::node_iterator::update_position(
+                    scope,
+                    arguments.this(),
+                    original,
+                    original_before,
+                );
+                return;
+            }
         }
-        index += 1;
     }
-    result.set(v8::null(scope).into());
 }

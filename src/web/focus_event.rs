@@ -58,6 +58,39 @@ pub(crate) fn create<'s>(
         .ok_or_else(|| "cannot create FocusEvent".to_owned())
 }
 
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: &str,
+    bubbles: bool,
+    composed: bool,
+    related_target: Option<v8::Global<v8::Object>>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create FocusEvent".to_owned());
+    }
+    let view: v8::Local<v8::Value> = scope.get_current_context().global(scope).into();
+    super::ui_event::attach(
+        scope,
+        event,
+        event_type.to_owned(),
+        bubbles,
+        false,
+        composed,
+        Some(v8::Global::new(scope, view)),
+        0,
+        None,
+    );
+    scope
+        .get_slot_mut::<FocusEventStore>()
+        .ok_or_else(|| "FocusEvent state was not prepared".to_owned())?
+        .related_targets
+        .insert(event.get_identity_hash().get(), related_target);
+    Ok(event)
+}
+
 pub(crate) fn construct(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
@@ -128,13 +161,54 @@ pub(crate) fn get_related_target(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    match scope.get_slot::<FocusEventStore>().and_then(|store| {
+    let related = scope.get_slot::<FocusEventStore>().and_then(|store| {
         store
             .related_targets
             .get(&arguments.this().get_identity_hash().get())
-    }) {
-        Some(Some(value)) => result.set(v8::Local::new(scope, value).into()),
-        Some(None) => result.set(v8::null(scope).into()),
-        None => crate::webidl::throw_type_error(scope, "Illegal invocation"),
+            .cloned()
+    });
+    let Some(related) = related else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Some(related) = related else {
+        result.set(v8::null(scope).into());
+        return;
+    };
+    let mut related = v8::Local::new(scope, &related);
+    let current_target = super::event::record(scope, arguments.this())
+        .and_then(|record| record.current_target)
+        .map(|target| v8::Local::new(scope, &target));
+    if let Some(current_target) = current_target {
+        loop {
+            if super::node::record(scope, related).is_none() {
+                break;
+            }
+            let root = super::node::root_node(scope, related);
+            let Some(host) = super::shadow_root::host(scope, root) else {
+                break;
+            };
+            if shadow_including_contains(scope, root, current_target) {
+                break;
+            }
+            related = host;
+        }
     }
+    result.set(related.into());
+}
+
+fn shadow_including_contains(
+    scope: &v8::PinScope<'_, '_>,
+    ancestor: v8::Local<'_, v8::Object>,
+    descendant: v8::Local<'_, v8::Object>,
+) -> bool {
+    let mut current = Some(descendant);
+    while let Some(node) = current {
+        if node.get_identity_hash() == ancestor.get_identity_hash() {
+            return true;
+        }
+        current =
+            super::node::parent(scope, node).or_else(|| super::shadow_root::host(scope, node));
+    }
+    false
 }

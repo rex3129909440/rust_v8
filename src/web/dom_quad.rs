@@ -50,6 +50,8 @@ fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "getBounds", 0, get_bounds)?;
     crate::webidl::define_method(scope, prototype, "toJSON", 0, to_json)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(scope, constructor.into(), "fromQuad", 0, from_quad)?;
+    crate::webidl::define_method(scope, constructor.into(), "fromRect", 0, from_rect)?;
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
         .get_slot_mut::<DomQuadStore>()
@@ -57,6 +59,78 @@ fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(constructor)
+}
+
+fn create<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    points: [super::dom_point_read_only::PointRecord; 4],
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let object = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
+        return Err("cannot create DOMQuad".to_owned());
+    }
+    attach(scope, object, points)?;
+    Ok(object)
+}
+
+fn quad_points_from_value(
+    scope: &v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+) -> [super::dom_point_read_only::PointRecord; 4] {
+    let default = super::dom_point_read_only::PointRecord {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: 1.0,
+    };
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+        return [default; 4];
+    };
+    let point = |name: &str| {
+        v8::String::new(scope, name)
+            .and_then(|key| object.get(scope, key.into()))
+            .map(|value| super::dom_point_read_only::from_value(scope, value))
+            .unwrap_or(default)
+    };
+    [point("p1"), point("p2"), point("p3"), point("p4")]
+}
+
+fn from_quad(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let points = quad_points_from_value(scope, arguments.get(0));
+    match create(scope, points) {
+        Ok(quad) => result.set(quad.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
+}
+
+fn from_rect(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let rect = super::dom_rect_read_only::from_value(scope, arguments.get(0));
+    let point = |x, y| super::dom_point_read_only::PointRecord {
+        x,
+        y,
+        z: 0.0,
+        w: 1.0,
+    };
+    let points = [
+        point(rect.x, rect.y),
+        point(rect.x + rect.width, rect.y),
+        point(rect.x + rect.width, rect.y + rect.height),
+        point(rect.x, rect.y + rect.height),
+    ];
+    match create(scope, points) {
+        Ok(quad) => result.set(quad.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
 }
 
 fn construct(

@@ -279,10 +279,12 @@ pub(crate) fn begin_element(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    let current_time = container_current_time(scope, arguments.this()).unwrap_or(0.0);
     let handler = record(scope, arguments.this()).and_then(|record| record.onbegin);
     update(scope, arguments.this(), |record| {
         record.active = true;
-        record.start_time = record.current_time;
+        record.current_time = current_time;
+        record.start_time = current_time;
     });
     fire(scope, arguments.this(), "begin", handler);
     result.set(v8::Boolean::new(scope, true).into());
@@ -294,10 +296,12 @@ pub(crate) fn begin_element_at(
     mut result: v8::ReturnValue<'_>,
 ) {
     let offset = arguments.get(0).number_value(scope).unwrap_or(0.0);
+    let current_time = container_current_time(scope, arguments.this()).unwrap_or(0.0);
     let handler = record(scope, arguments.this()).and_then(|record| record.onbegin);
     update(scope, arguments.this(), |record| {
         record.active = true;
-        record.start_time = record.current_time + offset;
+        record.current_time = current_time;
+        record.start_time = current_time + offset;
     });
     fire(scope, arguments.this(), "begin", handler);
     result.set(v8::Boolean::new(scope, true).into());
@@ -320,9 +324,11 @@ pub(crate) fn end_element_at(
     mut result: v8::ReturnValue<'_>,
 ) {
     let offset = arguments.get(0).number_value(scope).unwrap_or(0.0);
+    let current_time = container_current_time(scope, arguments.this()).unwrap_or(0.0);
     let handler = record(scope, arguments.this()).and_then(|record| record.onend);
     update(scope, arguments.this(), |record| {
-        record.duration = (record.current_time + offset - record.start_time).max(0.0);
+        record.current_time = current_time;
+        record.duration = (current_time + offset - record.start_time).max(0.0);
         record.active = false;
     });
     fire(scope, arguments.this(), "end", handler);
@@ -334,11 +340,26 @@ pub(crate) fn get_current_time(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Number::new(scope, record.current_time).into());
+    if record(scope, arguments.this()).is_some() {
+        let current_time = container_current_time(scope, arguments.this()).unwrap_or(0.0);
+        result.set(v8::Number::new(scope, current_time).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
+}
+
+fn container_current_time(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<f64> {
+    let mut candidate = super::node::parent(scope, object);
+    while let Some(node) = candidate {
+        if super::svg_svg_element::record(scope, node).is_some() {
+            return super::svg_svg_element::current_time(scope, node);
+        }
+        candidate = super::node::parent(scope, node);
+    }
+    None
 }
 pub(crate) fn get_duration(
     scope: &mut v8::PinScope<'_, '_>,

@@ -55,7 +55,8 @@ impl EdgeRuntime {
         })
     }
 
-    pub fn with_options(options: crate::EdgeRuntimeOptions) -> Result<Self, String> {
+    pub fn with_options(mut options: crate::EdgeRuntimeOptions) -> Result<Self, String> {
+        options.fingerprint.synchronize_default_browser_version();
         options.validate()?;
         initialize_v8();
 
@@ -70,10 +71,16 @@ impl EdgeRuntime {
                 v8::CreateParams::default().heap_limits(0, maximum)
             });
         let mut isolate = v8::Isolate::new(create_params);
+        // Browsers own the task/microtask checkpoint boundary.  Explicit
+        // policy prevents V8 from draining Promise reactions inside a host
+        // callback before the timer/scheduler task state has been cleared.
+        isolate.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
         let mut deterministic = options.deterministic;
         options.fingerprint.timing.apply(&mut deterministic);
         crate::page_init::prepare(&mut isolate, options.page)?;
+        crate::font_shaping::prepare(&mut isolate, &options.fingerprint.fonts)?;
         crate::fingerprint::prepare(&mut isolate, options.fingerprint);
+        crate::browser_surface::prepare(&mut isolate);
         crate::determinism::prepare(&mut isolate, deterministic);
         crate::locale_runtime::prepare(&mut isolate);
         crate::network_replay::prepare(&mut isolate, options.network_replay);
@@ -81,6 +88,7 @@ impl EdgeRuntime {
         crate::console_capture::prepare(&mut isolate);
         crate::trace::prepare(&mut isolate);
         crate::iframe_hook::prepare(&mut isolate, options.iframe_hooks)?;
+        crate::web::cross_origin_isolated::prepare(&mut isolate, options.cross_origin_isolated);
         crate::web::prepare(&mut isolate);
         let (context, late_intrinsics) = {
             v8::scope!(let scope, &mut isolate);
@@ -93,6 +101,7 @@ impl EdgeRuntime {
                 },
             );
             let context_scope = &mut v8::ContextScope::new(scope, context);
+            crate::browser_surface::register_current_realm_from_fingerprint(context_scope)?;
             let late_intrinsics =
                 crate::intrinsics::LateIntrinsics::detach(context_scope, context)?;
             crate::web::install_prefix(context_scope)?;
@@ -114,6 +123,12 @@ impl EdgeRuntime {
             let web_assembly = v8::Local::new(context_scope, &late_intrinsics.web_assembly);
             crate::web::web_assembly_global::install(context_scope, web_assembly)?;
             crate::web::install_after_webassembly(context_scope)?;
+            crate::browser_surface::apply_window_phase(
+                context_scope,
+                crate::browser_surface::WindowSurfacePhase::AfterChrome,
+            )?;
+            crate::browser_surface::finalize_versioned_prototypes(context_scope)?;
+            crate::browser_surface::finalize_versioned_statics_and_objects(context_scope)?;
             crate::locale_runtime::install(context_scope)?;
             crate::determinism::install(context_scope)?;
             crate::iframe_hook::install_for_root(context_scope)?;
@@ -169,7 +184,8 @@ impl EdgeRuntime {
         let context = v8::Local::new(scope, &self.context);
         let scope = &mut v8::ContextScope::new(scope, context);
         v8::tc_scope!(let try_catch, scope);
-        crate::web::animation_timeline::sample_current_realm(try_catch);
+        crate::web::animation_frame_state::sample_current_task_realm(try_catch);
+        let top_level_task_start = crate::web::performance_observer::task_start(try_catch);
         let source = v8::String::new(try_catch, source)
             .ok_or_else(|| "source exceeds V8 limits".to_owned())?;
         let traced = crate::trace::is_enabled(try_catch);
@@ -215,6 +231,13 @@ impl EdgeRuntime {
             return Err(message);
         };
         try_catch.perform_microtask_checkpoint();
+        if crate::web::performance_observer::record_completed_task(
+            try_catch,
+            top_level_task_start,
+            false,
+        ) {
+            try_catch.perform_microtask_checkpoint();
+        }
         for _ in 0..crate::determinism::max_task_turns(try_catch) {
             if !crate::web::run_pending_tasks(try_catch) {
                 break;
@@ -269,6 +292,266 @@ impl EdgeRuntime {
             return Err("JavaScript output exceeded max_output_bytes".to_owned());
         }
         Ok(evaluation)
+    }
+
+    /// Dispatches a browser-generated primary pointer click at viewport
+    /// coordinates. Events created through this host-only path are trusted;
+    /// JavaScript constructors, `dispatchEvent()` and `element.click()` remain
+    /// synthetic and expose `isTrusted === false`.
+    pub fn dispatch_host_click(&mut self, input: &crate::HostClickInput) -> Result<bool, String> {
+        input.validate()?;
+        let _locale_guard = crate::locale_runtime::lock_process_defaults();
+        crate::locale_runtime::configure_process_defaults(&self.locale, &self.time_zone)?;
+        let watchdog = EvaluationWatchdog::start(&self.isolate, self.limits.timeout);
+        v8::scope!(let scope, &mut self.isolate);
+        let context = v8::Local::new(scope, &self.context);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        v8::tc_scope!(let try_catch, scope);
+        crate::web::animation_frame_state::sample_current_task_realm(try_catch);
+        let top_level_task_start = crate::web::performance_observer::task_start(try_catch);
+        let traced = crate::trace::is_enabled(try_catch);
+        if traced {
+            crate::trace::start_recording(try_catch)?;
+        }
+        let dispatched = crate::web::host_input::dispatch_trusted_click(try_catch, input);
+        try_catch.perform_microtask_checkpoint();
+        if crate::web::performance_observer::record_completed_task(
+            try_catch,
+            top_level_task_start,
+            false,
+        ) {
+            try_catch.perform_microtask_checkpoint();
+        }
+        for _ in 0..crate::determinism::max_task_turns(try_catch) {
+            if !crate::web::run_pending_tasks(try_catch) {
+                break;
+            }
+            crate::determinism::advance_task_turn(try_catch);
+            try_catch.perform_microtask_checkpoint();
+        }
+        if traced {
+            crate::trace::stop_recording(try_catch);
+        }
+        if watchdog.timed_out() {
+            let _ = try_catch.cancel_terminate_execution();
+            return Err("host input dispatch exceeded the configured timeout".to_owned());
+        }
+        dispatched
+    }
+
+    /// Dispatches a trusted keyboard press sequence to the active element.
+    pub fn dispatch_host_keyboard(
+        &mut self,
+        input: &crate::HostKeyboardInput,
+    ) -> Result<bool, String> {
+        input.validate()?;
+        let _locale_guard = crate::locale_runtime::lock_process_defaults();
+        crate::locale_runtime::configure_process_defaults(&self.locale, &self.time_zone)?;
+        let watchdog = EvaluationWatchdog::start(&self.isolate, self.limits.timeout);
+        v8::scope!(let scope, &mut self.isolate);
+        let context = v8::Local::new(scope, &self.context);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        v8::tc_scope!(let try_catch, scope);
+        crate::web::animation_frame_state::sample_current_task_realm(try_catch);
+        let top_level_task_start = crate::web::performance_observer::task_start(try_catch);
+        let traced = crate::trace::is_enabled(try_catch);
+        if traced {
+            crate::trace::start_recording(try_catch)?;
+        }
+        let dispatched = crate::web::host_input::dispatch_trusted_keyboard(try_catch, input);
+        try_catch.perform_microtask_checkpoint();
+        if crate::web::performance_observer::record_completed_task(
+            try_catch,
+            top_level_task_start,
+            false,
+        ) {
+            try_catch.perform_microtask_checkpoint();
+        }
+        for _ in 0..crate::determinism::max_task_turns(try_catch) {
+            if !crate::web::run_pending_tasks(try_catch) {
+                break;
+            }
+            crate::determinism::advance_task_turn(try_catch);
+            try_catch.perform_microtask_checkpoint();
+        }
+        if traced {
+            crate::trace::stop_recording(try_catch);
+        }
+        if watchdog.timed_out() {
+            let _ = try_catch.cancel_terminate_execution();
+            return Err("host keyboard dispatch exceeded the configured timeout".to_owned());
+        }
+        dispatched
+    }
+
+    /// Dispatches one trusted wheel input at viewport coordinates.
+    pub fn dispatch_host_wheel(&mut self, input: &crate::HostWheelInput) -> Result<bool, String> {
+        input.validate()?;
+        let _locale_guard = crate::locale_runtime::lock_process_defaults();
+        crate::locale_runtime::configure_process_defaults(&self.locale, &self.time_zone)?;
+        let watchdog = EvaluationWatchdog::start(&self.isolate, self.limits.timeout);
+        v8::scope!(let scope, &mut self.isolate);
+        let context = v8::Local::new(scope, &self.context);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        v8::tc_scope!(let try_catch, scope);
+        crate::web::animation_frame_state::sample_current_task_realm(try_catch);
+        let top_level_task_start = crate::web::performance_observer::task_start(try_catch);
+        let traced = crate::trace::is_enabled(try_catch);
+        if traced {
+            crate::trace::start_recording(try_catch)?;
+        }
+        let dispatched = crate::web::host_input::dispatch_trusted_wheel(try_catch, input);
+        try_catch.perform_microtask_checkpoint();
+        if crate::web::performance_observer::record_completed_task(
+            try_catch,
+            top_level_task_start,
+            false,
+        ) {
+            try_catch.perform_microtask_checkpoint();
+        }
+        for _ in 0..crate::determinism::max_task_turns(try_catch) {
+            if !crate::web::run_pending_tasks(try_catch) {
+                break;
+            }
+            crate::determinism::advance_task_turn(try_catch);
+            try_catch.perform_microtask_checkpoint();
+        }
+        if traced {
+            crate::trace::stop_recording(try_catch);
+        }
+        if watchdog.timed_out() {
+            let _ = try_catch.cancel_terminate_execution();
+            return Err("host wheel dispatch exceeded the configured timeout".to_owned());
+        }
+        dispatched
+    }
+
+    /// Dispatches a trusted HTML drag-and-drop gesture through the supplied
+    /// viewport points.
+    pub fn dispatch_host_drag(&mut self, input: &crate::HostDragInput) -> Result<bool, String> {
+        input.validate()?;
+        let _locale_guard = crate::locale_runtime::lock_process_defaults();
+        crate::locale_runtime::configure_process_defaults(&self.locale, &self.time_zone)?;
+        let watchdog = EvaluationWatchdog::start(&self.isolate, self.limits.timeout);
+        v8::scope!(let scope, &mut self.isolate);
+        let context = v8::Local::new(scope, &self.context);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        v8::tc_scope!(let try_catch, scope);
+        crate::web::animation_frame_state::sample_current_task_realm(try_catch);
+        let top_level_task_start = crate::web::performance_observer::task_start(try_catch);
+        let traced = crate::trace::is_enabled(try_catch);
+        if traced {
+            crate::trace::start_recording(try_catch)?;
+        }
+        let dispatched = crate::web::host_input::dispatch_trusted_drag(try_catch, input);
+        try_catch.perform_microtask_checkpoint();
+        if crate::web::performance_observer::record_completed_task(
+            try_catch,
+            top_level_task_start,
+            false,
+        ) {
+            try_catch.perform_microtask_checkpoint();
+        }
+        for _ in 0..crate::determinism::max_task_turns(try_catch) {
+            if !crate::web::run_pending_tasks(try_catch) {
+                break;
+            }
+            crate::determinism::advance_task_turn(try_catch);
+            try_catch.perform_microtask_checkpoint();
+        }
+        if traced {
+            crate::trace::stop_recording(try_catch);
+        }
+        if watchdog.timed_out() {
+            let _ = try_catch.cancel_terminate_execution();
+            return Err("host drag dispatch exceeded the configured timeout".to_owned());
+        }
+        dispatched
+    }
+
+    /// Dispatches one phase of a trusted touch stream. Active touch state is
+    /// retained by the runtime between Start, Move and End/Cancel calls.
+    pub fn dispatch_host_touch(&mut self, input: &crate::HostTouchInput) -> Result<bool, String> {
+        input.validate()?;
+        let _locale_guard = crate::locale_runtime::lock_process_defaults();
+        crate::locale_runtime::configure_process_defaults(&self.locale, &self.time_zone)?;
+        let watchdog = EvaluationWatchdog::start(&self.isolate, self.limits.timeout);
+        v8::scope!(let scope, &mut self.isolate);
+        let context = v8::Local::new(scope, &self.context);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        v8::tc_scope!(let try_catch, scope);
+        crate::web::animation_frame_state::sample_current_task_realm(try_catch);
+        let top_level_task_start = crate::web::performance_observer::task_start(try_catch);
+        let traced = crate::trace::is_enabled(try_catch);
+        if traced {
+            crate::trace::start_recording(try_catch)?;
+        }
+        let dispatched = crate::web::host_input::dispatch_trusted_touch(try_catch, input);
+        try_catch.perform_microtask_checkpoint();
+        if crate::web::performance_observer::record_completed_task(
+            try_catch,
+            top_level_task_start,
+            false,
+        ) {
+            try_catch.perform_microtask_checkpoint();
+        }
+        for _ in 0..crate::determinism::max_task_turns(try_catch) {
+            if !crate::web::run_pending_tasks(try_catch) {
+                break;
+            }
+            crate::determinism::advance_task_turn(try_catch);
+            try_catch.perform_microtask_checkpoint();
+        }
+        if traced {
+            crate::trace::stop_recording(try_catch);
+        }
+        if watchdog.timed_out() {
+            let _ = try_catch.cancel_terminate_execution();
+            return Err("host touch dispatch exceeded the configured timeout".to_owned());
+        }
+        dispatched
+    }
+
+    /// Dispatches one phase of a trusted pen stream.
+    pub fn dispatch_host_pen(&mut self, input: &crate::HostPenInput) -> Result<bool, String> {
+        input.validate()?;
+        let _locale_guard = crate::locale_runtime::lock_process_defaults();
+        crate::locale_runtime::configure_process_defaults(&self.locale, &self.time_zone)?;
+        let watchdog = EvaluationWatchdog::start(&self.isolate, self.limits.timeout);
+        v8::scope!(let scope, &mut self.isolate);
+        let context = v8::Local::new(scope, &self.context);
+        let scope = &mut v8::ContextScope::new(scope, context);
+        v8::tc_scope!(let try_catch, scope);
+        crate::web::animation_frame_state::sample_current_task_realm(try_catch);
+        let top_level_task_start = crate::web::performance_observer::task_start(try_catch);
+        let traced = crate::trace::is_enabled(try_catch);
+        if traced {
+            crate::trace::start_recording(try_catch)?;
+        }
+        let dispatched = crate::web::host_input::dispatch_trusted_pen(try_catch, input);
+        try_catch.perform_microtask_checkpoint();
+        if crate::web::performance_observer::record_completed_task(
+            try_catch,
+            top_level_task_start,
+            false,
+        ) {
+            try_catch.perform_microtask_checkpoint();
+        }
+        for _ in 0..crate::determinism::max_task_turns(try_catch) {
+            if !crate::web::run_pending_tasks(try_catch) {
+                break;
+            }
+            crate::determinism::advance_task_turn(try_catch);
+            try_catch.perform_microtask_checkpoint();
+        }
+        if traced {
+            crate::trace::stop_recording(try_catch);
+        }
+        if watchdog.timed_out() {
+            let _ = try_catch.cancel_terminate_execution();
+            return Err("host pen dispatch exceeded the configured timeout".to_owned());
+        }
+        dispatched
     }
 
     pub fn enable_native_trace(&mut self) -> Result<(), String> {
@@ -762,7 +1045,7 @@ mod tests {
         );
         assert_eq!(
             surface,
-            "true|https://sandbox.test/|https://sandbox.test|1232|60594b80|946e759f|83|fbf27bf3|25|9f9f9a5f|[object console]"
+            "true|https://sandbox.test/|https://sandbox.test|1232|06c68e7c|79521bf2|83|fbf27bf3|25|9f9f9a5f|[object console]"
         );
 
         let complete_surface = text(
@@ -856,7 +1139,7 @@ mod tests {
         );
         assert_eq!(
             complete_surface,
-            "961|e65af842|1024|a8b3e550|53|59942bf5|155|907ccdc7"
+            "962|9e9712ed|1024|63bea235|53|bda8bcd7|155|907ccdc7"
         );
 
         let relationships = text(
@@ -979,11 +1262,30 @@ mod tests {
             "BeforeUnloadEvent,CompositionEvent,CustomEvent,DeviceMotionEvent,DeviceOrientationEvent,DragEvent,Event,FocusEvent,HashChangeEvent,KeyboardEvent,MessageEvent,MouseEvent,StorageEvent,TextEvent,UIEvent|NotSupportedError/9"
         );
 
+        assert_eq!(
+            text(
+                &mut runtime,
+                r#"
+                var secureSession;
+                navigator.xr.requestSession("inline").then(session => secureSession = session);
+                "queued"
+                "#,
+            ),
+            "queued"
+        );
+        assert_eq!(
+            text(
+                &mut runtime,
+                "secureSession instanceof XRSession && secureSession.environmentBlendMode === 'opaque'",
+            ),
+            "true"
+        );
+
         let xr_layers = text(
             &mut runtime,
             r#"
             (() => {
-              const binding = new XRWebGLBinding({}, {});
+              const binding = new XRWebGLBinding(secureSession, {});
               const layer = binding.createQuadLayer({width: 2, height: 3, opacity: 0.5});
               layer.width = 4;
               layer.opacity = 0.75;
@@ -1006,25 +1308,6 @@ mod tests {
             "#,
         );
         assert_eq!(xr_layers, "true,true,4,3,0.75,true,true,true,true,false");
-
-        assert_eq!(
-            text(
-                &mut runtime,
-                r#"
-                var secureSession;
-                navigator.xr.requestSession("inline").then(session => secureSession = session);
-                "queued"
-                "#,
-            ),
-            "queued"
-        );
-        assert_eq!(
-            text(
-                &mut runtime,
-                "secureSession instanceof XRSession && secureSession.environmentBlendMode === 'opaque'",
-            ),
-            "true"
-        );
 
         assert_eq!(
             text(
@@ -1101,7 +1384,7 @@ mod tests {
                 })()
                 "#,
             ),
-            "true|true|true|1|alpha|1|2|true|36|4|true|true|true|none|true|true|false|false|1|preload stylesheet|true|true|function|function||0||0|after,append,before,prepend,remove,replaceChildren,replaceWith,slot"
+            "true|true|true|1|alpha|1|2|true|36|4|true|true|true|none|true|true|false|false|1|preload stylesheet preload|true|true|function|function||0||0|after,append,before,prepend,remove,replaceChildren,replaceWith,slot"
         );
 
         assert_eq!(

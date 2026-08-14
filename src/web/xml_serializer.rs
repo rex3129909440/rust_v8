@@ -1,6 +1,7 @@
 #[derive(Default)]
 pub(crate) struct XmlSerializerStore {
     constructor: crate::webidl::RealmConstructor,
+    records: std::collections::HashSet<i32>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -55,5 +56,16 @@ fn construct(
         );
         return;
     }
+    scope
+        .get_slot_mut::<XmlSerializerStore>()
+        .expect("XMLSerializer state")
+        .records
+        .insert(arguments.this().get_identity_hash().get());
     result.set(arguments.this().into());
+}
+
+pub(crate) fn is_instance(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    scope
+        .get_slot::<XmlSerializerStore>()
+        .is_some_and(|store| store.records.contains(&object.get_identity_hash().get()))
 }

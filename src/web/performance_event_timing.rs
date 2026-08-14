@@ -82,6 +82,29 @@ pub(crate) fn create<'s>(
     target: Option<v8::Local<'_, v8::Value>>,
     interaction_id: i32,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
+    create_with_entry_type(
+        scope,
+        name,
+        "event",
+        start_time,
+        duration,
+        cancelable,
+        target,
+        interaction_id,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_with_entry_type<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    name: String,
+    entry_type: &str,
+    start_time: f64,
+    duration: f64,
+    cancelable: bool,
+    target: Option<v8::Local<'_, v8::Value>>,
+    interaction_id: i32,
+) -> Result<v8::Local<'s, v8::Object>, String> {
     let constructor = ensure_constructor(scope)?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
     let timing = v8::Object::new(scope);
@@ -92,7 +115,7 @@ pub(crate) fn create<'s>(
         scope,
         timing,
         name,
-        "event".to_owned(),
+        entry_type.to_owned(),
         start_time,
         duration,
     );
@@ -123,6 +146,21 @@ pub(crate) fn record(
         .records
         .get(&object.get_identity_hash().get())
         .cloned()
+}
+
+pub(crate) fn set_processing_times(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    processing_start: f64,
+    processing_end: f64,
+) {
+    if let Some(record) = scope
+        .get_slot_mut::<PerformanceEventTimingStore>()
+        .and_then(|store| store.records.get_mut(&object.get_identity_hash().get()))
+    {
+        record.processing_start = processing_start;
+        record.processing_end = processing_end.max(processing_start);
+    }
 }
 pub(crate) fn return_number(
     scope: &mut v8::PinScope<'_, '_>,

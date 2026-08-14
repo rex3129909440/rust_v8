@@ -13,7 +13,7 @@ fn delete(
     result: v8::ReturnValue<'_>,
 ) {
     if !valid(scope, arguments.this()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "CookieStore", "delete", result);
         return;
     }
     let options = v8::Local::<v8::Object>::try_from(arguments.get(0)).ok();

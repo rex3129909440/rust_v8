@@ -109,18 +109,25 @@ pub(crate) fn construct(
             violated_directive: string(scope, o, "violatedDirective"),
             effective_directive: string(scope, o, "effectiveDirective"),
             original_policy: string(scope, o, "originalPolicy"),
-            disposition: string(scope, o, "disposition"),
+            disposition: {
+                let value = string(scope, o, "disposition");
+                if value.is_empty() {
+                    "enforce".to_owned()
+                } else {
+                    value
+                }
+            },
             source_file: string(scope, o, "sourceFile"),
             status_code: uint(scope, o, "statusCode") as u16,
             line_number: uint(scope, o, "lineNumber"),
             column_number: uint(scope, o, "columnNumber"),
             sample: string(scope, o, "sample"),
         })
-        .unwrap_or_default();
-    let bubbles = init.is_some_and(|o| super::event::boolean_property(scope, o, "bubbles"));
-    let cancelable = init.is_some_and(|o| super::event::boolean_property(scope, o, "cancelable"));
-    let composed = init.is_some_and(|o| super::event::boolean_property(scope, o, "composed"));
-    super::event::attach(scope, a.this(), event_type, bubbles, cancelable, composed);
+        .unwrap_or_else(|| Record {
+            disposition: "enforce".to_owned(),
+            ..Record::default()
+        });
+    super::event::attach(scope, a.this(), event_type, true, false, true);
     scope
         .get_slot_mut::<SecurityPolicyViolationEventStore>()
         .expect("SecurityPolicyViolationEvent state")

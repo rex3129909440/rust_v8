@@ -121,7 +121,7 @@ fn read(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Clipboard", "read", result);
         return;
     };
     let array = v8::Array::new(scope, record.items.len() as i32);
@@ -138,7 +138,7 @@ fn read_text(
     result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Clipboard", "readText", result);
         return;
     };
     if let Some(text) = v8::String::new(scope, &record.text) {
@@ -151,6 +151,10 @@ fn write(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "Clipboard", "write", result);
+        return;
+    }
     let Ok(items) = v8::Local::<v8::Array>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "Clipboard.write requires a sequence");
         return;
@@ -169,7 +173,7 @@ fn write(
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Clipboard", "write", result);
         return;
     };
     record.items = stored;
@@ -181,13 +185,17 @@ fn write_text(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "Clipboard", "writeText", result);
+        return;
+    }
     let text = crate::webidl::value_to_string(scope, arguments.get(0));
     let Some(record) = scope.get_slot_mut::<ClipboardStore>().and_then(|store| {
         store
             .records
             .get_mut(&arguments.this().get_identity_hash().get())
     }) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "Clipboard", "writeText", result);
         return;
     };
     record.text = text;
@@ -199,8 +207,11 @@ fn get_onchange(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, arguments.this()).and_then(|record| record.onchange);
-    super::window_event_handler_support::return_handler(scope, handler, result);
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(scope, record.onchange, result);
 }
 
 fn set_onchange(

@@ -12,5 +12,12 @@ pub(crate) fn blur(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    set_focused(scope, arguments.this(), false);
+    if !is_html_element(scope, arguments.this()) {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let target = v8::Global::new(scope, arguments.this());
+    if let Err(message) = blur_with_events(scope, target) {
+        crate::webidl::throw_type_error(scope, &message);
+    }
 }

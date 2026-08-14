@@ -3,6 +3,7 @@ use std::collections::HashMap;
 #[derive(Clone)]
 struct AnimationRecord {
     object: v8::Global<v8::Object>,
+    realm_id: i32,
     sequence: u64,
     effect: Option<v8::Global<v8::Value>>,
     timeline: Option<v8::Global<v8::Value>>,
@@ -180,6 +181,7 @@ fn construct(
         .unwrap_or_default();
     let record = AnimationRecord {
         object: v8::Global::new(scope, arguments.this()),
+        realm_id: crate::webidl::realm_id(scope),
         sequence,
         effect,
         timeline,
@@ -301,10 +303,49 @@ pub(crate) fn current_time_for_effect(
             continue;
         };
         if candidate.get_identity_hash().get() == effect_id {
-            return animation.current_time;
+            return derived_current_time(scope, animation);
         }
     }
     None
+}
+
+fn timeline_time(scope: &v8::PinScope<'_, '_>, animation: &AnimationRecord) -> Option<f64> {
+    let timeline = animation.timeline.as_ref()?;
+    let timeline = v8::Local::new(scope, timeline);
+    let timeline = v8::Local::<v8::Object>::try_from(timeline).ok()?;
+    super::animation_timeline::current_time(scope, timeline)
+}
+
+fn derived_current_time(scope: &v8::PinScope<'_, '_>, animation: &AnimationRecord) -> Option<f64> {
+    if animation.play_state != "running" || animation.pending {
+        return animation.current_time;
+    }
+    match (timeline_time(scope, animation), animation.start_time) {
+        (Some(timeline_time), Some(start_time)) => {
+            Some((timeline_time - start_time) * animation.playback_rate)
+        }
+        _ => animation.current_time,
+    }
+}
+
+pub(crate) fn sample_realm_at(scope: &mut v8::PinScope<'_, '_>, realm_id: i32, timeline_time: f64) {
+    if let Some(store) = scope.get_slot_mut::<AnimationStore>() {
+        for animation in store.records.values_mut() {
+            if animation.realm_id != realm_id
+                || animation.play_state != "running"
+                || !animation.pending
+            {
+                continue;
+            }
+            let hold_time = animation.current_time.unwrap_or(0.0);
+            animation.start_time = if animation.playback_rate == 0.0 {
+                None
+            } else {
+                Some(timeline_time - hold_time / animation.playback_rate)
+            };
+            animation.pending = false;
+        }
+    }
 }
 
 fn set_record(
@@ -408,7 +449,11 @@ fn get_current_time(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    get_optional_number(s, record(s, a.this()).map(|v| v.current_time), r);
+    get_optional_number(
+        s,
+        record(s, a.this()).map(|animation| derived_current_time(s, &animation)),
+        r,
+    );
 }
 fn set_current_time(
     s: &mut v8::PinScope<'_, '_>,
@@ -416,7 +461,18 @@ fn set_current_time(
     _: v8::ReturnValue<'_>,
 ) {
     let value = number_or_none(s, a.get(0));
-    set_record(s, a.this(), |v| v.current_time = value);
+    let timeline_time = record(s, a.this()).and_then(|animation| timeline_time(s, &animation));
+    set_record(s, a.this(), |animation| {
+        animation.current_time = value;
+        if animation.play_state == "running" && !animation.pending {
+            animation.start_time = match (timeline_time, value) {
+                (Some(timeline_time), Some(current_time)) if animation.playback_rate != 0.0 => {
+                    Some(timeline_time - current_time / animation.playback_rate)
+                }
+                _ => None,
+            };
+        }
+    });
 }
 
 fn get_playback_rate(
@@ -607,7 +663,12 @@ fn get_finished(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.finished).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'finished' property from 'Animation': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }
 fn get_ready(
@@ -618,7 +679,12 @@ fn get_ready(
     if let Some(record) = record(scope, arguments.this()) {
         result.set(v8::Local::new(scope, &record.ready).into());
     } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'ready' property from 'Animation': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
     }
 }
 
@@ -663,8 +729,12 @@ fn pause(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let current_time =
+        record(scope, a.this()).and_then(|animation| derived_current_time(scope, &animation));
     set_record(scope, a.this(), |v| {
         v.play_state = "paused".to_owned();
+        v.current_time = current_time;
+        v.start_time = None;
         v.pending = false;
     });
 }
@@ -684,7 +754,8 @@ fn play(
 ) {
     set_record(scope, a.this(), |v| {
         v.play_state = "running".to_owned();
-        v.pending = false;
+        v.pending = true;
+        v.start_time = None;
         if v.current_time.is_none() && v.effect.is_some() && v.timeline.is_some() {
             v.current_time = Some(0.0);
         }
@@ -720,7 +791,7 @@ fn get_overall_progress(
 ) {
     match record(scope, arguments.this()) {
         Some(record) => {
-            let progress = record.current_time.and_then(|current_time| {
+            let progress = derived_current_time(scope, &record).and_then(|current_time| {
                 let effect = record.effect.as_ref()?;
                 let effect = v8::Local::new(scope, effect);
                 let effect = v8::Local::<v8::Object>::try_from(effect).ok()?;

@@ -12,24 +12,13 @@ fn get_value(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    get_string(s, a, r, |x| &x.value);
+    super::html_input_element::get_value(s, a, r);
 }
 
 fn set_value(
     s: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    let value = crate::webidl::value_to_string(s, a.get(0));
-    update(s, a.this(), |x| {
-        if x.input_type == "file" && !value.is_empty() {
-            return;
-        }
-        x.value = sanitize_value(&x.input_type, value);
-        x.value_dirty = true;
-        let length = x.value.chars().count() as u32;
-        x.selection_start = length;
-        x.selection_end = length;
-        x.selection_direction = "forward".to_owned();
-    });
+    super::html_input_element::set_value(s, a, result);
 }

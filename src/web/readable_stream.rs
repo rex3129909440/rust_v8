@@ -331,7 +331,7 @@ fn cancel(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "ReadableStream", "cancel", result);
         return;
     };
     if record.locked {
@@ -367,6 +367,10 @@ fn get_reader(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let byob = v8::Local::<v8::Object>::try_from(arguments.get(0))
         .ok()
         .and_then(|options| {
@@ -422,14 +426,14 @@ fn pipe_to(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "ReadableStream", "pipeTo", result);
+        return;
+    }
     let Ok(destination) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "pipeTo requires a WritableStream");
         return;
     };
-    if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     pipe_all(scope, arguments.this(), destination);
     let undefined = v8::undefined(scope);
     if let Ok(promise) = super::writable_stream::resolved_promise(scope, undefined.into()) {
@@ -488,6 +492,10 @@ fn values(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     match super::readable_stream_default_reader::create(scope, arguments.this()) {
         Ok(reader) => result.set(reader.into()),
         Err(message) => crate::webidl::throw_type_error(scope, &message),

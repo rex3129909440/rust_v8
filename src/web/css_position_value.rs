@@ -77,6 +77,23 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSPositionValue requires x and y");
         return;
     }
+    if arguments.get(0).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSPositionValue': parameter 1 is not of type 'CSSNumericValue'.",
+        );
+        return;
+    }
+    let valid_x = v8::Local::<v8::Object>::try_from(arguments.get(0))
+        .ok()
+        .is_some_and(|object| super::css_numeric_value::is_numeric(scope, object));
+    if !valid_x {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSPositionValue': parameter 1 is not of type 'CSSNumericValue'.",
+        );
+        return;
+    }
     let Some(x) = numeric(scope, arguments.get(0)) else {
         return;
     };
@@ -125,6 +142,10 @@ fn set_component(
     value: v8::Local<'_, v8::Value>,
     x_axis: bool,
 ) {
+    if record(scope, object).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some(value) = numeric(scope, value) else {
         return;
     };

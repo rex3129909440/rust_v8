@@ -56,22 +56,31 @@ pub(crate) fn construct(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'RTCDTMFToneChangeEvent': 2 arguments required",
+            "Failed to construct 'RTCDTMFToneChangeEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
-    let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "RTCDTMFToneChangeEventInit must be an object");
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
         return;
     };
-    let tone = property_string(scope, init, "tone").unwrap_or_default();
+    if !arguments.get(1).is_null_or_undefined() && !arguments.get(1).is_object() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCDTMFToneChangeEvent': The provided value is not of type 'RTCDTMFToneChangeEventInit'.",
+        );
+        return;
+    }
+    let init = v8::Local::<v8::Object>::try_from(arguments.get(1)).ok();
+    let tone = init
+        .and_then(|init| property_string(scope, init, "tone"))
+        .unwrap_or_default();
     super::event::attach(
         scope,
         arguments.this(),
-        crate::webidl::value_to_string(scope, arguments.get(0)),
-        super::event::boolean_property(scope, init, "bubbles"),
-        super::event::boolean_property(scope, init, "cancelable"),
-        super::event::boolean_property(scope, init, "composed"),
+        event_type,
+        init.is_some_and(|init| super::event::boolean_property(scope, init, "bubbles")),
+        init.is_some_and(|init| super::event::boolean_property(scope, init, "cancelable")),
+        init.is_some_and(|init| super::event::boolean_property(scope, init, "composed")),
     );
     scope
         .get_slot_mut::<RtcDtmfToneChangeEventStore>()

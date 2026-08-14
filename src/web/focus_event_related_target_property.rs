@@ -12,13 +12,5 @@ fn get_related_target(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    match scope.get_slot::<FocusEventStore>().and_then(|store| {
-        store
-            .related_targets
-            .get(&arguments.this().get_identity_hash().get())
-    }) {
-        Some(Some(value)) => result.set(v8::Local::new(scope, value).into()),
-        Some(None) => result.set(v8::null(scope).into()),
-        None => crate::webidl::throw_type_error(scope, "Illegal invocation"),
-    }
+    super::focus_event::get_related_target(scope, arguments, result);
 }

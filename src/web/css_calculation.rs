@@ -119,6 +119,16 @@ pub(crate) fn is_root_numeric_math(value: &str) -> bool {
 
 pub(crate) fn normalize_property_value(name: &str, value: &str) -> Option<String> {
     let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    if ((name == "accent-color" || name == "scrollbar-color") && lower == "auto")
+        || ((name == "fill" || name == "stroke")
+            && matches!(lower.as_str(), "none" | "context-fill" | "context-stroke"))
+    {
+        return Some(lower);
+    }
+    if matches!(name, "text-shadow" | "box-shadow") {
+        return normalize_embedded_color_functions(value);
+    }
     if is_color_property(name) {
         return normalize_color_value(value);
     }
@@ -139,6 +149,30 @@ pub(crate) fn normalize_property_value(name: &str, value: &str) -> Option<String
         return None;
     }
     normalize_embedded_math(value)
+}
+
+fn normalize_embedded_color_functions(value: &str) -> Option<String> {
+    let mut output = String::with_capacity(value.len());
+    let lower = value.to_ascii_lowercase();
+    let mut position = 0;
+    while position < value.len() {
+        let remaining = &lower[position..];
+        let next = ["rgba(", "rgb(", "hsla(", "hsl("]
+            .into_iter()
+            .filter_map(|prefix| remaining.find(prefix).map(|index| (index, prefix)))
+            .min_by_key(|(index, _)| *index);
+        let Some((relative, _)) = next else {
+            output.push_str(&value[position..]);
+            break;
+        };
+        let start = position + relative;
+        output.push_str(&value[position..start]);
+        let end = value[start..].find(')')? + start + 1;
+        let color = normalize_color_value(&value[start..end])?;
+        output.push_str(&color);
+        position = end;
+    }
+    Some(output)
 }
 
 fn is_color_property(name: &str) -> bool {

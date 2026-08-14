@@ -21,7 +21,7 @@ struct RealmTimerState {
     next_id: i32,
     timeouts: HashMap<i32, TimerRecord>,
     intervals: HashMap<i32, TimerRecord>,
-    running_nesting_level: u32,
+    running_nesting_level: Option<u32>,
 }
 
 #[derive(Default)]
@@ -39,7 +39,7 @@ fn new_realm_state() -> RealmTimerState {
         next_id: 1,
         timeouts: HashMap::new(),
         intervals: HashMap::new(),
-        running_nesting_level: 0,
+        running_nesting_level: None,
     }
 }
 
@@ -85,7 +85,8 @@ fn reserve(
     let nesting_level = scope
         .get_slot::<TimerState>()
         .and_then(|state| state.realms.get(&realm_id))
-        .map_or(1, |realm| realm.running_nesting_level.saturating_add(1));
+        .and_then(|realm| realm.running_nesting_level)
+        .map_or(0, |level| level.saturating_add(1));
     let delay_ms = timer_delay_for_nesting(delay_ms, nesting_level);
     let due_ms = crate::determinism::monotonic_snapshot_milliseconds(scope) + delay_ms;
     let Some(state) = scope.get_slot_mut::<TimerState>() else {
@@ -179,10 +180,12 @@ pub(crate) fn run_ready(scope: &mut v8::PinScope<'_, '_>) -> bool {
             .get_slot_mut::<TimerState>()
             .and_then(|state| state.realms.get_mut(&realm_id))
         {
-            realm.running_nesting_level = timer.nesting_level;
+            realm.running_nesting_level = Some(timer.nesting_level);
         }
         let context = v8::Local::new(scope, &timer.context);
         let callback_scope = &mut v8::ContextScope::new(scope, context);
+        super::animation_frame_state::sample_task_realm(callback_scope, realm_id);
+        let task_start = super::performance_observer::task_start(callback_scope);
         let receiver: v8::Local<v8::Value> = callback_scope
             .get_current_context()
             .global(callback_scope)
@@ -205,12 +208,18 @@ pub(crate) fn run_ready(scope: &mut v8::PinScope<'_, '_>) -> bool {
                 }
             }
         }
+        // Promise reactions queued by a timer callback still run inside the
+        // same HTML timer task and therefore inherit its nesting level.  Only
+        // clear the task-local level after both microtask checkpoints.
         callback_scope.perform_microtask_checkpoint();
+        if super::performance_observer::record_completed_task(callback_scope, task_start, false) {
+            callback_scope.perform_microtask_checkpoint();
+        }
         if let Some(realm) = callback_scope
             .get_slot_mut::<TimerState>()
             .and_then(|state| state.realms.get_mut(&realm_id))
         {
-            realm.running_nesting_level = 0;
+            realm.running_nesting_level = None;
         }
         ran = true;
     }

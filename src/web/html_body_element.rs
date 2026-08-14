@@ -73,6 +73,7 @@ pub(crate) fn ensure_constructor<'s>(
     super::html_body_element_onstorage_property::define(scope, prototype)?;
     super::html_body_element_onunhandledrejection_property::define(scope, prototype)?;
     super::html_body_element_onunload_property::define(scope, prototype)?;
+    super::html_body_element_orientation_handler::define(scope, prototype)?;
     super::html_body_element_ongamepadconnected_property::define(scope, prototype)?;
     super::html_body_element_ongamepaddisconnected_property::define(scope, prototype)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;

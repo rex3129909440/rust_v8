@@ -85,6 +85,7 @@ pub(crate) fn enable_native_trace_for_existing_realms(
         let child_scope = &mut v8::ContextScope::new(scope, context);
         let window = v8::Local::new(child_scope, &window);
         let label = format!("iframe[{id}]");
+        crate::trace::relabel_json_intrinsic_trace(child_scope, &label)?;
         crate::trace::label_native_value(child_scope, window.into(), &label);
         if let Some(document) = document {
             let document = v8::Local::new(child_scope, &document);
@@ -180,7 +181,11 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLIFrameElement".to_owned());
     }
     super::html_element::attach(scope, object, "IFRAME");
-    let sandbox = super::dom_token_list::create(scope, "")?;
+    let sandbox = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::Sandbox,
+    )?;
     let feature_policy = super::feature_policy::create(scope)?;
     let sandbox = v8::Global::new(scope, sandbox);
     let feature_policy = v8::Global::new(scope, feature_policy);
@@ -759,6 +764,13 @@ fn install_iframe_interface_prefix(
 ) -> Result<crate::intrinsics::LateIntrinsics, String> {
     let late_intrinsics = crate::intrinsics::LateIntrinsics::detach(scope, context)?;
     super::install_window_interfaces(scope)?;
+    if crate::browser_surface::current_version(scope).is_android() {
+        super::install_after_webassembly_impl(scope)?;
+    }
+    crate::browser_surface::apply_window_phase(
+        scope,
+        crate::browser_surface::WindowSurfacePhase::Interfaces,
+    )?;
     Ok(late_intrinsics)
 }
 
@@ -796,7 +808,13 @@ fn install_iframe_late_globals(
     super::install_after_late_intrinsics(scope)?;
     let web_assembly = v8::Local::new(scope, &late_intrinsics.web_assembly);
     super::web_assembly_global::install(scope, web_assembly)?;
-    super::install_after_webassembly(scope)
+    super::install_after_webassembly(scope)?;
+    crate::browser_surface::apply_window_phase(
+        scope,
+        crate::browser_surface::WindowSurfacePhase::AfterChrome,
+    )?;
+    crate::browser_surface::finalize_versioned_prototypes(scope)?;
+    crate::browser_surface::finalize_versioned_statics_and_objects(scope)
 }
 
 pub(crate) fn ensure_browsing_context(
@@ -878,6 +896,7 @@ pub(crate) fn ensure_browsing_context(
 
     let setup = {
         let child_scope = &mut v8::ContextScope::new(scope, context);
+        crate::browser_surface::register_current_realm_from_fingerprint(child_scope)?;
         let late_intrinsics = install_iframe_interface_prefix(child_scope, context)?;
         let location = super::location::create(child_scope, "about:blank")?;
         let document = super::document_global::create_document(child_scope, "about:blank")?;
@@ -964,7 +983,9 @@ pub(crate) fn ensure_browsing_context(
         super::html_font_element::install(child_scope)?;
         super::html_frame_element::install(child_scope)?;
         super::html_frame_set_element::install(child_scope)?;
-        super::html_geolocation_element::install(child_scope)?;
+        if crate::browser_surface::current_version(child_scope).major() >= 144 {
+            super::html_geolocation_element::install(child_scope)?;
+        }
         super::html_heading_element::install(child_scope)?;
         super::html_hr_element::install(child_scope)?;
         super::html_label_element::install(child_scope)?;
@@ -1023,7 +1044,9 @@ pub(crate) fn ensure_browsing_context(
         super::xml_http_request_upload::install(child_scope)?;
         super::xml_http_request_event_target::install(child_scope)?;
         super::xml_http_request::install(child_scope)?;
-        super::shared_worker::install(child_scope)?;
+        // SharedWorker is already installed through the common, versioned
+        // Window interface pipeline. Reinstalling it here leaked the
+        // constructor into Android Chromium 140-147 iframe realms.
         super::speech_synthesis_event::install(child_scope)?;
         super::speech_synthesis_error_event::install(child_scope)?;
         super::speech_synthesis_utterance::install(child_scope)?;
@@ -1043,9 +1066,10 @@ pub(crate) fn ensure_browsing_context(
         super::performance::install(child_scope)?;
         crate::locale_runtime::install(child_scope)?;
         crate::determinism::install(child_scope)?;
+        let label = format!("iframe[{}]", iframe.get_identity_hash().get());
+        crate::trace::relabel_json_intrinsic_trace(child_scope, &label)?;
         crate::iframe_hook::run_for_current_iframe(child_scope, "about:blank")?;
         if crate::trace::is_enabled(child_scope) {
-            let label = format!("iframe[{}]", iframe.get_identity_hash().get());
             crate::trace::label_native_value(child_scope, child_window.into(), &label);
             crate::trace::label_native_value(
                 child_scope,
@@ -1313,6 +1337,7 @@ fn navigate_browsing_context(
     }
     let prepared = {
         let child_scope = &mut v8::ContextScope::new(scope, context);
+        crate::browser_surface::register_current_realm_from_fingerprint(child_scope)?;
         let late_intrinsics = install_iframe_interface_prefix(child_scope, context)?;
         let location = super::location::create(child_scope, &navigation.url)?;
         let document = super::document_global::create_document(child_scope, &navigation.url)?;
@@ -1427,7 +1452,9 @@ fn navigate_browsing_context(
         super::html_font_element::install(child_scope)?;
         super::html_frame_element::install(child_scope)?;
         super::html_frame_set_element::install(child_scope)?;
-        super::html_geolocation_element::install(child_scope)?;
+        if crate::browser_surface::current_version(child_scope).major() >= 144 {
+            super::html_geolocation_element::install(child_scope)?;
+        }
         super::html_heading_element::install(child_scope)?;
         super::html_hr_element::install(child_scope)?;
         super::html_label_element::install(child_scope)?;
@@ -1486,7 +1513,8 @@ fn navigate_browsing_context(
         super::xml_http_request_upload::install(child_scope)?;
         super::xml_http_request_event_target::install(child_scope)?;
         super::xml_http_request::install(child_scope)?;
-        super::shared_worker::install(child_scope)?;
+        // Installed by install_iframe_interface_prefix when the selected
+        // browser/platform surface exposes it.
         super::speech_synthesis_event::install(child_scope)?;
         super::speech_synthesis_error_event::install(child_scope)?;
         super::speech_synthesis_utterance::install(child_scope)?;
@@ -1507,9 +1535,10 @@ fn navigate_browsing_context(
 
         crate::locale_runtime::install(child_scope)?;
         crate::determinism::install(child_scope)?;
+        let label = format!("iframe[{}]", iframe.get_identity_hash().get());
+        crate::trace::relabel_json_intrinsic_trace(child_scope, &label)?;
         crate::iframe_hook::run_for_current_iframe(child_scope, &navigation.url)?;
         if crate::trace::is_enabled(child_scope) {
-            let label = format!("iframe[{}]", iframe.get_identity_hash().get());
             crate::trace::label_native_value(child_scope, child_window.into(), &label);
             crate::trace::label_native_value(
                 child_scope,
@@ -2679,6 +2708,76 @@ fn direct_child_records(
         .unwrap_or_default();
     records.sort_by_key(|record| record.sequence);
     records
+}
+
+pub(crate) fn user_activation_notification_window_ids(
+    scope: &v8::PinScope<'_, '_>,
+) -> std::collections::HashSet<i32> {
+    let source = scope.get_current_context().global(scope);
+    let source_origin = origin_for_window(scope, source);
+    let mut affected = std::collections::HashSet::new();
+    affected.insert(source.get_identity_hash().get());
+
+    let mut ancestor = source;
+    while let Some(parent) = containing_parent_window(scope, ancestor) {
+        if !affected.insert(parent.get_identity_hash().get()) {
+            break;
+        }
+        ancestor = parent;
+    }
+
+    let mut pending = vec![source];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(parent) = pending.pop() {
+        if !visited.insert(parent.get_identity_hash().get()) {
+            continue;
+        }
+        for child in direct_child_records(scope, parent) {
+            let Some(window) = child
+                .content_window
+                .as_ref()
+                .map(|window| v8::Local::new(scope, window))
+            else {
+                continue;
+            };
+            if origin_for_window(scope, window) == source_origin {
+                affected.insert(window.get_identity_hash().get());
+            }
+            pending.push(window);
+        }
+    }
+    affected
+}
+
+pub(crate) fn user_activation_consumption_window_ids(
+    scope: &v8::PinScope<'_, '_>,
+) -> std::collections::HashSet<i32> {
+    let mut top = scope.get_current_context().global(scope);
+    let mut ancestors = std::collections::HashSet::new();
+    while ancestors.insert(top.get_identity_hash().get()) {
+        let Some(parent) = containing_parent_window(scope, top) else {
+            break;
+        };
+        top = parent;
+    }
+
+    let mut affected = std::collections::HashSet::new();
+    let mut pending = vec![top];
+    while let Some(parent) = pending.pop() {
+        if !affected.insert(parent.get_identity_hash().get()) {
+            continue;
+        }
+        for child in direct_child_records(scope, parent) {
+            if let Some(window) = child
+                .content_window
+                .as_ref()
+                .map(|window| v8::Local::new(scope, window))
+            {
+                pending.push(window);
+            }
+        }
+    }
+    affected
 }
 
 fn cross_origin_child_records(

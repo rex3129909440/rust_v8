@@ -1,4 +1,9 @@
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
+    // Chromium Android exposes both Shape Detection and Content Index inside
+    // DedicatedWorkerGlobalScope. Desktop/version reconciliation removes them
+    // from platforms whose HTTPS evidence does not contain these interfaces.
+    super::barcode_detector::install(scope)?;
+    super::content_index::install(scope)?;
     super::text_encoder::install(scope)?;
     super::text_decoder::install(scope)?;
     super::text_encoder_stream::install(scope)?;
@@ -109,6 +114,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     super::idb_cursor_with_value::install(scope)?;
     super::idb_cursor::install(scope)?;
     super::font_face::install(scope)?;
+    super::font_face_set::install(scope)?;
     super::file_list::install(scope)?;
     super::event_source::install(scope)?;
     super::encoded_video_chunk::install(scope)?;
@@ -283,6 +289,7 @@ pub(crate) fn cleanup(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {
     super::file_system_sync_access_handle::cleanup_realm(scope, realm_id);
     super::file_system_writable_file_stream::cleanup_realm(scope, realm_id);
     super::font_face::cleanup_realm(scope, realm_id);
+    super::font_face_set::cleanup_realm(scope, realm_id);
     super::gpu::cleanup_realm(scope, realm_id);
     super::gpu_adapter::cleanup_realm(scope, realm_id);
     super::gpu_adapter_info::cleanup_realm(scope, realm_id);
@@ -356,6 +363,7 @@ pub(crate) fn cleanup(scope: &mut v8::PinScope<'_, '_>, realm_id: i32) {
     super::performance_mark::cleanup_realm(scope, realm_id);
     super::performance_measure::cleanup_realm(scope, realm_id);
     super::performance_observer::cleanup_realm(scope, realm_id);
+    super::rendering_performance_state::cleanup_realm(scope, realm_id);
     super::performance_observer_entry_list::cleanup_realm(scope, realm_id);
     super::performance_resource_timing::cleanup_realm(scope, realm_id);
     super::performance_server_timing::cleanup_realm(scope, realm_id);

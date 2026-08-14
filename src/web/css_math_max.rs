@@ -54,17 +54,22 @@ fn construct(
     mut result: v8::ReturnValue<'_>,
 ) {
     if !arguments.is_construct_call() || arguments.length() < 1 {
-        crate::webidl::throw_type_error(scope, "CSSMathMax arguments cannot be empty");
+        super::node::throw_dom_exception(
+            scope,
+            "SyntaxError",
+            "Failed to construct 'CSSMathMax': Arguments can't be empty",
+        );
         return;
     }
     let mut stored_members = Vec::with_capacity(arguments.length() as usize);
     for index in 0..arguments.length() {
         let member = match super::css_numeric_value::numberish(scope, arguments.get(index)) {
             Ok(member) => member,
-            Err(message) => {
+            Err(super::css_numeric_value::NumberishError::Message(message)) => {
                 crate::webidl::throw_type_error(scope, &message);
                 return;
             }
+            Err(super::css_numeric_value::NumberishError::Exception) => return,
         };
         stored_members.push(member);
     }

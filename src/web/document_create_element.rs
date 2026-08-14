@@ -14,20 +14,67 @@ fn create_element(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let name = crate::webidl::value_to_string(scope, arguments.get(0));
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'createElement' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let Some(name) = crate::webidl::dom_string_with_context(
+        scope,
+        arguments.get(0),
+        "Failed to execute 'createElement' on 'Document'",
+    ) else {
+        return;
+    };
     if !super::document::valid_xml_name(&name) {
         super::node::throw_dom_exception(
             scope,
             "InvalidCharacterError",
-            "The tag name provided is not a valid name",
+            &format!(
+                "Failed to execute 'createElement' on 'Document': The tag name provided ('{name}') is not a valid name."
+            ),
         );
         return;
     }
-    let normalized = name.to_ascii_lowercase();
-    match super::document::create_html_element_by_name(scope, &normalized) {
+    let element = if super::document::content_type(scope, arguments.this()) == Some("text/html") {
+        super::document::create_html_element_by_name(scope, &name.to_ascii_lowercase())
+    } else {
+        super::element::create(scope, name.clone(), None)
+    };
+    match element {
         Ok(element) => {
             super::node::set_owner_document(scope, element, arguments.this());
-            result.set(element.into());
+            if arguments.length() > 1
+                && let Ok(options) = v8::Local::<v8::Object>::try_from(arguments.get(1))
+                && let Some(key) = v8::String::new(scope, "is")
+                && let Some(value) = options.get(scope, key.into())
+                && !value.is_undefined()
+            {
+                let Some(is_name) = crate::webidl::dom_string_with_context(
+                    scope,
+                    value,
+                    "Failed to execute 'createElement' on 'Document': Failed to read the 'is' property from 'ElementCreationOptions'",
+                ) else {
+                    return;
+                };
+                super::custom_element_registry::set_candidate_is(scope, element, Some(is_name));
+            }
+            super::custom_element_registry::try_construct_created(scope, element);
+            if super::custom_element_registry::is_failed(scope, element)
+                && super::document::content_type(scope, arguments.this()) == Some("text/html")
+            {
+                match super::html_unknown_element::create(scope, &name.to_ascii_lowercase()) {
+                    Ok(fallback) => {
+                        super::node::set_owner_document(scope, fallback, arguments.this());
+                        result.set(fallback.into());
+                    }
+                    Err(message) => crate::webidl::throw_type_error(scope, &message),
+                }
+            } else {
+                result.set(element.into());
+            }
         }
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }

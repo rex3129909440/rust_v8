@@ -10,19 +10,43 @@ fn replace_data(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let offset = arguments.get(0).uint32_value(scope).unwrap_or(0);
-    let count = arguments.get(1).uint32_value(scope).unwrap_or(0);
-    let value = crate::webidl::value_to_string(scope, arguments.get(2));
+    if super::character_data::data_if_character(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    if !super::character_data::require_arguments(scope, &arguments, "replaceData", 3) {
+        return;
+    }
+    let Some(offset) =
+        super::character_data::unsigned_long_argument(scope, arguments.get(0), "replaceData")
+    else {
+        return;
+    };
+    let Some(count) =
+        super::character_data::unsigned_long_argument(scope, arguments.get(1), "replaceData")
+    else {
+        return;
+    };
+    let Some(value) = super::character_data::string_argument(
+        scope,
+        arguments.get(2),
+        "Failed to execute 'replaceData' on 'CharacterData'",
+    ) else {
+        return;
+    };
     match super::character_data::replace_data_units(scope, arguments.this(), offset, count, &value)
     {
         Ok(()) => {}
         Err(super::character_data::EditError::IllegalInvocation) => {
             crate::webidl::throw_type_error(scope, "Illegal invocation")
         }
-        Err(super::character_data::EditError::IndexSize) => super::node::throw_dom_exception(
-            scope,
-            "IndexSizeError",
-            "The offset is larger than the data length",
-        ),
+        Err(super::character_data::EditError::IndexSize) => {
+            super::character_data::throw_offset_error(
+                scope,
+                arguments.this(),
+                "replaceData",
+                offset,
+            )
+        }
     }
 }

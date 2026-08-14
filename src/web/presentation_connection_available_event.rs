@@ -56,18 +56,29 @@ pub(crate) fn construct(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !a.is_construct_call() || a.length() < 2 {
-        crate::webidl::throw_type_error(s, "2 arguments required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PresentationConnectionAvailableEvent': 2 arguments required, but only 1 present.",
+        );
         return;
     }
-    let t = crate::webidl::value_to_string(s, a.get(0));
+    let Some(t) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(a.get(1)) else {
-        crate::webidl::throw_type_error(s, "event init required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PresentationConnectionAvailableEvent': The provided value is not of type 'PresentationConnectionAvailableEventInit'.",
+        );
         return;
     };
     let Ok(connection) = v8::Local::<v8::Object>::try_from(
         member(s, init, "connection").unwrap_or_else(|| v8::undefined(s).into()),
     ) else {
-        crate::webidl::throw_type_error(s, "connection required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'PresentationConnectionAvailableEvent': Failed to read the 'connection' property from 'PresentationConnectionAvailableEventInit': Required member is undefined.",
+        );
         return;
     };
     let (bubbles, cancelable, composed) = super::event::event_init(s, a.get(1));

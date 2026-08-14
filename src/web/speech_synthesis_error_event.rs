@@ -75,9 +75,14 @@ pub(crate) fn construct(
         );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        super::speech_synthesis_event::throw_required_utterance(scope, "SpeechSynthesisErrorEvent");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'SpeechSynthesisErrorEvent': The provided value is not of type 'SpeechSynthesisErrorEventInit'.",
+        );
         return;
     };
     let Some(utterance) = object_property(scope, init, "utterance") else {

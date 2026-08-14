@@ -21,15 +21,34 @@ fn get_client_rects(
         }
         return;
     }
-    let rect = layout.rect();
-    let value = match super::dom_rect::create(scope, rect) {
-        Ok(value) => value,
-        Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
-            return;
+    let raw_rects =
+        if super::inline_text_layout::uses_inline_fragment_geometry(scope, arguments.this()) {
+            let rects = super::inline_text_layout::inline_element_rects(scope, arguments.this());
+            if rects.is_empty() {
+                vec![super::element_layout::bounding_rect(
+                    scope,
+                    arguments.this(),
+                )]
+            } else {
+                rects
+            }
+        } else {
+            vec![super::element_layout::bounding_rect(
+                scope,
+                arguments.this(),
+            )]
+        };
+    let mut values = Vec::with_capacity(raw_rects.len());
+    for rect in raw_rects {
+        match super::dom_rect::create(scope, rect) {
+            Ok(value) => values.push(value),
+            Err(message) => {
+                crate::webidl::throw_type_error(scope, &message);
+                return;
+            }
         }
-    };
-    match super::dom_rect_list::create(scope, vec![value]) {
+    }
+    match super::dom_rect_list::create(scope, values) {
         Ok(list) => result.set(list.into()),
         Err(message) => crate::webidl::throw_type_error(scope, &message),
     }

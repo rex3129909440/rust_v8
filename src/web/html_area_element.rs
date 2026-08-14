@@ -94,7 +94,11 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLAreaElement".to_owned());
     }
     super::html_element::attach(scope, o, "AREA");
-    let rel = super::dom_token_list::create(scope, "")?;
+    let rel = super::dom_token_list::create_with_support(
+        scope,
+        "",
+        super::dom_token_list::DomTokenSupport::HyperlinkRel,
+    )?;
     let rel = v8::Global::new(scope, rel);
     scope
         .get_slot_mut::<HtmlAreaElementStore>()

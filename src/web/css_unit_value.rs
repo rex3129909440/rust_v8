@@ -64,14 +64,114 @@ fn construct(
         crate::webidl::throw_type_error(scope, "CSSUnitValue requires a value and unit");
         return;
     }
-    let value = arguments.get(0).number_value(scope).unwrap_or(f64::NAN);
+    if let Some(message) = crate::webidl::number_conversion_error(arguments.get(0)) {
+        crate::webidl::throw_type_error(scope, &message);
+        return;
+    }
+    let Some(value) = arguments.get(0).number_value(scope) else {
+        return;
+    };
     let unit = crate::webidl::value_to_string(scope, arguments.get(1)).to_ascii_lowercase();
-    if unit.is_empty() || !value.is_finite() {
-        crate::webidl::throw_type_error(scope, "Invalid CSS numeric value");
+    if !value.is_finite() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSUnitValue': The provided double value is non-finite.",
+        );
+        return;
+    }
+    if arguments.get(1).is_null_or_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSUnitValue': Invalid unit: null",
+        );
+        return;
+    }
+    if unit.is_empty() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'CSSUnitValue': Invalid unit: ",
+        );
+        return;
+    }
+    if !valid_unit(&unit) {
+        crate::webidl::throw_type_error(
+            scope,
+            &format!("Failed to construct 'CSSUnitValue': Invalid unit: {unit}"),
+        );
         return;
     }
     attach(scope, arguments.this(), value, unit);
     result.set(arguments.this().into());
+}
+
+fn valid_unit(unit: &str) -> bool {
+    matches!(
+        unit,
+        "number"
+            | "%"
+            | "percent"
+            | "px"
+            | "cm"
+            | "mm"
+            | "q"
+            | "in"
+            | "pc"
+            | "pt"
+            | "em"
+            | "rem"
+            | "ex"
+            | "rex"
+            | "cap"
+            | "rcap"
+            | "ch"
+            | "rch"
+            | "ic"
+            | "ric"
+            | "lh"
+            | "rlh"
+            | "vw"
+            | "vh"
+            | "vi"
+            | "vb"
+            | "vmin"
+            | "vmax"
+            | "svw"
+            | "svh"
+            | "svi"
+            | "svb"
+            | "svmin"
+            | "svmax"
+            | "lvw"
+            | "lvh"
+            | "lvi"
+            | "lvb"
+            | "lvmin"
+            | "lvmax"
+            | "dvw"
+            | "dvh"
+            | "dvi"
+            | "dvb"
+            | "dvmin"
+            | "dvmax"
+            | "cqw"
+            | "cqh"
+            | "cqi"
+            | "cqb"
+            | "cqmin"
+            | "cqmax"
+            | "deg"
+            | "grad"
+            | "rad"
+            | "turn"
+            | "s"
+            | "ms"
+            | "hz"
+            | "khz"
+            | "dpi"
+            | "dpcm"
+            | "dppx"
+            | "fr"
+    )
 }
 
 fn attach(
@@ -136,7 +236,9 @@ fn set_value(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let value = arguments.get(0).number_value(scope).unwrap_or(f64::NAN);
+    let Some(value) = arguments.get(0).number_value(scope) else {
+        return;
+    };
     if !value.is_finite() {
         crate::webidl::throw_type_error(scope, "CSS unit value must be finite");
         return;

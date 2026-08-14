@@ -63,7 +63,10 @@ fn construct(
         return;
     }
     let Ok(source) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "ClipboardItem requires a data record");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ClipboardItem': Only objects can be converted to record<K,V> types",
+        );
         return;
     };
     let mut values = HashMap::new();
@@ -90,7 +93,10 @@ fn construct(
         }
     }
     if values.is_empty() {
-        crate::webidl::throw_type_error(scope, "ClipboardItem data cannot be empty");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ClipboardItem': Empty dictionary argument",
+        );
         return;
     }
     scope
@@ -140,7 +146,7 @@ fn get_type(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "ClipboardItem", "getType", result);
         return;
     };
     let media_type = crate::webidl::value_to_string(scope, arguments.get(0));

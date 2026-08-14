@@ -60,18 +60,29 @@ pub(crate) fn construct(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !a.is_construct_call() || a.length() < 2 {
-        crate::webidl::throw_type_error(s, "2 arguments required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'HIDConnectionEvent': 2 arguments required, but only 1 present.",
+        );
         return;
     }
-    let event_type = crate::webidl::value_to_string(s, a.get(0));
+    let Some(event_type) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(a.get(1)) else {
-        crate::webidl::throw_type_error(s, "event init required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'HIDConnectionEvent': The provided value is not of type 'HIDConnectionEventInit'.",
+        );
         return;
     };
     let Ok(device) = v8::Local::<v8::Object>::try_from(
         member(s, init, "device").unwrap_or_else(|| v8::undefined(s).into()),
     ) else {
-        crate::webidl::throw_type_error(s, "device required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'HIDConnectionEvent': Failed to read the 'device' property from 'HIDConnectionEventInit': Required member is undefined.",
+        );
         return;
     };
     let (bubbles, cancelable, composed) = super::event::event_init(s, a.get(1));

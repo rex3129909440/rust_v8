@@ -279,7 +279,12 @@ fn abort(
         record.result = "failure".to_owned();
         record.failure_reason = "aborted".to_owned();
     }) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BackgroundFetchRegistration",
+            "abort",
+            result,
+        );
         return;
     }
     let value = v8::Boolean::new(scope, true);
@@ -293,6 +298,15 @@ fn match_record(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    let Some(record) = data(scope, arguments.this()) else {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BackgroundFetchRegistration",
+            "match",
+            result,
+        );
+        return;
+    };
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(
             scope,
@@ -300,10 +314,6 @@ fn match_record(
         );
         return;
     }
-    let Some(record) = data(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
     let wanted = crate::webidl::value_to_string(scope, arguments.get(0));
     let found = record
         .records
@@ -329,7 +339,12 @@ fn match_all(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = data(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "BackgroundFetchRegistration",
+            "matchAll",
+            result,
+        );
         return;
     };
     let values = v8::Array::new(scope, record.records.len() as i32);

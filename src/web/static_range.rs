@@ -65,19 +65,58 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
-        crate::webidl::throw_type_error(scope, "StaticRange init must be an object");
-        return;
-    };
-    let Some(start) = prop(scope, init, "startContainer") else {
-        crate::webidl::throw_type_error(scope, "startContainer is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'StaticRange': The provided value is not of type 'StaticRangeInit'.",
+        );
         return;
     };
     let Some(end) = prop(scope, init, "endContainer") else {
-        crate::webidl::throw_type_error(scope, "endContainer is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'StaticRange': Failed to read the 'endContainer' property from 'StaticRangeInit': Required member is undefined.",
+        );
         return;
     };
-    let start_offset = uint(scope, init, "startOffset");
-    let end_offset = uint(scope, init, "endOffset");
+    let end_offset_key = v8::String::new(scope, "endOffset").expect("endOffset key");
+    let Some(end_offset_value) = init.get(scope, end_offset_key.into()) else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'StaticRange': Failed to read the 'endOffset' property from 'StaticRangeInit': Required member is undefined.",
+        );
+        return;
+    };
+    if end_offset_value.is_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'StaticRange': Failed to read the 'endOffset' property from 'StaticRangeInit': Required member is undefined.",
+        );
+        return;
+    }
+    let Some(start) = prop(scope, init, "startContainer") else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'StaticRange': Failed to read the 'startContainer' property from 'StaticRangeInit': Required member is undefined.",
+        );
+        return;
+    };
+    let start_offset_key = v8::String::new(scope, "startOffset").expect("startOffset key");
+    let Some(start_offset_value) = init.get(scope, start_offset_key.into()) else {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'StaticRange': Failed to read the 'startOffset' property from 'StaticRangeInit': Required member is undefined.",
+        );
+        return;
+    };
+    if start_offset_value.is_undefined() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'StaticRange': Failed to read the 'startOffset' property from 'StaticRangeInit': Required member is undefined.",
+        );
+        return;
+    }
+    let start_offset = start_offset_value.uint32_value(scope).unwrap_or(0);
+    let end_offset = end_offset_value.uint32_value(scope).unwrap_or(0);
     if super::node::record(scope, start).is_some_and(|record| record.node_type == 10)
         || super::node::record(scope, end).is_some_and(|record| record.node_type == 10)
     {

@@ -76,7 +76,7 @@ fn get_subscription(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PushManager", "getSubscription", r);
         return;
     }
     let v = s
@@ -96,7 +96,7 @@ fn permission_state(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PushManager", "permissionState", r);
         return;
     }
     let state = crate::fingerprint::edge(s)
@@ -116,7 +116,7 @@ fn subscribe(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !valid(s, a.this()) {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "PushManager", "subscribe", r);
         return;
     }
     let id = a.this().get_identity_hash().get();

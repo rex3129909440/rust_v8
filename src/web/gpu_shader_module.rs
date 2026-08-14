@@ -115,7 +115,12 @@ fn get_compilation_info(
         })
         .cloned()
     else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "GPUShaderModule",
+            "getCompilationInfo",
+            result,
+        );
         return;
     };
     let messages = if record.code.trim().is_empty() {

@@ -1,6 +1,7 @@
 #[derive(Default)]
 pub(crate) struct InkStore {
     constructor: crate::webidl::RealmConstructor,
+    instances: std::collections::HashSet<i32>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -52,6 +53,11 @@ pub(crate) fn create<'s>(
     if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
         return Err("cannot create Ink".to_owned());
     }
+    scope
+        .get_slot_mut::<InkStore>()
+        .ok_or_else(|| "Ink state was not prepared".to_owned())?
+        .instances
+        .insert(object.get_identity_hash().get());
     Ok(object)
 }
 
@@ -68,22 +74,12 @@ fn request_presenter(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let constructor = match ensure_constructor(scope) {
-        Ok(constructor) => constructor,
-        Err(message) => {
-            crate::webidl::throw_type_error(scope, &message);
-            return;
-        }
-    };
-    let Ok(prototype) = crate::webidl::prototype(scope, constructor) else {
-        return;
-    };
-    let Some(actual_prototype) = arguments.this().get_prototype(scope) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
-    if !actual_prototype.strict_equals(prototype.into()) {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    if scope.get_slot::<InkStore>().is_none_or(|store| {
+        !store
+            .instances
+            .contains(&arguments.this().get_identity_hash().get())
+    }) {
+        crate::webidl::reject_illegal_invocation_promise(scope, "Ink", "requestPresenter", result);
         return;
     }
     let options = v8::Local::<v8::Object>::try_from(arguments.get(0)).ok();

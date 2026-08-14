@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 
 MIN_SUPPORTED_CHROMIUM_MAJOR = 140
-MAX_SUPPORTED_CHROMIUM_MAJOR = 150
+MAX_SUPPORTED_CHROMIUM_MAJOR = 151
 
 
 CHROME_VERSION_MAP = {
@@ -24,6 +24,7 @@ CHROME_VERSION_MAP = {
     "148": "148.0.7778.216",
     "149": "149.0.7827.54",
     "150": "150.0.7871.187",
+    "151": "151.0.7922.47",
 }
 
 EDGE_VERSION_MAP = {
@@ -41,6 +42,42 @@ EDGE_VERSION_MAP = {
     "148": "148.0.3967.96",
     "149": "149.0.4022.98",
     "150": "150.0.4078.99",
+    "151": "151.0.4129.15",
+}
+
+# Android is released on its own train.  Reusing the desktop patch maps makes
+# high-entropy UA-CH claim builds that were never shipped by the mobile
+# browser.  Chrome values are the official Android/CfT builds used by the
+# project's 140-151 Pixel evidence matrix.  Edge values are published Mobile
+# Stable builds from Microsoft's mobile release notes.
+ANDROID_CHROME_VERSION_MAP = {
+    "140": "140.0.7339.207",
+    "141": "141.0.7390.122",
+    "142": "142.0.7444.175",
+    "143": "143.0.7499.192",
+    "144": "144.0.7559.133",
+    "145": "145.0.7632.117",
+    "146": "146.0.7680.165",
+    "147": "147.0.7727.117",
+    "148": "148.0.7778.178",
+    "149": "149.0.7827.155",
+    "150": "150.0.7871.124",
+    "151": "151.0.7922.138",
+}
+
+ANDROID_EDGE_VERSION_MAP = {
+    "140": "140.0.3485.98",
+    "141": "141.0.3537.99",
+    "142": "142.0.3595.107",
+    "143": "143.0.3650.139",
+    "144": "144.0.3719.115",
+    "145": "145.0.3800.99",
+    "146": "146.0.3856.102",
+    "147": "147.0.3912.87",
+    "148": "148.0.3967.97",
+    "149": "149.0.4022.105",
+    "150": "150.0.4078.96",
+    "151": "151.0.4129.72",
 }
 
 GREASED_CHARS = [" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"]
@@ -123,14 +160,19 @@ def get_grease_data(seed: int, full_version_mode: bool = False) -> Dict[str, Any
 def make_brand_lists(ua_string: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     options = options or {}
     parsed = parse_ua(ua_string)
+    android = get_platform(ua_string) == "Android"
+    chrome_version_map = (
+        ANDROID_CHROME_VERSION_MAP if android else CHROME_VERSION_MAP
+    )
+    edge_version_map = ANDROID_EDGE_VERSION_MAP if android else EDGE_VERSION_MAP
     chrome_full = resolve_full_version(
         options.get("chromeFullVersion") or parsed["fullChromeVersion"],
-        CHROME_VERSION_MAP,
+        chrome_version_map,
     )
     edge_full = (
         resolve_full_version(
             options.get("edgeFullVersion") or parsed["fullEdgeVersion"],
-            EDGE_VERSION_MAP,
+            edge_version_map,
         )
         if parsed["isEdge"]
         else ""
@@ -185,7 +227,9 @@ def get_base_platform(ua_string: str) -> str:
     if platform == "Windows":
         return "Win32"
     if platform == "Android":
-        return "Linux armv8l"
+        # Chromium exposes the ARM ISA revision here; the final character is
+        # the digit one, not a lower-case L.
+        return "Linux armv81"
     return "Linux x86_64"
 
 
@@ -193,7 +237,9 @@ def get_platform_defaults(ua_string: str, platform: Optional[str] = None) -> Dic
     ua = str(ua_string or "")
     platform = platform or get_platform(ua_string)
     if platform == "Android":
-        return {"architecture": "arm", "bitness": "64", "mobile": True}
+        # HTTPS evidence from Chromium Android 151 returns empty high-entropy
+        # architecture/bitness values even on the arm64 Pixel test device.
+        return {"architecture": "", "bitness": "", "mobile": True}
     if platform == "Windows" and re.search(r"\bARM64\b|\bARM\b", ua, re.I):
         return {"architecture": "arm", "bitness": "64", "mobile": False}
     return {"architecture": "x86", "bitness": "64", "mobile": False}
@@ -207,7 +253,10 @@ def get_platform_version(ua_string: str, major_version: int, platform: Optional[
         return mac_match.group(1).replace("_", ".") if mac_match else "10.15.7"
     if platform == "Android":
         android_match = re.search(r"Android ([\d.]+)", ua)
-        return android_match.group(1) if android_match else ""
+        if not android_match:
+            return ""
+        components = android_match.group(1).split(".")[:3]
+        return ".".join(components + ["0"] * (3 - len(components)))
     if platform == "Linux":
         return ""
 
@@ -233,13 +282,22 @@ def generate_ua_data_from_ua(ua_string: str, options: Optional[Dict[str, Any]] =
     defaults = get_platform_defaults(ua_string, platform)
     brand_data = make_brand_lists(ua_string, options)
     return {
-        "architecture": options.get("architecture") or defaults["architecture"],
-        "bitness": str(options.get("bitness") or defaults["bitness"]),
+        "architecture": (
+            options["architecture"]
+            if "architecture" in options
+            else defaults["architecture"]
+        ),
+        "bitness": str(
+            options["bitness"] if "bitness" in options else defaults["bitness"]
+        ),
         "mobile": bool(options["mobile"]) if "mobile" in options else defaults["mobile"],
         "model": options.get("model") or "",
         "platform": platform,
-        "platformVersion": options.get("platformVersion")
-        or get_platform_version(ua_string, parsed["chromeMajorInt"], platform),
+        "platformVersion": (
+            options["platformVersion"]
+            if "platformVersion" in options
+            else get_platform_version(ua_string, parsed["chromeMajorInt"], platform)
+        ),
         "uaFullVersion": brand_data["uaFullVersion"],
         "wow64": bool(options.get("wow64")),
         "brands": brand_data["brands"],

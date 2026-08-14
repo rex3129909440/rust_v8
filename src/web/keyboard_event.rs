@@ -17,6 +17,9 @@ pub(crate) struct KeyboardRecord {
     pub(crate) meta_key: bool,
     pub(crate) repeat: bool,
     pub(crate) is_composing: bool,
+    pub(crate) char_code: u32,
+    pub(crate) key_code: u32,
+    pub(crate) which: u32,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -155,9 +158,70 @@ pub(crate) fn construct(
                 meta_key,
                 repeat,
                 is_composing,
+                char_code: 0,
+                key_code: 0,
+                which: 0,
             },
         );
     result.set(arguments.this().into());
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_with_data<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event_type: &str,
+    key: String,
+    code: String,
+    location: u32,
+    ctrl_key: bool,
+    shift_key: bool,
+    alt_key: bool,
+    meta_key: bool,
+    repeat: bool,
+    char_code: u32,
+    key_code: u32,
+    which: u32,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let event = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, event, prototype.into()) != Some(true) {
+        return Err("cannot create KeyboardEvent".to_owned());
+    }
+    let view: v8::Local<v8::Value> = scope.get_current_context().global(scope).into();
+    super::ui_event::attach(
+        scope,
+        event,
+        event_type.to_owned(),
+        true,
+        true,
+        true,
+        Some(v8::Global::new(scope, view)),
+        0,
+        None,
+    );
+    scope
+        .get_slot_mut::<KeyboardEventStore>()
+        .ok_or_else(|| "KeyboardEvent state was not prepared".to_owned())?
+        .records
+        .insert(
+            event.get_identity_hash().get(),
+            KeyboardRecord {
+                key,
+                code,
+                location,
+                ctrl_key,
+                shift_key,
+                alt_key,
+                meta_key,
+                repeat,
+                is_composing: false,
+                char_code,
+                key_code,
+                which,
+            },
+        );
+    Ok(event)
 }
 
 pub(crate) fn record(
@@ -276,6 +340,30 @@ pub(crate) fn get_zero(
 ) {
     if record(scope, arguments.this()).is_some() {
         result.set(v8::Integer::new(scope, 0).into());
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
+}
+
+pub(crate) fn get_char_code(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if let Some(record) = record(scope, arguments.this()) {
+        result.set(v8::Integer::new_from_unsigned(scope, record.char_code).into());
+    } else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+    }
+}
+
+pub(crate) fn get_key_code(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if let Some(record) = record(scope, arguments.this()) {
+        result.set(v8::Integer::new_from_unsigned(scope, record.key_code).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }

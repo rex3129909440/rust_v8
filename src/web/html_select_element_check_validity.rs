@@ -12,9 +12,5 @@ fn check_validity(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(scope, a.this()) {
-        r.set(v8::Boolean::new(scope, x.disabled || !invalid(scope, a.this())).into())
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation")
-    }
+    super::html_select_element::check_validity(scope, a, r);
 }

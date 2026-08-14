@@ -169,14 +169,20 @@ fn delete_record_contents(
                 super::node::detach(scope, *child);
             }
         }
-        collapse_to_start(scope, range, record);
+        collapse_to(
+            scope,
+            range,
+            record.start_container.clone(),
+            record.start_offset,
+        );
         return;
     }
     let Some(common) = common_ancestor(scope, start, end) else {
         return;
     };
+    let (collapse_node, collapse_offset) = collapse_point(scope, record, common);
     delete_selected_descendants(scope, common, record);
-    collapse_to_start(scope, range, record);
+    collapse_to(scope, range, collapse_node, collapse_offset);
 }
 
 fn delete_selected_descendants(
@@ -232,19 +238,57 @@ fn delete_character_slice(
     );
 }
 
-fn collapse_to_start(
+fn collapse_to(
     scope: &mut v8::PinScope<'_, '_>,
     range: v8::Local<'_, v8::Object>,
-    record: &super::abstract_range::RangeRecord,
+    container: v8::Global<v8::Object>,
+    offset: u32,
 ) {
-    let start = record.start_container.clone();
-    let offset = record.start_offset;
     super::abstract_range::update(scope, range, |value| {
-        value.start_container = start.clone();
-        value.end_container = start;
+        value.start_container = container.clone();
+        value.end_container = container;
         value.start_offset = offset;
         value.end_offset = offset;
     });
+}
+
+fn collapse_point(
+    scope: &v8::PinScope<'_, '_>,
+    record: &super::abstract_range::RangeRecord,
+    common: v8::Local<'_, v8::Object>,
+) -> (v8::Global<v8::Object>, u32) {
+    let start = v8::Local::new(scope, &record.start_container);
+    let end = v8::Local::new(scope, &record.end_container);
+    if start.strict_equals(common.into()) || is_ancestor(scope, start, end) {
+        return (record.start_container.clone(), record.start_offset);
+    }
+    let mut reference = start;
+    while let Some(parent) = super::node::parent(scope, reference) {
+        if parent.strict_equals(common.into()) {
+            let offset = super::node::children(scope, common)
+                .iter()
+                .position(|child| child.strict_equals(reference.into()))
+                .map(|index| index as u32 + 1)
+                .unwrap_or(0);
+            return (v8::Global::new(scope, common), offset);
+        }
+        reference = parent;
+    }
+    (record.start_container.clone(), record.start_offset)
+}
+
+fn is_ancestor<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    ancestor: v8::Local<'s, v8::Object>,
+    mut node: v8::Local<'s, v8::Object>,
+) -> bool {
+    while let Some(parent) = super::node::parent(scope, node) {
+        if parent.strict_equals(ancestor.into()) {
+            return true;
+        }
+        node = parent;
+    }
+    false
 }
 
 fn relation_to_range(

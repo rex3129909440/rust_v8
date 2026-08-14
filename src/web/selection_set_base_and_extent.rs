@@ -9,6 +9,10 @@ fn set_base_and_extent(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if super::selection::record(scope, a.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(base) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(scope, "base must be a Node");
         return;
@@ -26,7 +30,19 @@ fn set_base_and_extent(
     if !super::selection::valid_offset(scope, base_local, bo)
         || !super::selection::valid_offset(scope, extent_local, eo)
     {
-        super::node::throw_dom_exception(scope, "IndexSizeError", "The offset is out of bounds");
+        let (node, offset) = if !super::selection::valid_offset(scope, base_local, bo) {
+            (base_local, bo)
+        } else {
+            (extent_local, eo)
+        };
+        let length = super::range::boundary_length(scope, node).unwrap_or(0);
+        super::node::throw_dom_exception(
+            scope,
+            "IndexSizeError",
+            &format!(
+                "Failed to execute 'setBaseAndExtent' on 'Selection': The offset {offset} is larger than the node's length ({length})."
+            ),
+        );
         return;
     }
     let direction = super::selection::direction_between(scope, base_local, bo, extent_local, eo);

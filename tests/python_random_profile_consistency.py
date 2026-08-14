@@ -105,7 +105,8 @@ class RandomProfileConsistencyTests(unittest.TestCase):
             ).profile.hardware_devices.device_posture
             for seed in range(500)
         }
-        self.assertEqual(android_postures, {"continuous", "folded"})
+        # A folded posture is emitted only with matching hinge/screen geometry.
+        self.assertEqual(android_postures, {"continuous"})
 
     def test_document_state_can_be_passed_to_standalone_evaluate_profile(self) -> None:
         profile = get_random_fp_details(

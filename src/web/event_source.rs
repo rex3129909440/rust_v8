@@ -97,17 +97,20 @@ pub(crate) fn construct(
         );
         return;
     }
-    let url = crate::webidl::value_to_string(scope, arguments.get(0));
-    if ::url::Url::parse(&url).is_err() {
-        if let Ok(exception) = super::dom_exception::create(
-            scope,
-            "The URL is invalid".to_owned(),
-            "SyntaxError".to_owned(),
-        ) {
-            scope.throw_exception(exception.into());
+    let input = crate::webidl::value_to_string(scope, arguments.get(0));
+    let url = match super::fetch_global::resolve_request_url(scope, &input) {
+        Ok(url) => url,
+        Err(_) => {
+            if let Ok(exception) = super::dom_exception::create(
+                scope,
+                "The URL is invalid".to_owned(),
+                "SyntaxError".to_owned(),
+            ) {
+                scope.throw_exception(exception.into());
+            }
+            return;
         }
-        return;
-    }
+    };
     let with_credentials = v8::Local::<v8::Object>::try_from(arguments.get(1))
         .ok()
         .is_some_and(|object| super::event::boolean_property(scope, object, "withCredentials"));

@@ -10,6 +10,7 @@ pub struct EdgeRuntimeOptions {
     pub network_replay: Vec<NetworkReplayEntry>,
     pub limits: SandboxLimits,
     pub page: Option<PageInit>,
+    pub cross_origin_isolated: bool,
     pub iframe_hooks: Vec<IframeHook>,
 }
 

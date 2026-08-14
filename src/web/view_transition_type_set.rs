@@ -155,9 +155,12 @@ fn has(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
     let value = crate::webidl::value_to_string(scope, arguments.get(0));
-    let exists = record(scope, arguments.this())
-        .is_some_and(|record| record.iter().any(|existing| existing == &value));
+    let exists = record.iter().any(|existing| existing == &value);
     result.set(v8::Boolean::new(scope, exists).into());
 }
 
@@ -240,15 +243,15 @@ fn for_each(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    let Some(record) = record(scope, arguments.this()) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "forEach callback must be callable");
         return;
     };
     let this_argument = arguments.get(1);
-    let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
-    };
     for value in record {
         if let Some(value) = v8::String::new(scope, &value) {
             let _ = callback.call(

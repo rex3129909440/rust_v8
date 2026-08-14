@@ -639,7 +639,9 @@ fn canvas_text_metrics_use_font_spacing_alignment_and_empty_text_ink_bounds() {
             fixed(empty.actualBoundingBoxRight),
             fixed(empty.actualBoundingBoxAscent),
             fixed(empty.actualBoundingBoxDescent),
-            fixed(empty.fontBoundingBoxAscent)
+            fixed(empty.fontBoundingBoxAscent),
+            Object.is(empty.actualBoundingBoxAscent, -0),
+            Object.is(baseline.alphabeticBaseline, -0)
           ].join("|");
         })()
         "#,
@@ -648,7 +650,7 @@ fn canvas_text_metrics_use_font_spacing_alignment_and_empty_text_ink_bounds() {
         answer,
         concat!(
             "22.844|20.000|17.000|23.060|19.050|5.905|5.725|",
-            "11.810|-0.180|0.000|0.000|0.000|0.000|0.000|12.000"
+            "11.810|-0.180|0.000|0.000|0.000|0.000|0.000|9.000|true|true"
         )
     );
 }
@@ -824,6 +826,40 @@ fn web_audio_profile_survives_native_trace_without_shape_drift() {
         trace
             .iter()
             .any(|entry| { entry.operation == "get" && entry.api.ends_with(".sampleRate") })
+    );
+}
+
+#[test]
+fn audio_output_timestamp_uses_the_complete_configured_output_path() {
+    let mut options = configured_options();
+    options.deterministic.clock_epoch_ms = Some(1_700_000_000_000);
+    options.deterministic.clock_step_ms = 0;
+    let mut runtime = EdgeRuntime::with_options(options).expect("configured audio clock runtime");
+    let _ = runtime
+        .evaluate(
+            r#"
+            globalThis.__audioOutputTimestampAudit = "pending";
+            const auditAudioContext = new AudioContext();
+            setTimeout(() => {
+              const timestamp = auditAudioContext.getOutputTimestamp();
+              const current = auditAudioContext.currentTime;
+              const now = performance.now();
+              __audioOutputTimestampAudit = [
+                current > timestamp.contextTime,
+                Math.abs(
+                  (current - timestamp.contextTime) -
+                  (auditAudioContext.baseLatency + auditAudioContext.outputLatency)
+                ) < 1e-12,
+                timestamp.performanceTime <= now,
+                now - timestamp.performanceTime < 0.001
+              ].join("|");
+            }, 100);
+            "#,
+        )
+        .expect("schedule configured audio timestamp audit");
+    assert_eq!(
+        text(&mut runtime, "__audioOutputTimestampAudit"),
+        "true|true|true|true"
     );
 }
 

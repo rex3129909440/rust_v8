@@ -90,11 +90,17 @@ fn construct(
         return;
     }
     let Ok(stream) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The supplied value is not a ReadableStream");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ReadableStreamBYOBReader': parameter 1 is not of type 'ReadableStream'.",
+        );
         return;
     };
     let Some(record) = super::readable_stream::record(scope, stream) else {
-        crate::webidl::throw_type_error(scope, "The supplied value is not a ReadableStream");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ReadableStreamBYOBReader': parameter 1 is not of type 'ReadableStream'.",
+        );
         return;
     };
     if !record.byte_stream || record.locked {
@@ -127,9 +133,25 @@ fn read(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(Some(stream)) = stream(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Reader has no stream");
-        return;
+    let stream = match stream(scope, arguments.this()) {
+        None => {
+            crate::webidl::reject_illegal_invocation_promise(
+                scope,
+                "ReadableStreamBYOBReader",
+                "read",
+                result,
+            );
+            return;
+        }
+        Some(None) => {
+            if let Some(promise) =
+                crate::webidl::rejected_type_error_promise(scope, "Reader has no stream")
+            {
+                result.set(promise.into());
+            }
+            return;
+        }
+        Some(Some(stream)) => stream,
     };
     let Ok(view) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "read requires an ArrayBufferView");
@@ -188,7 +210,12 @@ fn get_closed(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(current) = stream(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        if let Some(promise) = crate::webidl::rejected_type_error_promise(
+            scope,
+            "Failed to read the 'closed' property from 'ReadableStreamBYOBReader': Illegal invocation",
+        ) {
+            result.set(promise.into());
+        }
         return;
     };
     let value = v8::undefined(scope);
@@ -207,9 +234,25 @@ fn cancel(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    let Some(Some(stream)) = stream(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Reader has no stream");
-        return;
+    let stream = match stream(scope, arguments.this()) {
+        None => {
+            crate::webidl::reject_illegal_invocation_promise(
+                scope,
+                "ReadableStreamBYOBReader",
+                "cancel",
+                result,
+            );
+            return;
+        }
+        Some(None) => {
+            if let Some(promise) =
+                crate::webidl::rejected_type_error_promise(scope, "Reader has no stream")
+            {
+                result.set(promise.into());
+            }
+            return;
+        }
+        Some(Some(stream)) => stream,
     };
     let stream = v8::Local::new(scope, &stream);
     super::readable_stream::close(scope, stream);

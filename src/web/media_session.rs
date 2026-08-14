@@ -176,6 +176,10 @@ fn set_playback_state(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let value = crate::webidl::value_to_string(s, a.get(0));
     if !matches!(value.as_str(), "none" | "paused" | "playing") {
         crate::webidl::throw_type_error(s, "Invalid MediaSessionPlaybackState");
@@ -258,6 +262,10 @@ fn set_position_state(
     a: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if a.length() == 0 || a.get(0).is_undefined() {
         let _ = update(s, a.this(), |x| x.duration = None);
         return;

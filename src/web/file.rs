@@ -77,23 +77,28 @@ fn construct(
         crate::webidl::throw_type_error(scope, "Failed to construct 'File': 2 arguments required");
         return;
     }
-    let Ok(parts) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
+    if !arguments.get(0).is_object() {
         crate::webidl::throw_type_error(
             scope,
-            "The provided value cannot be converted to a sequence",
+            "Failed to construct 'File': The provided value cannot be converted to a sequence.",
         );
         return;
+    }
+    let parts = match crate::webidl::sequence_values(scope, arguments.get(0)) {
+        Ok(parts) => parts,
+        Err(_) => {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'File': The object must have a callable @@iterator property.",
+            );
+            return;
+        }
     };
     let mut bytes = Vec::new();
-    let length = property(scope, parts, "length")
-        .and_then(|value| value.uint32_value(scope))
-        .unwrap_or(0);
-    for index in 0..length {
-        if let Some(part) = parts.get_index(scope, index) {
-            append_part(scope, part, &mut bytes);
-        }
+    for part in parts {
+        append_part(scope, v8::Local::new(scope, &part), &mut bytes);
     }
-    let name = crate::webidl::value_to_string(scope, arguments.get(1)).replace('/', ":");
+    let name = crate::webidl::value_to_string(scope, arguments.get(1));
     let options = v8::Local::<v8::Object>::try_from(arguments.get(2)).ok();
     let media_type = options
         .and_then(|object| property(scope, object, "type"))
@@ -104,6 +109,7 @@ fn construct(
         .and_then(|object| property(scope, object, "lastModified"))
         .filter(|value| !value.is_undefined())
         .and_then(|value| value.number_value(scope))
+        .map(webidl_long_long)
         .unwrap_or_else(|| crate::determinism::date_epoch_milliseconds(scope));
     attach(
         scope,
@@ -183,12 +189,30 @@ pub(crate) fn create<'s>(
         bytes,
         media_type.to_ascii_lowercase(),
         FileRecord {
-            name: name.replace('/', ":"),
-            last_modified,
+            name: name.to_owned(),
+            last_modified: webidl_long_long(last_modified),
             webkit_relative_path: String::new(),
         },
     );
     Ok(file)
+}
+
+fn webidl_long_long(value: f64) -> f64 {
+    if !value.is_finite() || value == 0.0 {
+        return 0.0;
+    }
+    const TWO_TO_63: f64 = 9_223_372_036_854_775_808.0;
+    const TWO_TO_64: f64 = 18_446_744_073_709_551_616.0;
+    let value = value.trunc();
+    if (-TWO_TO_63..TWO_TO_63).contains(&value) {
+        return value;
+    }
+    let value = value.rem_euclid(TWO_TO_64);
+    if value >= TWO_TO_63 {
+        value - TWO_TO_64
+    } else {
+        value
+    }
 }
 
 fn property<'s>(

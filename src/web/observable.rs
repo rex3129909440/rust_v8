@@ -112,7 +112,10 @@ fn construct(
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "The subscriber callback must be a function");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'Observable': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     let callback = v8::Global::new(scope, callback);
@@ -633,6 +636,10 @@ fn catch_op(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if source(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if let Some(f) = required_callback(s, a.get(0), "catch") {
         operation(s, a.this(), ObservableOperation::Catch(f), r)
     }
@@ -642,6 +649,10 @@ fn filter_op(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if source(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if let Some(f) = required_callback(s, a.get(0), "filter") {
         operation(s, a.this(), ObservableOperation::Filter(f), r)
     }
@@ -651,6 +662,10 @@ fn finally_op(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if source(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if let Some(f) = required_callback(s, a.get(0), "finally") {
         operation(s, a.this(), ObservableOperation::Finally(f), r)
     }
@@ -660,6 +675,10 @@ fn flat_map(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if source(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if let Some(f) = required_callback(s, a.get(0), "flatMap") {
         operation(s, a.this(), ObservableOperation::FlatMap(f), r)
     }
@@ -669,6 +688,10 @@ fn map_op(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if source(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if let Some(f) = required_callback(s, a.get(0), "map") {
         operation(s, a.this(), ObservableOperation::Map(f), r)
     }
@@ -678,6 +701,10 @@ fn switch_map(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if source(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if let Some(f) = required_callback(s, a.get(0), "switchMap") {
         operation(s, a.this(), ObservableOperation::SwitchMap(f), r)
     }
@@ -713,6 +740,10 @@ fn take_until(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if source(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     let Ok(notifier) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
         crate::webidl::throw_type_error(s, "takeUntil requires an Observable");
         return;
@@ -758,6 +789,19 @@ fn rejected(
         result.set(promise.into())
     }
 }
+fn ensure_promise_receiver(
+    scope: &mut v8::PinScope<'_, '_>,
+    this: v8::Local<'_, v8::Object>,
+    method_name: &str,
+    result: v8::ReturnValue<'_>,
+) -> bool {
+    if source(scope, this).is_some() {
+        true
+    } else {
+        crate::webidl::reject_illegal_invocation_promise(scope, "Observable", method_name, result);
+        false
+    }
+}
 fn predicate_result(
     scope: &mut v8::PinScope<'_, '_>,
     callback: &v8::Global<v8::Function>,
@@ -774,6 +818,9 @@ fn first(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "first", r) {
+        return;
+    }
     let Some(c) = collected_or_throw(scope, a.this()) else {
         return;
     };
@@ -789,6 +836,9 @@ fn last(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "last", r) {
+        return;
+    }
     let Some(c) = collected_or_throw(scope, a.this()) else {
         return;
     };
@@ -804,6 +854,9 @@ fn find(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "find", r) {
+        return;
+    }
     let Some(callback) = required_callback(scope, a.get(0), "find") else {
         return;
     };
@@ -825,6 +878,9 @@ fn every(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "every", r) {
+        return;
+    }
     let Some(callback) = required_callback(scope, a.get(0), "every") else {
         return;
     };
@@ -843,6 +899,9 @@ fn some(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "some", r) {
+        return;
+    }
     let Some(callback) = required_callback(scope, a.get(0), "some") else {
         return;
     };
@@ -861,6 +920,9 @@ fn reduce(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "reduce", r) {
+        return;
+    }
     let Some(callback) = required_callback(scope, a.get(0), "reduce") else {
         return;
     };
@@ -895,6 +957,9 @@ fn to_array(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "toArray", r) {
+        return;
+    }
     let Some(c) = collected_or_throw(scope, a.this()) else {
         return;
     };
@@ -909,6 +974,9 @@ fn for_each(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if !ensure_promise_receiver(scope, a.this(), "forEach", r) {
+        return;
+    }
     let Some(callback) = required_callback(scope, a.get(0), "forEach") else {
         return;
     };

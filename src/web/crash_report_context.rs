@@ -93,6 +93,22 @@ fn initialize(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<CrashReportContextStore>()
+        .is_none_or(|store| {
+            !store
+                .records
+                .contains_key(&arguments.this().get_identity_hash().get())
+        })
+    {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "CrashReportContext",
+            "initialize",
+            result,
+        );
+        return;
+    }
     if arguments.length() < 1 {
         crate::webidl::throw_type_error(
             scope,
@@ -119,9 +135,6 @@ fn initialize(
         record.product_name = product_name;
         record.company_name = company_name;
         record.submit_url = submit_url;
-    } else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
-        return;
     }
     if let Ok(promise) =
         super::writable_stream::resolved_promise(scope, v8::undefined(scope).into())

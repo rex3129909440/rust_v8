@@ -316,7 +316,7 @@ fn edge_150_complete_legacy_and_mozilla_color_matrix_is_exact() {
         assert_eq!(fields[3], "rgb(0, 0, 0)", "initial computed color: {row}");
         assert!(fields[4].is_empty(), "unsupported property lookup: {row}");
     }
-    assert_eq!(rows[72], "rgb(0, 0, 0)~rgb(0, 0, 0)");
+    assert_eq!(rows[72], "rgb(0, 0, 0)~");
 }
 
 #[test]
@@ -1165,7 +1165,7 @@ fn range_content_operations_preserve_partial_dom_structure() {
     );
     assert_eq!(
         result,
-        "<p>b<b>cd</b>ef</p><i>g</i>|<p>b<b>cd</b>ef</p><i>g</i>|<p>a</p><i>h</i>|true,true,1,true,1|<p>a</p><i>h</i>|0"
+        "<p>b<b>cd</b>ef</p><i>g</i>|<p>b<b>cd</b>ef</p><i>g</i>|<p>a</p><i>h</i>|true,false,1,false,1|<p>a</p><i>h</i>|0"
     );
 }
 
@@ -2260,6 +2260,113 @@ fn traversal_filters_skip_reject_and_follow_live_tree_mutations() {
 }
 
 #[test]
+fn edge150_tree_traversal_live_filter_and_cursor_algorithms_match() {
+    const SETUP: &str = r##"
+      (() => {
+        const makeTree = () => {
+          const root = document.createElement("div");
+          root.id = "root";
+          root.innerHTML =
+            '<section id="a"><i id="a1">x</i><b id="a2"></b></section>' +
+            '<section id="b"><u id="b1"></u></section>';
+          return root;
+        };
+        const label = node => node === null ? "null" :
+          node.nodeName + (node.id ? "#" + node.id : "");
+
+        const root = makeTree();
+        const calls = [];
+        const walker = document.createTreeWalker(
+          root,
+          NodeFilter.SHOW_ELEMENT,
+          { acceptNode(node) { calls.push(label(node)); return 1; } }
+        );
+        const forward = [label(walker.nextNode()), label(walker.nextNode())];
+        const afterForward = calls.splice(0).join(",");
+        const previous = label(walker.previousNode());
+        const afterPrevious = calls.splice(0).join(",");
+
+        const removedRoot = makeTree();
+        const removedWalker = document.createTreeWalker(
+          removedRoot, NodeFilter.SHOW_ELEMENT
+        );
+        removedWalker.currentNode = removedRoot.querySelector("#a1");
+        removedRoot.firstElementChild.remove();
+        const removed = [
+          label(removedWalker.currentNode),
+          label(removedWalker.nextNode()),
+          label(removedWalker.parentNode())
+        ].join(",");
+
+        const iteratorRoot = makeTree();
+        let inserted = false;
+        const iteratorCalls = [];
+        const iterator = document.createNodeIterator(
+          iteratorRoot,
+          NodeFilter.SHOW_ELEMENT,
+          {
+            acceptNode(node) {
+              iteratorCalls.push(label(node));
+              if (!inserted && node === iteratorRoot) {
+                inserted = true;
+                const aside = document.createElement("aside");
+                aside.id = "during-filter";
+                iteratorRoot.prepend(aside);
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+        const liveInsert = [
+          label(iterator.nextNode()),
+          iteratorCalls.join(","),
+          label(iterator.referenceNode),
+          iterator.pointerBeforeReferenceNode
+        ].join(",");
+
+        const conversionRoot = makeTree();
+        const converted = document.createNodeIterator(
+          conversionRoot,
+          NodeFilter.SHOW_ELEMENT,
+          { acceptNode() { return { valueOf() { return 65537; } }; } }
+        ).nextNode();
+        let conversionError = "";
+        try {
+          document.createTreeWalker(
+            conversionRoot,
+            NodeFilter.SHOW_ELEMENT,
+            { acceptNode() { return { valueOf() { throw new RangeError("status conversion"); } }; } }
+          ).nextNode();
+        } catch (error) {
+          conversionError = error.name + ":" + error.message;
+        }
+
+        return [
+          forward.join(","), afterForward,
+          previous, afterPrevious,
+          removed, liveInsert,
+          label(converted), conversionError
+        ].join("|");
+      })()
+    "##;
+    const EXPECTED: &str = concat!(
+        "SECTION#a,I#a1|SECTION#a,I#a1|SECTION#a|SECTION#a|",
+        "I#a1,B#a2,SECTION#a|",
+        "ASIDE#during-filter,DIV#root,ASIDE#during-filter,ASIDE#during-filter,false|",
+        "DIV#root|RangeError:Failed to execute 'acceptNode' on 'NodeFilter': status conversion"
+    );
+
+    let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
+    assert_eq!(text(&mut direct, SETUP), EXPECTED);
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    let actual = text(&mut traced, SETUP);
+    assert_eq!(actual, EXPECTED, "{:#?}", traced.proxy_trace());
+}
+
+#[test]
 fn shadow_slots_assign_light_dom_nodes_and_expose_assigned_slot_relationships() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     let result = text(
@@ -2304,6 +2411,58 @@ fn shadow_slots_assign_light_dom_nodes_and_expose_assigned_slot_relationships() 
         "##,
     );
     assert_eq!(result, "true|true|true|true|true|true|true|true|true");
+}
+
+#[test]
+fn edge150_shadow_slotting_manual_assignment_events_and_serialization_match() {
+    let source = r##"
+      (async () => {
+        const host = document.createElement('div');
+        const a = document.createElement('i'); a.id = 'a';
+        const b = document.createElement('b'); b.id = 'b';
+        const textNode = document.createTextNode('t');
+        host.append(a, b, textNode);
+        const root = host.attachShadow({mode:'open', slotAssignment:'manual',
+          serializable:true, clonable:true, delegatesFocus:true});
+        root.innerHTML = '<slot id="one"></slot><slot id="two"></slot>';
+        const one = root.querySelector('#one'), two = root.querySelector('#two');
+        const events = [];
+        one.addEventListener('slotchange', event => events.push([
+          event.bubbles, event.cancelable, event.composed, event.isTrusted
+        ]));
+        one.assign(b, a, b, textNode);
+        two.assign(a);
+        const assignments = [
+          Array.from(one.assignedNodes(), node => node.id || '#text'),
+          Array.from(two.assignedNodes(), node => node.id || '#text'),
+          a.assignedSlot === two, b.assignedSlot === one, textNode.assignedSlot === one
+        ];
+        const immediate = events.length;
+        await Promise.resolve();
+        const serialized = host.getHTML({serializableShadowRoots:true});
+
+        const namedHost = document.createElement('div');
+        const namedChild = document.createElement('i'); namedChild.id = 'named';
+        namedHost.append(namedChild);
+        const namedRoot = namedHost.attachShadow({mode:'open'});
+        namedRoot.innerHTML = '<slot id="first"></slot><slot id="second"></slot>';
+        namedRoot.querySelector('#first').assign(namedChild);
+        const named = [
+          Array.from(namedRoot.querySelector('#first').assignedNodes(), node => node.id),
+          namedRoot.querySelector('#second').assignedNodes().length,
+          namedChild.assignedSlot === namedRoot.querySelector('#first')
+        ];
+        return JSON.stringify({assignments, immediate, events, serialized, named});
+      })()
+    "##;
+    let expected = r####"{"assignments":[["b","#text"],["a"],true,true,true],"immediate":0,"events":[[true,false,false,true]],"serialized":"<template shadowrootmode=\"open\" shadowrootdelegatesfocus=\"\" shadowrootserializable=\"\" shadowrootclonable=\"\"><slot id=\"one\"></slot><slot id=\"two\"></slot></template><i id=\"a\"></i><b id=\"b\"></b>t","named":[["named"],0,true]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct shadow slotting runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced shadow slotting runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
 }
 
 #[test]
@@ -2394,8 +2553,9 @@ fn document_core_properties_are_tree_backed_and_keep_browser_interface_shapes() 
             children instanceof HTMLCollection,
             document.implementation instanceof DOMImplementation,
             document.styleSheets instanceof StyleSheetList,
-            fonts.constructor.name === "FontFaceSet" &&
-              typeof FontFaceSet === "undefined",
+            fonts.constructor === EventTarget &&
+              typeof FontFaceSet === "undefined" &&
+              !Object.hasOwn(Object.getPrototypeOf(fonts), "constructor"),
             fonts.ready instanceof Promise,
             fonts.status,
             fontAdded,
@@ -2585,6 +2745,355 @@ fn live_ranges_track_tree_character_data_split_and_normalize_mutations() {
 }
 
 #[test]
+fn edge150_character_data_normalize_and_childnode_algorithms_match() {
+    const SETUP: &str = r##"
+      (() => {
+        const text = new Text("abcdef");
+        const editRange = document.createRange();
+        editRange.setStart(text, 2); editRange.setEnd(text, 5);
+        text.replaceData(1, 3, "X");
+        const edit = text.data === "aXef" &&
+          editRange.startOffset === 1 && editRange.endOffset === 3 &&
+          editRange.toString() === "Xe";
+
+        const splitHost = document.createElement("div");
+        const splitText = new Text("abcdef"); splitHost.append(splitText);
+        const splitParent = document.createRange();
+        splitParent.setStart(splitHost, 0); splitParent.setEnd(splitHost, 1);
+        splitText.splitText(3);
+        const split = splitParent.endContainer === splitHost &&
+          splitParent.endOffset === 2;
+
+        const normalizeHost = document.createElement("div");
+        const left = new Text("ab"), empty = new Text(""), right = new Text("cd");
+        normalizeHost.append(left, empty, right);
+        const normalizeRange = document.createRange();
+        normalizeRange.setStart(normalizeHost, 1);
+        normalizeRange.setEnd(normalizeHost, 3);
+        normalizeHost.normalize();
+        const normalized = normalizeHost.childNodes.length === 1 &&
+          normalizeRange.startContainer === left &&
+          normalizeRange.startOffset === 2 &&
+          normalizeRange.endContainer === normalizeHost &&
+          normalizeRange.endOffset === 1 &&
+          normalizeRange.toString() === "cd";
+
+        const host = document.createElement("div");
+        const a = new Text("a"), b = new Text("b"), c = new Text("c");
+        host.append(a, b, c);
+        const observer = new MutationObserver(() => {});
+        observer.observe(host, { childList: true });
+        b.after(b, a);
+        const records = observer.takeRecords();
+        const moved = host.textContent === "bac" && records.length === 3 &&
+          records[0].removedNodes[0] === b &&
+          records[1].removedNodes[0] === a &&
+          records[2].addedNodes.length === 2 &&
+          records[2].addedNodes[0] === b && records[2].addedNodes[1] === a &&
+          records[2].previousSibling === null && records[2].nextSibling === c;
+
+        const detached = document.createElement("div");
+        detached.textContent = "xy";
+        const detachedRange = document.createRange();
+        detachedRange.selectNodeContents(detached);
+        const selection = getSelection(); selection.removeAllRanges();
+        selection.addRange(detachedRange);
+        const detachedIgnored = selection.rangeCount === 0;
+
+        let conversion = "";
+        try { new Text("x").before(Symbol("value")); }
+        catch (error) { conversion = error.name + ":" + error.message; }
+        const conversionExact = conversion ===
+          "TypeError:Failed to execute 'before' on 'CharacterData': Cannot convert a Symbol value to a string";
+
+        return [edit, split, normalized, moved, detachedIgnored, conversionExact].join("|");
+      })()
+    "##;
+    const EXPECTED: &str = "true|true|true|true|true|true";
+
+    let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
+    assert_eq!(text(&mut direct, SETUP), EXPECTED);
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    let actual = text(&mut traced, SETUP);
+    assert_eq!(actual, EXPECTED, "{:#?}", traced.proxy_trace());
+}
+
+#[test]
+fn edge150_node_clone_import_adopt_and_owner_document_algorithms_match() {
+    const SETUP: &str = r##"
+      (() => {
+        const input = document.createElement("input");
+        input.defaultValue = "default"; input.value = "live";
+        input.defaultChecked = true; input.checked = false; input.indeterminate = true;
+        input.setSelectionRange(1, 3, "backward");
+        const inputClone = input.cloneNode(true);
+        const formState = inputClone.value === "live" &&
+          inputClone.defaultValue === "default" &&
+          inputClone.checked === false && inputClone.defaultChecked === true &&
+          inputClone.indeterminate === true &&
+          inputClone.selectionStart === 0 && inputClone.selectionEnd === 0 &&
+          inputClone.selectionDirection === "forward";
+
+        const doctype = document.implementation.createDocumentType("root", "p", "s");
+        const doctypeClone = doctype.cloneNode();
+        const doctypeState = doctype.ownerDocument === document &&
+          doctypeClone.ownerDocument === document && doctypeClone.name === "root" &&
+          doctypeClone.publicId === "p" && doctypeClone.systemId === "s";
+
+        const xml = new Document(); const root = xml.createElement("r");
+        root.append(xml.createTextNode("x")); xml.append(root);
+        const xmlClone = xml.cloneNode(true);
+        const documentState = Object.prototype.toString.call(xmlClone) === "[object Document]" &&
+          xmlClone.URL === "about:blank" && xmlClone.documentElement.outerHTML === "<r>x</r>" &&
+          xmlClone.documentElement.ownerDocument === xmlClone && xmlClone.ownerDocument === null;
+
+        const shadowHost = document.createElement("div");
+        shadowHost.attachShadow({ mode: "open", clonable: true, serializable: true }).innerHTML = "<b>x</b>";
+        const shadowClone = shadowHost.cloneNode(false);
+        const shadowState = shadowClone.shadowRoot.innerHTML === "<b>x</b>" &&
+          shadowClone.shadowRoot !== shadowHost.shadowRoot && shadowClone.shadowRoot.clonable &&
+          shadowClone.shadowRoot.serializable;
+
+        const other = document.implementation.createHTMLDocument("other");
+        const adoptedHost = other.createElement("div");
+        const adoptedRoot = adoptedHost.attachShadow({ mode: "open" });
+        adoptedRoot.innerHTML = "<i>x</i>"; document.adoptNode(adoptedHost);
+        const adoptedShadow = adoptedHost.ownerDocument === document &&
+          adoptedRoot.ownerDocument === document && adoptedRoot.firstChild.ownerDocument === document;
+
+        const owner = other.createElement("p"); owner.setAttribute("x", "1");
+        const attribute = owner.getAttributeNode("x"); document.adoptNode(attribute);
+        const attributeState = attribute.ownerElement === null && !owner.hasAttribute("x") &&
+          attribute.ownerDocument === document;
+
+        const canvas = document.createElement("canvas"); canvas.width = 2; canvas.height = 1;
+        canvas.getContext("2d").fillRect(0, 0, 1, 1);
+        const canvasClone = canvas.cloneNode(true);
+        const canvasState = canvasClone.width === 2 && canvasClone.height === 1 &&
+          canvasClone.getContext("2d").getImageData(0, 0, 1, 1).data[3] === 0;
+
+        delete window.__cloneContentHandler;
+        const button = document.createElement("button");
+        button.setAttribute("onclick", "window.__cloneContentHandler = (window.__cloneContentHandler || 0) + 1");
+        const buttonClone = button.cloneNode(); buttonClone.click();
+        const handlerState = typeof button.onclick === "function" && buttonClone.onclick === null &&
+          window.__cloneContentHandler === 1;
+        delete window.__cloneContentHandler;
+
+        return [formState, doctypeState, documentState, shadowState, adoptedShadow,
+          attributeState, canvasState, handlerState].join("|");
+      })()
+    "##;
+    const EXPECTED: &str = "true|true|true|true|true|true|true|true";
+
+    let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
+    assert_eq!(text(&mut direct, SETUP), EXPECTED);
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    let actual = text(&mut traced, SETUP);
+    assert_eq!(actual, EXPECTED, "{:#?}", traced.proxy_trace());
+}
+
+#[test]
+fn edge150_document_parsing_serialization_factories_and_namespaces_match() {
+    const SETUP: &str = r##"
+      (() => {
+        const parser = new DOMParser();
+        const parsed = parser.parseFromString(
+          '<!DOCTYPE r PUBLIC "pub" "sys"><r xmlns:p="urn:p" a="&amp;&quot;">&lt;&#65;&#x42;&gt;<p:c/></r>',
+          "application/xml"
+        );
+        const parserState = parsed.URL === "about:blank" &&
+          parsed.doctype.name === "r" && parsed.doctype.publicId === "pub" &&
+          parsed.doctype.systemId === "sys" && parsed.documentElement.getAttribute("a") === '&"' &&
+          parsed.documentElement.textContent === "<AB>";
+
+        const malformed = parser.parseFromString("<a/><b/>", "application/xml");
+        const parserError = malformed.documentElement.nodeName === "a" &&
+          malformed.getElementsByTagName("parsererror").length === 1 &&
+          malformed.documentElement.textContent.includes("error");
+
+        const xml = document.implementation.createDocument("urn:r", "p:r");
+        const plain = xml.createElementNS("urn:r", "plain"); xml.documentElement.append(plain);
+        const attr = xml.createAttributeNS("urn:a", "a:x"); attr.value = '"<&';
+        const serializer = new XMLSerializer();
+        const serializerState = serializer.serializeToString(xml) ===
+          '<p:r xmlns:p="urn:r"><p:plain/></p:r>' &&
+          serializer.serializeToString(attr) === "&quot;&lt;&amp;";
+
+        const detached = new Document();
+        const colon = detached.createElement("a:b");
+        const multi = detached.createElementNS("urn:x", "a:b:c");
+        const mixedHtml = detached.createElementNS("http://www.w3.org/1999/xhtml", "DiV");
+        const factoryState = colon.prefix === null && colon.localName === "a:b" &&
+          multi.nodeName === "a:b" && multi.prefix === "a" && multi.localName === "b" &&
+          mixedHtml instanceof HTMLUnknownElement && mixedHtml.localName === "DiV";
+
+        let arity = "", namespace = "", cdata = "";
+        try { document.createElement(); } catch (error) { arity = error.name + ":" + error.message; }
+        try { document.createElementNS(null, "p:x"); } catch (error) { namespace = error.name + ":" + error.message; }
+        try { document.createCDATASection("x"); } catch (error) { cdata = error.name + ":" + error.message; }
+        const errors = arity === "TypeError:Failed to execute 'createElement' on 'Document': 1 argument required, but only 0 present." &&
+          namespace === "NamespaceError:Failed to execute 'createElementNS' on 'Document': The namespace URI provided ('') is not valid for the qualified name provided ('p:x')." &&
+          cdata === "NotSupportedError:Failed to execute 'createCDATASection' on 'Document': This operation is not supported for HTML documents.";
+
+        const implementationDoctype = document.implementation.createDocumentType("x", "p", "s");
+        const implementationDocument = document.implementation.createDocument(null, "x", implementationDoctype);
+        const implementationState = implementationDocument.URL === "about:blank" &&
+          implementationDoctype.ownerDocument === implementationDocument &&
+          implementationDocument.firstChild === implementationDoctype;
+
+        const namespaced = parser.parseFromString('<r xmlns="u0"><a xmlns=""/></r>', "application/xml").documentElement.firstElementChild;
+        const namespaceState = namespaced.isDefaultNamespace("") &&
+          document.documentElement.lookupNamespaceURI(undefined) === "http://www.w3.org/1999/xhtml";
+
+        return [parserState, parserError, serializerState, factoryState, errors,
+          implementationState, namespaceState].join("|");
+      })()
+    "##;
+    const EXPECTED: &str = "true|true|true|true|true|true|true";
+
+    let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
+    assert_eq!(text(&mut direct, SETUP), EXPECTED);
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    let actual = text(&mut traced, SETUP);
+    assert_eq!(actual, EXPECTED, "{:#?}", traced.proxy_trace());
+}
+
+#[test]
+fn edge150_dom_collections_exotic_named_and_mutation_algorithms_match() {
+    const SETUP: &str = r##"
+      (() => {
+        const errorOf = callback => {
+          try { callback(); return "return"; }
+          catch (error) { return error.name + ":" + error.message; }
+        };
+
+        const host = document.createElement("div");
+        host.innerHTML = '<i name="q"></i><b id="q"></b><u id="q"></u>';
+        const collection = host.children;
+        const collectionState = collection.namedItem("q") === host.children[1] &&
+          collection.q === host.children[1] &&
+          host.getElementsByTagName("i") === host.getElementsByTagName("i") &&
+          host.getElementsByTagName("i") !== host.getElementsByTagName("I") &&
+          host.getElementsByClassName("x y") !== host.getElementsByClassName(" x  y ");
+
+        const arityState =
+          errorOf(() => host.childNodes.item()) ===
+            "TypeError:Failed to execute 'item' on 'NodeList': 1 argument required, but only 0 present." &&
+          errorOf(() => collection.item()) ===
+            "TypeError:Failed to execute 'item' on 'HTMLCollection': 1 argument required, but only 0 present." &&
+          errorOf(() => host.attributes.item()) ===
+            "TypeError:Failed to execute 'item' on 'NamedNodeMap': 1 argument required, but only 0 present.";
+
+        const tokenElement = document.createElement("div");
+        tokenElement.classList.value = " a  b a ";
+        tokenElement.classList.add("a\u00a0b");
+        const tokenState = tokenElement.classList.value === "a b a\u00a0b" &&
+          Array.from(tokenElement.classList).join("|") === "a|b|a\u00a0b" &&
+          document.createElement("a").relList.supports("NOOPENER");
+
+        const dataElement = document.createElement("div");
+        dataElement.dataset["ä"] = "1";
+        dataElement.dataset["foo-Bar"] = "2";
+        const datasetState = dataElement.getAttribute("data-ä") === "1" &&
+          dataElement.getAttribute("data-foo--bar") === "2" &&
+          errorOf(() => { dataElement.dataset["-x"] = "3"; }) ===
+            "SyntaxError:Failed to set a named property '-x' on 'DOMStringMap': '-x' is not a valid property name.";
+
+        const form = document.createElement("form");
+        form.innerHTML = '<input name="x"><input name="x">';
+        const formState = form.elements.x instanceof RadioNodeList &&
+          form.elements.x === form.elements.x &&
+          form.elements.namedItem("x") === form.elements.namedItem("x");
+
+        const select = document.createElement("select");
+        select.innerHTML = '<option>a</option><optgroup><option>b</option></optgroup>';
+        const inserted = new Option("c", "c"); select.options.add(inserted, 1);
+        const gap = new Option("g", "g"); select.options[4] = gap;
+        const optionsState = inserted.parentNode.nodeName === "OPTGROUP" &&
+          Array.from(select.options, option => option.text).join("|") === "a|c|b||g" &&
+          select.options[4] === gap;
+
+        const allHost = document.createElement("div");
+        allHost.innerHTML = '<i name="ignored"></i><img name="accepted"><b id="preferred"></b>';
+        document.body.append(allHost); const all = document.all;
+        const allState = all.namedItem("ignored") === null &&
+          all.namedItem("accepted") === allHost.children[1] &&
+          all.namedItem("preferred") === allHost.children[2] &&
+          all.item() === null;
+        allHost.remove();
+
+        return [collectionState, arityState, tokenState, datasetState,
+          formState, optionsState, allState].join("|");
+      })()
+    "##;
+    const EXPECTED: &str = "true|true|true|true|true|true|true";
+
+    let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
+    assert_eq!(text(&mut direct, SETUP), EXPECTED);
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    let actual = text(&mut traced, SETUP);
+    assert_eq!(actual, EXPECTED, "{:#?}", traced.proxy_trace());
+}
+
+#[test]
+fn edge150_selectors_scope_state_escape_and_logical_algorithms_match() {
+    const SETUP: &str = r##"
+      (() => {
+        const host = document.createElement("section");
+        host.innerHTML = '<i id="a" class="x"></i><b id="b"></b><i id="c" class="x"></i>';
+        const core = Array.from(host.querySelectorAll(":scope > i"), node => node.id).join("") === "ac" &&
+          host.querySelector(":scope") === null &&
+          Array.from(host.querySelectorAll(":nth-child(2 of .x)"), node => node.id).join("") === "c" &&
+          Array.from(host.querySelectorAll(":is(i, :unsupported, b)"), node => node.id).join("") === "abc";
+
+        const escaped = document.createElement("i"); escaped.id = "a:b"; escaped.className = "1x"; host.append(escaped);
+        const escapes = host.querySelector("#a\\:b") === escaped && host.querySelector(".\\31 x") === escaped;
+
+        const states = document.createElement("div");
+        states.innerHTML = '<fieldset disabled><legend><input id="legend"></legend><input id="field"></fieldset>' +
+          '<select><optgroup disabled><option id="option">x</option></optgroup></select>' +
+          '<input id="required" required><input id="readonly" readonly>';
+        const state = states.querySelector("#legend").matches(":enabled") &&
+          states.querySelector("#field").matches(":disabled") &&
+          states.querySelector("#option").matches(":disabled") &&
+          states.querySelector("#required").matches(":required") &&
+          states.querySelector("#readonly").matches(":read-only");
+
+        const xml = new DOMParser().parseFromString('<r><Item id="u"/><item id="l"/></r>', "application/xml");
+        const xmlCase = xml.querySelectorAll("Item").length === 1 &&
+          xml.querySelectorAll("ITEM").length === 0;
+
+        const pseudo = host.querySelectorAll("i::before").length === 0 && !host.firstChild.matches("::before");
+        let arity = "", invalid = "";
+        try { host.querySelector(); } catch (error) { arity = error.name + ":" + error.message; }
+        try { host.matches(":unsupported"); } catch (error) { invalid = error.name + ":" + error.message; }
+        const errors = arity === "TypeError:Failed to execute 'querySelector' on 'Element': 1 argument required, but only 0 present." &&
+          invalid === "SyntaxError:Failed to execute 'matches' on 'Element': ':unsupported' is not a valid selector.";
+
+        return [core, escapes, state, xmlCase, pseudo, errors].join("|");
+      })()
+    "##;
+    const EXPECTED: &str = "true|true|true|true|true|true";
+
+    let mut direct = EdgeRuntime::new().expect("direct Edge runtime");
+    assert_eq!(text(&mut direct, SETUP), EXPECTED);
+
+    let mut traced = EdgeRuntime::new().expect("traced Edge runtime");
+    traced.enable_proxy_trace().expect("enable Proxy trace");
+    let actual = text(&mut traced, SETUP);
+    assert_eq!(actual, EXPECTED, "{:#?}", traced.proxy_trace());
+}
+
+#[test]
 fn dom_collections_focus_iterators_observers_and_auxiliary_factories_stay_live() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     let result = text(
@@ -2709,7 +3218,162 @@ fn dom_collections_focus_iterators_observers_and_auxiliary_factories_stay_live()
     );
     assert_eq!(
         result,
-        "true|true|true|true|true|true|true|InvalidCharacterError|root|TypeError|true|1|TypeError"
+        "true|true|false|true|true|true|true|InvalidCharacterError|root|TypeError|true|1|TypeError"
+    );
+}
+
+#[test]
+fn dom_token_list_supports_uses_the_owning_attributes_supported_token_set() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const noTokens = document.createElement("div").classList;
+          let noTokensError;
+          try { noTokens.supports("noopener"); }
+          catch (error) { noTokensError = `${error.name}: ${error.message}`; }
+          let symbolError;
+          try { noTokens.supports(Symbol("token")); }
+          catch (error) { symbolError = `${error.name}: ${error.message}`; }
+          return [
+            noTokensError,
+            symbolError,
+            document.createElement("a").relList.supports("noopener"),
+            document.createElement("a").relList.supports("nofollow"),
+            document.createElement("link").relList.supports("compression-dictionary"),
+            document.createElement("link").relList.supports("noopener"),
+            document.createElement("iframe").sandbox.supports("allow-scripts"),
+            document.createElement("iframe").sandbox.supports("scripts"),
+            document.createElement("script").blocking.supports("render"),
+            document.createElement("script").blocking.supports("expect"),
+            document.createElement("video").controlsList.supports("nodownload"),
+            document.createElement("video").controlsList.supports("download")
+          ].join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        result,
+        concat!(
+            "TypeError: Failed to execute 'supports' on 'DOMTokenList': ",
+            "DOMTokenList has no supported tokens.|",
+            "TypeError: Failed to execute 'supports' on 'DOMTokenList': ",
+            "Cannot convert a Symbol value to a string|",
+            "true|false|true|false|true|false|true|false|true|false"
+        )
+    );
+}
+
+#[test]
+fn edge150_core_operation_semantics_cover_files_datasets_parsing_css_and_codecs() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const file = new File([], "a/b.txt", { lastModified: 7.9 });
+          const negativeFile = new File([], "x", { lastModified: -7.9 });
+          const nonFiniteFile = new File([], "x", { lastModified: NaN });
+
+          const element = document.createElement("div");
+          element.setAttribute("data-user-id", "7");
+          element.setAttribute("data-long--name", "x");
+
+          const parsed = new DOMParser().parseFromString(
+            "<!doctype html><title>T</title><p id=x>A&amp;B</p>",
+            "text/html"
+          );
+
+          let decoderError;
+          try {
+            new TextDecoder("utf-8", { fatal: true }).decode(
+              new Uint8Array([0xff])
+            );
+          } catch (error) {
+            decoderError = `${error.name}: ${error.message}`;
+          }
+
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync("@media screen { b { width: 1px; } }");
+          const rotated = new DOMMatrix().rotate(90);
+          const flipped = new DOMMatrix().flipX();
+
+          return [
+            file.name,
+            file.lastModified,
+            negativeFile.lastModified,
+            nonFiniteFile.lastModified,
+            Object.keys(element.dataset).join(","),
+            element.dataset["long-Name"],
+            parsed.compatMode,
+            parsed.head.innerHTML,
+            parsed.body.innerHTML,
+            decoderError,
+            CSS.in(1).to("px").value,
+            sheet.cssRules[0].cssText,
+            rotated.a,
+            rotated.d,
+            Object.is(flipped.m12, -0)
+          ].join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        result,
+        concat!(
+            "a/b.txt|7|-7|0|userId,long-Name|x|CSS1Compat|<title>T</title>|",
+            "<p id=\"x\">A&amp;B</p>|",
+            "TypeError: Failed to execute 'decode' on 'TextDecoder': ",
+            "The encoded data was not valid.|96|",
+            "@media screen {\n  b { width: 1px; }\n}|0|0|true"
+        )
+    );
+}
+
+#[test]
+fn response_body_readers_return_platform_objects_and_reject_reuse_like_edge150() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let _ = runtime
+        .evaluate(
+            r#"
+            globalThis.__responseBodyReaderAudit = "pending";
+            (async () => {
+              const jsonResponse = new Response('{"a":1}');
+              const formResponse = new Response("a=1&b=x+y", {
+                headers: { "content-type": "application/x-www-form-urlencoded" }
+              });
+              const blobResponse = new Response(new Uint8Array([65, 66]), {
+                headers: { "content-type": "text/custom" }
+              });
+              const json = await jsonResponse.json();
+              const form = await formResponse.formData();
+              const blob = await blobResponse.blob();
+              let secondRead;
+              try { await jsonResponse.text(); }
+              catch (error) { secondRead = `${error.name}: ${error.message}`; }
+              __responseBodyReaderAudit = [
+                json.a,
+                jsonResponse.bodyUsed,
+                Object.prototype.toString.call(form),
+                JSON.stringify(Array.from(form)),
+                Object.prototype.toString.call(blob),
+                blob.size,
+                blob.type,
+                await blob.text(),
+                secondRead
+              ].join("|");
+            })();
+            "#,
+        )
+        .expect("response body reader audit");
+    assert_eq!(
+        text(&mut runtime, "__responseBodyReaderAudit"),
+        concat!(
+            "1|true|[object FormData]|[[\"a\",\"1\"],[\"b\",\"x y\"]]|",
+            "[object Blob]|2|text/custom|AB|",
+            "TypeError: Failed to execute 'text' on 'Response': body stream already read"
+        )
     );
 }
 
@@ -2719,7 +3383,7 @@ fn selection_slots_static_ranges_and_cookie_store_share_dom_state() {
     let result = text(
         &mut runtime,
         r##"
-        (() => {
+        (async () => {
           const text = document.createTextNode("alpha beta");
           document.body.appendChild(text);
           const selection = document.getSelection();
@@ -2781,6 +3445,7 @@ fn selection_slots_static_ranges_and_cookie_store_share_dom_state() {
           const noAssignment =
             slot.assignedNodes().length === 0 &&
             slot.assignedNodes({ flatten: true })[0] === fallback;
+          await Promise.resolve();
 
           let cookieEvent = null;
           cookieStore.addEventListener("change", event => cookieEvent = event);
@@ -3151,7 +3816,7 @@ fn input_intrinsic_geometry_follows_edge_150_https_evidence() {
             "reset,42.671875,23,39,19,43,23,42.671875px,23px,border-box,inline-block|",
             "file,253,23,253,23,253,23,253px,23px,content-box,inline-block|",
             "image,0,0,0,0,0,0,0,0,content-box,inline-block|",
-            "hidden,0,0,0,0,0,0,auto,auto,,none|",
+            "hidden,0,0,0,0,0,0,auto,auto,content-box,none|",
             "detached,0,0,0,0,0,0,0"
         )
     );
@@ -3284,6 +3949,212 @@ fn range_geometry_and_overflow_scrolling_follow_edge_https_evidence() {
             "400|300|10|20|0|0|400|300|10|20"
         )
     );
+}
+
+#[test]
+fn inline_text_fragments_follow_edge_whitespace_nesting_and_grapheme_evidence() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          document.body.replaceChildren();
+          document.body.style.cssText = "margin:8px";
+          const rect = value =>
+            [value.x, value.y, value.width, value.height].join(",");
+          const rects = range =>
+            Array.from(range.getClientRects(), rect).join("/");
+
+          const normal = document.createElement("div");
+          normal.style.cssText =
+            "font:16px Arial;width:45px;line-height:18px;white-space:normal";
+          normal.textContent = "A   B\nC";
+          document.body.appendChild(normal);
+          const normalRange = document.createRange();
+          normalRange.selectNodeContents(normal);
+          const normalResult = rects(normalRange);
+          normal.remove();
+
+          const pre = document.createElement("div");
+          pre.style.cssText =
+            "font:16px Arial;width:45px;line-height:18px;white-space:pre";
+          pre.textContent = "A   B\nC";
+          document.body.appendChild(pre);
+          const preRange = document.createRange();
+          preRange.selectNodeContents(pre);
+          const preResult = rects(preRange);
+          pre.remove();
+
+          const nested = document.createElement("div");
+          nested.style.cssText = "font:16px Arial;width:120px;line-height:18px";
+          const span = document.createElement("span");
+          span.textContent = "cd ef";
+          nested.append("ab", span, " gh");
+          document.body.appendChild(nested);
+          const nestedRange = document.createRange();
+          nestedRange.setStart(nested.firstChild, 1);
+          nestedRange.setEnd(nested.lastChild, 2);
+          const nestedResult = rects(nestedRange);
+          nested.remove();
+
+          const selections = (value, offsets) => {
+            const host = document.createElement("div");
+            host.style.cssText = "font:16px Arial;width:300px;line-height:18px";
+            host.textContent = value;
+            document.body.appendChild(host);
+            const result = offsets.map(([start, end]) => {
+              const range = document.createRange();
+              range.setStart(host.firstChild, start);
+              range.setEnd(host.firstChild, end);
+              return rect(range.getBoundingClientRect());
+            }).join("/");
+            host.remove();
+            return result;
+          };
+          const unicodeResult = [
+            selections("A\u{1F600}B", [[1, 2], [2, 3], [1, 3]]),
+            selections("e\u0301", [[0, 1], [1, 2], [0, 2]]),
+            selections("\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}", [[0, 2], [0, 11]]),
+            selections("\u{1F1E8}\u{1F1F3}", [[0, 2], [0, 4]])
+          ].join("|");
+          return [normalResult, preResult, nestedResult, unicodeResult].join("||");
+        })()
+        "#,
+    );
+    assert_eq!(
+        result,
+        concat!(
+            "8,8,40.90625,17||",
+            "8,8,33.796875,17/41.796875,8,0,17/8,26,11.5625,17||",
+            "16.890625,8,8.90625,17/25.796875,8,34.6875,17/",
+            "25.796875,8,34.6875,17/60.484375,8,13.34375,17||",
+            "18.671875,8,21.96875,17/18.671875,8,21.96875,17/",
+            "18.671875,8,21.96875,17|",
+            "8,8,8.90625,17/8,8,8.90625,17/8,8,8.90625,17|",
+            "8,8,20.046875,17/8,8,20.046875,17|",
+            "8,8,16.765625,17/8,8,16.765625,17"
+        )
+    );
+}
+
+#[test]
+fn horizontal_text_alignment_and_rtl_override_follow_edge_geometry() {
+    let mut runtime = EdgeRuntime::new().expect("Edge runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const measure = style => {
+                const node = document.createElement("div");
+                node.style.cssText =
+                  "font:16px Arial;width:240px;height:80px;margin:0;padding:0;border:0;" + style;
+                node.textContent = style.includes("bidi-override") ? "abc 123" : "abc def";
+                document.body.appendChild(node);
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                const first = document.createRange();
+                first.setStart(node.firstChild, 0);
+                first.setEnd(node.firstChild, 1);
+                const last = document.createRange();
+                last.setStart(node.firstChild, 6);
+                last.setEnd(node.firstChild, 7);
+                const result = [
+                  range.getBoundingClientRect().x,
+                  range.getBoundingClientRect().width,
+                  first.getBoundingClientRect().x,
+                  last.getBoundingClientRect().x,
+                ].join(":");
+                node.remove();
+                return result;
+              };
+              return [
+                measure("text-align:center"),
+                measure("text-align:right"),
+                measure("direction:rtl;text-align:end"),
+                measure("direction:rtl;unicode-bidi:bidi-override")
+              ].join("|");
+            })()
+            "#,
+        ),
+        "101.75:52.484375:101.75:149.78125|195.515625:52.484375:195.515625:243.546875|8:52.484375:8:56.03125|191.0625:56.9375:239.09375:191.0625"
+    );
+}
+
+#[test]
+fn mixed_bidi_and_basic_vertical_writing_follow_edge_geometry() {
+    let source = r#"
+            (() => {
+              const rect = value => [value.x, value.y, value.width, value.height].join(":");
+              const node = document.createElement("div");
+              node.style.cssText =
+                "font:16px Arial;width:240px;height:80px;margin:0;padding:0;border:0;direction:rtl";
+              node.textContent = "abc \u05d0\u05d1\u05d2 123";
+              document.body.appendChild(node);
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              const units = [0, 4, 5, 6, 8, 9, 10].map(offset => {
+                const unit = document.createRange();
+                unit.setStart(node.firstChild, offset);
+                unit.setEnd(node.firstChild, offset + 1);
+                return unit.getBoundingClientRect().x;
+              }).join(",");
+              const bidi = [
+                rect(range.getBoundingClientRect()),
+                Array.from(range.getClientRects(), value => rect(value)).join(","),
+                units,
+              ].join("|");
+              node.remove();
+              const vertical = mode => {
+                const host = document.createElement("div");
+                host.style.cssText =
+                  `font:16px Arial;width:240px;height:80px;margin:0;padding:0;border:0;writing-mode:${mode}`;
+                host.textContent = "AB\u4e2d";
+                document.body.appendChild(host);
+                const selection = document.createRange();
+                selection.selectNodeContents(host);
+                const result = rect(selection.getBoundingClientRect());
+                host.remove();
+                return result;
+              };
+              const context = document.createElement("canvas").getContext("2d");
+              context.font = "16px Arial";
+              return [
+                bidi,
+                vertical("vertical-rl"),
+                vertical("vertical-lr"),
+                ["\u05d0", "\u05d1", "\u05d2"].map(value => context.measureText(value).width).join(",")
+              ].join("||");
+            })()
+            "#;
+    let expected = concat!(
+        "162.546875:8:85.453125:17|",
+        "162.546875:8:26.703125:17,189.25:8:32.953125:17,222.203125:8:25.796875:17|",
+        "222.203125,208.75,200.078125,193.6875,162.546875,171.4375,180.34375||",
+        "229:8:17:37.34375||10:8:17:37.34375||",
+        "9.0078125,8.671875,6.3828125"
+    );
+    let mut direct = EdgeRuntime::new().expect("direct bidi runtime");
+    assert_eq!(text(&mut direct, source), expected);
+    let mut traced = EdgeRuntime::new().expect("traced bidi runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_complex_vertical_text_orientation_wrapping_combine_and_ruby_match() {
+    let source = format!(
+        "{}\nJSON.stringify(runVerticalTextSemanticsProbe())",
+        include_str!("../tools/vertical_text_semantics_probe.js")
+    );
+    let expected = include_str!("../tools/vertical_text_edge150_expected.json").trim();
+
+    let mut direct = EdgeRuntime::new().expect("direct vertical runtime");
+    assert_eq!(text(&mut direct, &source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced vertical runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, &source), expected);
 }
 
 #[test]
@@ -3747,6 +4618,609 @@ fn css_numeric_typed_om_parses_and_simplifies_math_values() {
     assert_eq!(text(&mut direct, source), expected);
 
     let mut traced = EdgeRuntime::new().expect("traced CSS Typed OM runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn window_named_properties_follow_document_tree_without_becoming_own_keys() {
+    let mut runtime = EdgeRuntime::new().expect("named Window runtime");
+    let result = text(
+        &mut runtime,
+        r##"
+        (() => {
+          const firstElement = document.createElement("div");
+          firstElement.id = "first";
+          const one = document.createElement("span");
+          const two = document.createElement("i");
+          one.id = two.id = "dup";
+          const form = document.createElement("form");
+          form.name = "formName";
+          const input = document.createElement("input");
+          input.name = "inputName";
+          document.body.append(firstElement, one, two, form, input);
+          const duplicate = window.dup;
+          const initial = [
+            first === firstElement,
+            "first" in window,
+            Object.prototype.hasOwnProperty.call(window, "first"),
+            Object.getOwnPropertyDescriptor(window, "first") === undefined,
+            Object.keys(window).includes("first"),
+            Object.prototype.toString.call(duplicate),
+            duplicate.length,
+            duplicate === window.dup,
+            formName === form,
+            typeof inputName
+          ].join("|");
+          window.first = 7;
+          const shadowed = [window.first, Object.hasOwn(window, "first")].join("|");
+          delete window.first;
+          const restored = window.first === firstElement;
+          firstElement.remove();
+          return [initial, shadowed, restored, typeof first].join("#");
+        })()
+        "##,
+    );
+    assert_eq!(
+        result,
+        "true|true|false|true|false|[object HTMLCollection]|2|true|true|undefined#7|true#true#undefined"
+    );
+}
+
+#[test]
+fn iframe_window_named_properties_use_the_child_document_and_realm() {
+    let mut runtime = EdgeRuntime::new().expect("iframe named Window runtime");
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const mainOnly = document.createElement("div");
+          mainOnly.id = "mainOnly";
+          document.body.appendChild(mainOnly);
+          const frame = document.createElement("iframe");
+          document.body.appendChild(frame);
+          frame.contentDocument.body.innerHTML =
+            '<div id="inside"></div><div id="dup"></div><span id="dup"></span>';
+          const child = frame.contentWindow;
+          const duplicate = child.dup;
+          return [
+            child.inside === frame.contentDocument.getElementById("inside"),
+            "inside" in child,
+            Object.hasOwn(child, "inside"),
+            Object.hasOwn(Object.getPrototypeOf(Object.getPrototypeOf(child)), "inside"),
+            Object.prototype.toString.call(duplicate),
+            duplicate.length,
+            duplicate === child.dup,
+            duplicate instanceof child.HTMLCollection,
+            typeof child.mainOnly,
+            typeof window.inside,
+            window.mainOnly === mainOnly
+          ].join("|");
+        })()
+        "#,
+    );
+    assert_eq!(
+        result,
+        "true|true|false|true|[object HTMLCollection]|2|true|true|undefined|undefined|true"
+    );
+}
+
+#[test]
+fn edge150_form_controls_apply_successful_control_and_selection_algorithms() {
+    let source = r#"
+      (() => {
+        const input = document.createElement('input');
+        input.value = 'abc\r\nxyz';
+        const defaults = [input.tabIndex, input.value];
+
+        const color = document.createElement('input');
+        color.type = 'color';
+        color.value = 'red';
+        const namedColor = color.value;
+        color.value = '#A1b2C3';
+
+        const range = document.createElement('input');
+        range.type = 'range';
+        const rangeDefault = range.value;
+        range.min = '10';
+        range.max = '20';
+        range.value = '100';
+
+        const form = document.createElement('form');
+        const firstRadio = document.createElement('input');
+        const secondRadio = document.createElement('input');
+        firstRadio.type = secondRadio.type = 'radio';
+        firstRadio.name = secondRadio.name = 'group';
+        form.append(firstRadio, secondRadio);
+        firstRadio.checked = true;
+        secondRadio.checked = true;
+
+        const dataForm = document.createElement('form');
+        const text = document.createElement('input');
+        text.name = 'a'; text.value = '1';
+        const disabled = document.createElement('input');
+        disabled.name = 'disabled'; disabled.value = 'x'; disabled.disabled = true;
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox'; checkbox.name = 'checked'; checkbox.value = 'yes';
+        checkbox.checked = true;
+        const select = document.createElement('select');
+        select.name = 'choice';
+        select.append(new Option('One', '1'), new Option('Two', '2', true, true));
+        const textarea = document.createElement('textarea');
+        textarea.name = 'note'; textarea.value = 'a\nb';
+        dataForm.append(text, disabled, checkbox, select, textarea);
+
+        const choice = document.createElement('select');
+        const one = new Option('One', '1');
+        const two = new Option('Two', '2', true, false);
+        const three = new Option('Three', '3', false, true);
+        choice.add(one); choice.add(two); choice.add(three, 1);
+        const selected = [
+          choice.selectedIndex,
+          choice.value,
+          Array.from(choice.selectedOptions, option => option.value),
+          Array.from(choice, option => option.value),
+          choice[1] === three,
+          Object.keys(choice)
+        ];
+
+        const option = new Option(' Text ', undefined, true, true);
+        return JSON.stringify({
+          defaults,
+          colors: [namedColor, color.value],
+          range: [rangeDefault, range.value],
+          radios: [firstRadio.checked, secondRadio.checked],
+          formData: Array.from(new FormData(dataForm)),
+          selected,
+          option: [option.text, option.value, option.textContent]
+        });
+      })()
+    "#;
+    let expected = r###"{"defaults":[0,"abcxyz"],"colors":["#ff0000","#a1b2c3"],"range":["50","20"],"radios":[false,true],"formData":[["a","1"],["checked","yes"],["choice","2"],["note","a\nb"]],"selected":[1,"3",["3"],["1","3","2"],true,["0","1","2"]],"option":["Text","Text"," Text "]}"###;
+
+    let mut direct = EdgeRuntime::new().expect("direct form-control runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced form-control runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_form_data_files_submitters_disabled_controls_and_invalid_events_match() {
+    let source = r#"
+      (() => {
+        const extended = document.createElement('form');
+        const select = document.createElement('select');
+        select.name = 'multi'; select.multiple = true;
+        const one = new Option('One', '1', false, true);
+        const group = document.createElement('optgroup'); group.disabled = true;
+        group.append(new Option('Three', '3', false, true));
+        select.append(one, group); extended.append(select);
+
+        const disabledForm = document.createElement('form');
+        const fieldset = document.createElement('fieldset'); fieldset.disabled = true;
+        const legend = document.createElement('legend');
+        const allowed = document.createElement('input'); allowed.name = 'allowed'; allowed.value = '1';
+        const blocked = document.createElement('input'); blocked.name = 'blocked'; blocked.value = '2';
+        legend.append(allowed); fieldset.append(legend, blocked); disabledForm.append(fieldset);
+
+        const fileForm = document.createElement('form');
+        const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.name = 'upload';
+        fileForm.append(fileInput);
+        const summarize = data => Array.from(data, ([name, value]) =>
+          [name, value.name, value.size, value.type, Object.prototype.toString.call(value)]);
+        const emptyFile = summarize(new FormData(fileForm));
+        const transfer = new DataTransfer();
+        transfer.items.add(new File(['abc'], 'a.txt', {type:'text/plain', lastModified:7}));
+        fileInput.files = transfer.files;
+        const filledFile = summarize(new FormData(fileForm));
+
+        const submitForm = document.createElement('form');
+        const input = document.createElement('input'); input.name = 'a'; input.value = '1';
+        const submit = document.createElement('button'); submit.name = 'go'; submit.value = 'yes';
+        submitForm.append(input, submit);
+        const submitted = Array.from(new FormData(submitForm, submit));
+        let outside;
+        try { new FormData(submitForm, document.createElement('button')); }
+        catch (error) { outside = [error.name, error.message]; }
+
+        let fileValue;
+        try { fileInput.value = 'x'; }
+        catch (error) { fileValue = [error.name, error.message]; }
+
+        const invalidInput = document.createElement('input'); invalidInput.required = true;
+        const invalidEvents = [];
+        invalidInput.addEventListener('invalid', event => invalidEvents.push(
+          [event.bubbles, event.cancelable, event.composed, event.isTrusted]));
+        const validationForm = document.createElement('form'); validationForm.append(invalidInput);
+        const validity = [invalidInput.checkValidity(), validationForm.checkValidity()];
+
+        return JSON.stringify({
+          extended: Array.from(new FormData(extended)),
+          disabled: Array.from(new FormData(disabledForm)),
+          files: [emptyFile, filledFile],
+          submitter: [submitted, outside],
+          fileValue,
+          invalid: [validity, invalidEvents]
+        });
+      })()
+    "#;
+    let expected = r####"{"extended":[["multi","1"]],"disabled":[["allowed","1"]],"files":[[["upload","",0,"application/octet-stream","[object File]"]],[["upload","a.txt",3,"text/plain","[object File]"]]],"submitter":[[["a","1"],["go","yes"]],["NotFoundError","Failed to construct 'FormData': The specified element is not owned by this form element."]],"fileValue":["InvalidStateError","Failed to set the 'value' property on 'HTMLInputElement': This input element accepts a filename, which may only be programmatically set to the empty string."],"invalid":[[false,false],[[false,true,false,true],[false,true,false,true]]]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct successful-control runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced successful-control runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_storage_history_and_location_state_algorithms_match() {
+    let source = r#"
+      (() => {
+        localStorage.clear(); sessionStorage.clear();
+        localStorage.setItem('b', '2');
+        localStorage.a = 1;
+        localStorage.setItem('c', null);
+        const descriptor = Object.getOwnPropertyDescriptor(localStorage, 'a');
+        const storage = [
+          localStorage.length,
+          [localStorage.key(0), localStorage.key(1), localStorage.key(2)],
+          Object.keys(localStorage),
+          localStorage.a,
+          descriptor.value,
+          descriptor.writable,
+          descriptor.enumerable,
+          descriptor.configurable
+        ];
+        sessionStorage.same = 'session';
+        localStorage.same = 'local';
+        const separate = [localStorage.same, sessionStorage.same, localStorage === sessionStorage];
+
+        const input = {nested:{value:1}, list:[1,2]};
+        history.replaceState({start:true}, '', '/start');
+        history.pushState(input, '', 'next?x=1#n');
+        input.nested.value = 9; input.list.push(3);
+        const firstState = history.state;
+        firstState.nested.value = 7;
+        const historyResult = [history.state, location.pathname, location.search, location.hash];
+
+        let crossOrigin;
+        try { history.pushState({}, '', 'https://other.example/path'); }
+        catch (error) { crossOrigin = error.name; }
+        const cloneErrors = [];
+        for (const value of [() => {}, Symbol('state')]) {
+          try { history.replaceState(value, ''); cloneErrors.push('return'); }
+          catch (error) { cloneErrors.push([error.name, error.message]); }
+        }
+        return JSON.stringify({storage, separate, historyResult, crossOrigin, cloneErrors});
+      })()
+    "#;
+    let expected = r####"{"storage":[3,["c","a","b"],["c","a","b"],"1","1",true,true,true],"separate":["local","session",false],"historyResult":[{"nested":{"value":7},"list":[1,2]},"/next","?x=1","#n"],"crossOrigin":"SecurityError","cloneErrors":[["DataCloneError","Failed to execute 'replaceState' on 'History': () => {} could not be cloned."],["DataCloneError","Failed to execute 'replaceState' on 'History': Symbol(state) could not be cloned."]]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct storage/history runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced storage/history runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_table_dom_order_reflection_and_live_collections_match() {
+    let source = r#"
+      (() => {
+        const table = document.createElement('table');
+        const b1 = table.createTBody(); b1.id = 'b1';
+        const foot = table.createTFoot(); foot.id = 'f';
+        const caption = table.createCaption(); caption.id = 'c';
+        const head = table.createTHead(); head.id = 'h';
+        const b2 = table.createTBody(); b2.id = 'b2';
+        head.insertRow().id = 'hr'; b1.insertRow().id = 'br'; foot.insertRow().id = 'fr';
+        table.insertRow(1).id = 'x'; table.insertRow(-1).id = 'z';
+        const held = table.rows;
+        const other = document.createElement('table');
+        other.createTBody().append(table.rows[1]);
+        table.align = 'left'; table.setAttribute('align', 'right'); table.cellPadding = '3';
+        const cell = table.rows[0].insertCell();
+        cell.headers = 'a b'; cell.colSpan = 1001; cell.rowSpan = 0; cell.noWrap = true;
+        const empty = document.createElement('table'); empty.deleteRow(-1);
+        let error;
+        try { empty.insertRow(1); }
+        catch (caught) { error = [caught.name, caught.message]; }
+        return JSON.stringify({
+          children: Array.from(table.children, element => element.id),
+          rows: Array.from(held, element => element.id),
+          other: Array.from(other.rows, element => element.id),
+          indices: Array.from(table.rows, element => [element.rowIndex, element.sectionRowIndex]),
+          attrs: Array.from(table.attributes, attribute => [attribute.name, attribute.value]),
+          cell: [cell.headers, cell.colSpan, cell.getAttribute('colspan'), cell.rowSpan,
+                 cell.getAttribute('rowspan'), cell.noWrap, cell.getAttribute('nowrap')],
+          error
+        });
+      })()
+    "#;
+    let expected = r####"{"children":["c","h","b1","b2","f"],"rows":["hr","br","fr","z"],"other":["x"],"indices":[[0,0],[1,0],[2,0],[3,1]],"attrs":[["align","right"],["cellpadding","3"]],"cell":["a b",1000,"1001",0,"0",true,""],"error":["IndexSizeError","Failed to execute 'insertRow' on 'HTMLTableElement': The index provided (1) is greater than the number of rows in the table (0)."]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct table runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced table runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_range_and_selection_live_boundary_algorithms_match() {
+    let source = r#"
+      (() => {
+        const host = document.createElement('div');
+        host.innerHTML = '<b>ab<i>cd</i>ef</b><u>gh</u><em>ij</em>';
+        const range = document.createRange();
+        range.setStart(host.querySelector('b').firstChild, 1);
+        range.setEnd(host.querySelector('em').firstChild, 1);
+        range.deleteContents();
+        const cross = [host.innerHTML, range.startContainer === host, range.startOffset, range.collapsed];
+
+        const splitHost = document.createElement('div'); splitHost.textContent = 'abcd';
+        const splitText = splitHost.firstChild;
+        const splitRange = document.createRange();
+        splitRange.setStart(splitText, 2); splitRange.setEnd(splitText, 3);
+        const marker = document.createElement('b'); marker.textContent = 'X';
+        splitRange.insertNode(marker);
+        const split = [splitHost.innerHTML, splitRange.startContainer.data, splitRange.startOffset,
+                       splitRange.endContainer.data, splitRange.endOffset, splitRange.toString()];
+
+        const selected = document.createElement('div'); selected.textContent = 'abcdef';
+        document.body.append(selected);
+        const selectedText = selected.firstChild;
+        const selection = getSelection(); selection.removeAllRanges();
+        const first = document.createRange(); first.setStart(selectedText, 1); first.setEnd(selectedText, 5);
+        selection.addRange(first);
+        const second = document.createRange(); second.setStart(selectedText, 0); second.setEnd(selectedText, 1);
+        selection.addRange(second);
+        const ignored = [selection.getRangeAt(0) === first, selection.anchorOffset,
+                         selection.focusOffset, selection.toString()];
+        selection.deleteFromDocument();
+        const deleted = [selectedText.data, selection.anchorOffset, selection.focusOffset,
+                         selection.isCollapsed, selection.direction];
+        selection.removeAllRanges(); selected.remove();
+        return JSON.stringify({cross, split, ignored, deleted});
+      })()
+    "#;
+    let expected = r####"{"cross":["<b>a</b><em>j</em>",true,1,true],"split":["ab<b>X</b>cd","ab",2,"cd",1,"Xc"],"ignored":[true,1,5,"bcde"],"deleted":["af",1,1,true,"none"]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct range/selection runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced range/selection runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_mutation_observer_batch_transient_and_order_algorithms_match() {
+    let source = r#"
+      (async () => {
+        const summarize = record => [record.type, record.addedNodes.length,
+          record.removedNodes.length, record.previousSibling && record.previousSibling.id,
+          record.nextSibling && record.nextSibling.id];
+
+        const target = document.createElement('div');
+        const fragmentObserver = new MutationObserver(() => {});
+        fragmentObserver.observe(target, {childList:true});
+        const fragment = document.createDocumentFragment();
+        fragment.append(document.createElement('a'), document.createElement('b'));
+        target.append(fragment);
+        const fragmentRecords = fragmentObserver.takeRecords().map(summarize);
+
+        target.innerHTML = '';
+        const a = document.createElement('a'); a.id = 'a';
+        const b = document.createElement('b'); b.id = 'b';
+        const c = document.createElement('i'); c.id = 'c';
+        target.append(a, b, c);
+        const replaceObserver = new MutationObserver(() => {});
+        replaceObserver.observe(target, {childList:true});
+        target.replaceChild(a, c);
+        const replaced = replaceObserver.takeRecords().map(summarize);
+
+        const root = document.createElement('div'); root.innerHTML = '<section><i></i></section>';
+        const section = root.firstElementChild; const child = section.firstElementChild;
+        const transient = [];
+        const transientObserver = new MutationObserver(records =>
+          transient.push(records.map(record => [record.type, record.attributeName])));
+        transientObserver.observe(root, {childList:true, attributes:true, subtree:true});
+        root.removeChild(section); child.setAttribute('x', '1');
+        await Promise.resolve(); await Promise.resolve();
+        child.setAttribute('x', '2'); await Promise.resolve(); await Promise.resolve();
+
+        const order = [];
+        const one = new MutationObserver(() => order.push('one'));
+        const two = new MutationObserver(() => order.push('two'));
+        one.observe(target, {attributes:true}); two.observe(target, {attributes:true});
+        target.setAttribute('x', '1'); await Promise.resolve(); await Promise.resolve();
+        return JSON.stringify({fragmentRecords, replaced, transient, order});
+      })()
+    "#;
+    let expected = r####"{"fragmentRecords":[["childList",2,0,null,null]],"replaced":[["childList",0,1,null,"b"],["childList",1,1,"b",null]],"transient":[[["childList",null],["attributes","x"]]],"order":["one","two"]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct mutation runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced mutation runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_custom_elements_construction_upgrade_and_reactions_match() {
+    let source = r#"
+      (() => {
+        const counts = {ctor:0, connected:0, disconnected:0, attr:0, adopted:0};
+        class C extends HTMLElement {
+          static get observedAttributes() { return ['a']; }
+          constructor() { super(); counts.ctor++; }
+          connectedCallback() { counts.connected++; }
+          disconnectedCallback() { counts.disconnected++; }
+          attributeChangedCallback() { counts.attr++; }
+          adoptedCallback() { counts.adopted++; }
+        }
+        customElements.define('x-rust-ce-regression', C);
+        const element = document.createElement('x-rust-ce-regression');
+        element.setAttribute('a', '1');
+        document.body.append(element);
+        element.remove();
+        const clone = element.cloneNode(true);
+        const other = document.implementation.createHTMLDocument('other');
+        const imported = other.importNode(element, true);
+        other.adoptNode(element);
+
+        const fragment = document.createDocumentFragment();
+        const late = document.createElement('x-rust-ce-late');
+        fragment.append(late);
+        let lateConstructed = 0;
+        class Late extends HTMLElement { constructor() { super(); lateConstructed++; } }
+        customElements.define('x-rust-ce-late', Late);
+        const before = late instanceof Late;
+        customElements.upgrade(fragment);
+
+        const host = document.createElement('div');
+        const root = host.attachShadow({mode:'open'});
+        return JSON.stringify({
+          element: [element instanceof C, Object.getPrototypeOf(element) === C.prototype],
+          counts,
+          clone: clone instanceof C,
+          imported: imported instanceof C,
+          explicit: [before, late instanceof Late, lateConstructed],
+          registries: [document.customElementRegistry === customElements,
+            host.customElementRegistry === customElements,
+            root.customElementRegistry === customElements]
+        });
+      })()
+    "#;
+    let expected = r####"{"element":[true,true],"counts":{"ctor":2,"connected":1,"disconnected":1,"attr":2,"adopted":1},"clone":true,"imported":false,"explicit":[false,true,1],"registries":[true,true,true]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct custom elements runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced custom elements runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_scoped_custom_element_registry_and_shadow_reactions_match() {
+    let source = r#"
+      (() => {
+        const scoped = new CustomElementRegistry();
+        const log = [];
+        class Scoped extends HTMLElement {
+          constructor() { super(); log.push(['ctor', this.getRootNode() instanceof ShadowRoot]); }
+          connectedCallback() { log.push(['connected', this.getRootNode() instanceof ShadowRoot]); }
+          disconnectedCallback() { log.push(['disconnected', this.getRootNode() instanceof ShadowRoot]); }
+        }
+        class Main extends HTMLElement {}
+        customElements.define('x-rust-scoped-regression', Main);
+        scoped.define('x-rust-scoped-regression', Scoped);
+
+        const host = document.createElement('div');
+        const root = host.attachShadow({mode:'open', customElementRegistry:scoped});
+        root.innerHTML = '<x-rust-scoped-regression></x-rust-scoped-regression>';
+        const parsed = root.firstChild;
+        const before = [parsed instanceof Scoped, parsed instanceof Main,
+          root.customElementRegistry === scoped, log.slice()];
+        document.body.append(host);
+        const connected = log.slice();
+        host.remove();
+        const disconnected = log.slice();
+
+        const moved = document.createElement('x-rust-unregistered-scoped');
+        root.append(moved);
+        let upgraded = 0;
+        class Late extends HTMLElement { constructor() { super(); upgraded++; } }
+        scoped.define('x-rust-unregistered-scoped', Late);
+        const insertion = [moved instanceof Late, upgraded];
+        scoped.upgrade(root);
+
+        const defaultRoot = document.createElement('div').attachShadow({mode:'open'});
+        const initialized = new CustomElementRegistry();
+        return JSON.stringify({
+          before, connected, disconnected, insertion,
+          explicit: [moved instanceof Late, upgraded],
+          defaults: [defaultRoot.customElementRegistry === customElements,
+            defaultRoot.customElementRegistry === null,
+            document.customElementRegistry === customElements],
+          initialize: [initialized.initialize(document), document.customElementRegistry === initialized]
+        });
+      })()
+    "#;
+    let expected = r####"{"before":[true,false,true,[["ctor",true]]],"connected":[["ctor",true],["connected",true]],"disconnected":[["ctor",true],["connected",true],["disconnected",true]],"insertion":[false,0],"explicit":[true,1],"defaults":[true,false,true],"initialize":[null,false]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct scoped registry runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced scoped registry runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn edge150_form_associated_custom_elements_and_internals_match() {
+    let source = r#"
+      (() => {
+        const log=[];
+        class Control extends HTMLElement {
+          static formAssociated=true;
+          constructor(){super();this.i=this.attachInternals();}
+          formAssociatedCallback(form){log.push(['form',form&&form.id]);}
+          formDisabledCallback(value){log.push(['disabled',value]);}
+          formResetCallback(){log.push(['reset']);}
+        }
+        customElements.define('x-rust-face-regression',Control);
+        const form=document.createElement('form');form.id='f';
+        const fieldset=document.createElement('fieldset');
+        const control=document.createElement('x-rust-face-regression');control.setAttribute('name','custom');
+        control.i.setFormValue('value');fieldset.append(control);form.append(fieldset);document.body.append(form);
+        const data=Array.from(new FormData(form));
+        fieldset.disabled=true;fieldset.disabled=false;
+        control.i.setValidity({customError:true},'bad',control);
+        const validity=[control.i.validity.valid,control.i.validationMessage,form.checkValidity()];
+        control.i.setValidity({});form.reset();
+        const root=control.attachShadow({mode:'open'});
+        const result={data,form:control.i.form===form,validity,root:control.i.shadowRoot===root,log};
+        form.remove();return JSON.stringify(result);
+      })()
+    "#;
+    let expected = r####"{"data":[["custom","value"]],"form":true,"validity":[false,"bad",false],"root":true,"log":[["form","f"],["disabled",true],["disabled",false],["reset"]]}"####;
+
+    let mut direct = EdgeRuntime::new().expect("direct form-associated runtime");
+    assert_eq!(text(&mut direct, source), expected);
+
+    let mut traced = EdgeRuntime::new().expect("traced form-associated runtime");
+    traced.enable_proxy_trace().expect("enable native trace");
+    assert_eq!(text(&mut traced, source), expected);
+}
+
+#[test]
+fn element_internals_form_methods_reject_illegal_receivers_before_arguments() {
+    let source = r#"
+      (() => [
+        "checkValidity", "reportValidity", "setFormValue", "setValidity"
+      ].map(name => {
+        try {
+          Reflect.apply(ElementInternals.prototype[name], {}, []);
+          return "returned";
+        } catch (error) {
+          return `${error.name}:${error.message}`;
+        }
+      }).join("|"))()
+    "#;
+    let expected = ["TypeError:Illegal invocation"; 4].join("|");
+    let mut direct = EdgeRuntime::new().expect("direct ElementInternals brand runtime");
+    assert_eq!(text(&mut direct, source), expected);
+    let mut traced = EdgeRuntime::new().expect("traced ElementInternals brand runtime");
     traced.enable_proxy_trace().expect("enable native trace");
     assert_eq!(text(&mut traced, source), expected);
 }

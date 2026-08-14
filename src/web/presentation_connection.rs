@@ -146,12 +146,16 @@ fn handler(
     r: v8::ReturnValue<'_>,
     n: u8,
 ) {
-    let h = record(s, a.this()).and_then(|v| match n {
-        0 => v.on_connect,
-        1 => v.on_close,
-        2 => v.on_terminate,
-        _ => v.on_message,
-    });
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    let h = match n {
+        0 => record.on_connect,
+        1 => record.on_close,
+        2 => record.on_terminate,
+        _ => record.on_message,
+    };
     super::window_event_handler_support::return_handler(s, h, r)
 }
 fn get_connect(

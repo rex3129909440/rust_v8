@@ -12,7 +12,8 @@ fn compare_point(
     let Some(record) = super::range::record_or_throw(scope, arguments.this()) else {
         return;
     };
-    let Some((node, offset)) = super::range::boundary_arguments(scope, &arguments) else {
+    let Some((node, offset)) = super::range::boundary_arguments(scope, &arguments, "comparePoint")
+    else {
         return;
     };
     let node = v8::Local::new(scope, &node);
@@ -24,7 +25,7 @@ fn compare_point(
         super::node::throw_dom_exception(
             scope,
             "WrongDocumentError",
-            "The point and range have different roots",
+            "Failed to execute 'comparePoint' on 'Range': The node provided and the Range are not in the same tree.",
         );
         return;
     };
@@ -33,7 +34,7 @@ fn compare_point(
         super::node::throw_dom_exception(
             scope,
             "WrongDocumentError",
-            "The point and range have different roots",
+            "Failed to execute 'comparePoint' on 'Range': The node provided and the Range are not in the same tree.",
         );
         return;
     };

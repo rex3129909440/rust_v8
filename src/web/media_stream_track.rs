@@ -171,13 +171,7 @@ pub(crate) fn attach(
 }
 
 pub(crate) fn is_track(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
-    scope
-        .get_slot::<MediaStreamTrackStore>()
-        .is_some_and(|store| {
-            store
-                .records
-                .contains_key(&object.get_identity_hash().get())
-        })
+    super::structured_clone::inherits_platform_interface(scope, object, "MediaStreamTrack")
 }
 
 pub(crate) fn kind(
@@ -459,7 +453,12 @@ fn apply_constraints(
     mut result: v8::ReturnValue<'_>,
 ) {
     let Some(record) = record(scope, arguments.this()) else {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "MediaStreamTrack",
+            "applyConstraints",
+            result,
+        );
         return;
     };
     let constraints = v8::Local::<v8::Object>::try_from(arguments.get(0)).ok();
@@ -495,6 +494,10 @@ fn clone_track(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     match clone_object(scope, arguments.this()) {
         Ok(track) => result.set(track.into()),
         Err(message) => crate::webidl::throw_type_error(scope, &message),

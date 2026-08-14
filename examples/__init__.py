@@ -2,6 +2,8 @@
 
 from .edge_profile import (
     EdgeProfile,
+    FontBinarySourceProfile,
+    FontProfile,
     PerformanceEntryProfile,
     PerformanceProfile,
     ProfileField,
@@ -38,6 +40,8 @@ __all__ = [
     "EdgeRunOptions",
     "EdgeSandbox",
     "EdgeSandboxPool",
+    "FontBinarySourceProfile",
+    "FontProfile",
     "IframeHook",
     "NetworkReplayEntry",
     "PageInit",

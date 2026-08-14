@@ -45,6 +45,9 @@ fn ensure_constructor<'s>(
     crate::webidl::define_method(scope, prototype, "clear", 0, clear)?;
     crate::webidl::define_method(scope, prototype, "delete", 1, delete)?;
     crate::webidl::define_method(scope, prototype, "set", 2, set)?;
+    if crate::browser_surface::current_version(scope).major() <= 147 {
+        super::shared_storage_get::define(scope, prototype)?;
+    }
     crate::webidl::define_method(scope, prototype, "batchUpdate", 1, batch_update)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
     crate::webidl::define_readonly_accessor(scope, prototype, "worklet", get_worklet)?;
@@ -106,6 +109,10 @@ fn record(
         .cloned()
 }
 
+pub(crate) fn has_record(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> bool {
+    record(scope, object).is_some()
+}
+
 fn update(
     scope: &mut v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
@@ -154,6 +161,10 @@ fn append(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "SharedStorage", "append", result);
+        return;
+    }
     if !require_arguments(scope, &arguments, "append", 2) {
         return;
     }
@@ -175,6 +186,10 @@ fn clear(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "SharedStorage", "clear", result);
+        return;
+    }
     if update(scope, arguments.this(), |record| record.entries.clear()) {
         resolve_undefined(scope, result);
     }
@@ -185,6 +200,10 @@ fn delete(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "SharedStorage", "delete", result);
+        return;
+    }
     if !require_arguments(scope, &arguments, "delete", 1) {
         return;
     }
@@ -201,6 +220,10 @@ fn set(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(scope, "SharedStorage", "set", result);
+        return;
+    }
     if !require_arguments(scope, &arguments, "set", 2) {
         return;
     }
@@ -265,6 +288,15 @@ fn batch_update(
     arguments: v8::FunctionCallbackArguments<'_>,
     result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "SharedStorage",
+            "batchUpdate",
+            result,
+        );
+        return;
+    }
     if !require_arguments(scope, &arguments, "batchUpdate", 1) {
         return;
     }
@@ -315,7 +347,12 @@ fn create_worklet(
     mut result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "SharedStorage",
+            "createWorklet",
+            result,
+        );
         return;
     }
     if !require_arguments(scope, &arguments, "createWorklet", 1) {
@@ -335,7 +372,7 @@ fn run(
     result: v8::ReturnValue<'_>,
 ) {
     if record(scope, arguments.this()).is_none() {
-        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(scope, "SharedStorage", "run", result);
         return;
     }
     if !require_arguments(scope, &arguments, "run", 1) {
@@ -349,6 +386,15 @@ fn select_url(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(
+            scope,
+            "SharedStorage",
+            "selectURL",
+            result,
+        );
+        return;
+    }
     if !require_arguments(scope, &arguments, "selectURL", 2) {
         return;
     }

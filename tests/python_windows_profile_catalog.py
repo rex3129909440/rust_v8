@@ -121,8 +121,8 @@ class WindowsProfileCatalogTests(unittest.TestCase):
         profile = windows_edge_150_profile()
 
         self.assertEqual(profile.navigator.platform, "Win32")
-        self.assertEqual(profile.canvas.font_bounding_box_ascent, 12.0)
-        self.assertEqual(profile.canvas.actual_bounding_box_ascent, 8.0)
+        self.assertEqual(profile.canvas.font_bounding_box_ascent, 9.0)
+        self.assertEqual(profile.canvas.actual_bounding_box_ascent, 7.0)
         self.assertIn("width:169px", profile.css.input_text)
         self.assertEqual(profile.webgl.max_viewport_width, 32_767)
         self.assertEqual(profile.webgl.max_vertex_uniform_vectors, 4_096)
@@ -312,7 +312,7 @@ class WindowsProfileCatalogTests(unittest.TestCase):
 
             self.assertEqual(profile.window.inner_width, 0.0)
             self.assertEqual(profile.window.inner_height, 0.0)
-            self.assertEqual(profile.canvas.font_bounding_box_ascent, 12.0)
+            self.assertEqual(profile.canvas.font_bounding_box_ascent, 9.0)
             expected_css = chromium150_windows_css_overrides(
                 float(profile.screen.device_pixel_ratio),
                 profile.navigator.language,

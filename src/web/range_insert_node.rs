@@ -10,6 +10,10 @@ fn insert_node_callback(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if super::abstract_range::record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(new_node) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "The argument is not a Node");
         return;
@@ -58,7 +62,7 @@ pub(crate) fn insert_node(
         let offset = (record.start_offset as usize).min(units.len());
         let left = String::from_utf16_lossy(&units[..offset]);
         let right = String::from_utf16_lossy(&units[offset..]);
-        let _ = super::character_data::set_data_if_character(scope, start, left);
+        let _ = super::character_data::set_data_without_range_adjustment(scope, start, left);
         let split = super::text::create(scope, right).map_err(|message| ("TypeError", message))?;
         if let Some(document) = super::node::record(scope, start)
             .and_then(|value| value.owner_document)
@@ -73,6 +77,7 @@ pub(crate) fn insert_node(
             .unwrap_or(siblings.len());
         super::node::insert_node(scope, parent, split, index + 1)
             .map_err(|(name, message)| (name, message.to_owned()))?;
+        super::abstract_range::adjust_for_split_text(scope, start, split, record.start_offset);
         super::node::insert_node(scope, parent, new_node, index + 1)
             .map_err(|(name, message)| (name, message.to_owned()))?;
         let parent_global = v8::Global::new(scope, parent);

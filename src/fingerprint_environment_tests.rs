@@ -198,6 +198,11 @@ fn prompt_permissions_do_not_disclose_profiled_devices_location_or_fonts() {
     options.fingerprint.permissions.microphone = "prompt".to_owned();
     options.fingerprint.permissions.geolocation = "prompt".to_owned();
     options.fingerprint.permissions.local_fonts = "prompt".to_owned();
+    options
+        .fingerprint
+        .navigator
+        .user_activation_has_been_active = true;
+    options.fingerprint.navigator.user_activation_is_active = true;
     options.fingerprint.media.devices = vec![MediaDeviceFingerprint {
         device_id: "secret-microphone-id".to_owned(),
         kind: "audioinput".to_owned(),
@@ -221,10 +226,7 @@ fn prompt_permissions_do_not_disclose_profiled_devices_location_or_fonts() {
             () => "success",
             error => `error:${error.name}`
           ),
-          queryLocalFonts().then(
-            () => "success",
-            error => `error:${error.name}`
-          ),
+          queryLocalFonts().then(fonts => `success:${fonts.length}`),
           navigator.mediaDevices.enumerateDevices().then(devices =>
             devices.map(device => [
               device.kind, device.deviceId, device.label, device.groupId
@@ -235,7 +237,7 @@ fn prompt_permissions_do_not_disclose_profiled_devices_location_or_fonts() {
     );
     assert_eq!(
         text(&mut runtime, "permissionAnswer"),
-        "error:1|error:NotAllowedError|error:NotAllowedError|audioinput:::"
+        "error:1|error:NotAllowedError|success:0|audioinput:::"
     );
 }
 

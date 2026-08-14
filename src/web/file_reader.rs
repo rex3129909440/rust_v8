@@ -418,6 +418,10 @@ fn read_as_array_buffer(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some((bytes, _)) = blob_bytes(scope, &arguments) else {
         return;
     };
@@ -431,6 +435,10 @@ fn read_as_binary_string(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some((bytes, _)) = blob_bytes(scope, &arguments) else {
         return;
     };
@@ -445,6 +453,10 @@ fn read_as_data_url(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some((bytes, media_type)) = blob_bytes(scope, &arguments) else {
         return;
     };
@@ -464,6 +476,10 @@ fn read_as_text(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some((bytes, _)) = blob_bytes(scope, &arguments) else {
         return;
     };

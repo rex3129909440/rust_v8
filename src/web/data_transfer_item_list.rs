@@ -175,7 +175,7 @@ pub(crate) fn set_string<'s>(
     value: String,
 ) -> Result<v8::Local<'s, v8::Object>, String> {
     clear_type(scope, list, &media_type);
-    let item = super::data_transfer_item::create_string(scope, value, media_type)?;
+    let item = super::data_transfer_item::create_string_from_set_data(scope, value, media_type)?;
     let mut values =
         records(scope, list).ok_or_else(|| "Invalid DataTransferItemList".to_owned())?;
     values.push(v8::Global::new(scope, item));
@@ -207,6 +207,12 @@ fn add(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if super::data_transfer::item_list_access_mode(scope, arguments.this())
+        != Some(super::data_transfer::AccessMode::ReadWrite)
+    {
+        result.set(v8::null(scope).into());
+        return;
+    }
     let created = if let Ok(file) = v8::Local::<v8::Object>::try_from(arguments.get(0))
         && let Some(media_type) = file_media_type(scope, file)
     {
@@ -250,6 +256,15 @@ fn clear(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if records(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    if super::data_transfer::item_list_access_mode(scope, arguments.this())
+        != Some(super::data_transfer::AccessMode::ReadWrite)
+    {
+        return;
+    }
     if !clear_all(scope, arguments.this()) {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -264,11 +279,36 @@ fn remove(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     };
+    if super::data_transfer::item_list_access_mode(scope, arguments.this())
+        != Some(super::data_transfer::AccessMode::ReadWrite)
+    {
+        throw_invalid_state(scope);
+        return;
+    }
     let index = arguments.get(0).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     if index < values.len() {
         values.remove(index);
         replace_records(scope, arguments.this(), values);
     }
+}
+
+fn throw_invalid_state(scope: &mut v8::PinScope<'_, '_>) {
+    let exception = v8::Exception::error(
+        scope,
+        v8::String::new(scope, "The list is not writable.").expect("static string"),
+    );
+    if let Ok(object) = v8::Local::<v8::Object>::try_from(exception) {
+        let _ = object.set(
+            scope,
+            v8::String::new(scope, "name")
+                .expect("static string")
+                .into(),
+            v8::String::new(scope, "InvalidStateError")
+                .expect("static string")
+                .into(),
+        );
+    }
+    scope.throw_exception(exception);
 }
 
 fn get_length(

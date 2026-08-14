@@ -12,8 +12,9 @@ fn get_disabled(
     a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
-    if let Some(x) = record(scope, a.this()) {
-        r.set(v8::Boolean::new(scope, x.disabled).into())
+    if record(scope, a.this()).is_some() {
+        let disabled = super::element::attribute_value(scope, a.this(), "disabled").is_some();
+        r.set(v8::Boolean::new(scope, disabled).into())
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation")
     }
@@ -25,5 +26,5 @@ fn set_disabled(
     _: v8::ReturnValue<'_>,
 ) {
     let value = a.get(0).boolean_value(scope);
-    update(scope, a.this(), |x| x.disabled = value);
+    super::element::set_reflected_boolean(scope, a.this(), "disabled", value);
 }

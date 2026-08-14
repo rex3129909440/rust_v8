@@ -53,6 +53,7 @@ pub(crate) fn ensure_constructor<'s>(
     crate::webidl::define_readonly_accessor(scope, prototype, "left", get_left)?;
     crate::webidl::define_method(scope, prototype, "toJSON", 0, to_json)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(scope, constructor.into(), "fromRect", 0, from_rect)?;
     let realm_constructor = v8::Global::new(scope, constructor);
     scope
         .get_slot_mut::<DomRectReadOnlyStore>()
@@ -60,6 +61,45 @@ pub(crate) fn ensure_constructor<'s>(
         .constructor
         .insert(realm_id, realm_constructor);
     Ok(constructor)
+}
+
+pub(crate) fn from_value(
+    scope: &v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+) -> RectRecord {
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+        return RectRecord {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
+    };
+    let property = |name: &str| {
+        v8::String::new(scope, name)
+            .and_then(|key| object.get(scope, key.into()))
+            .filter(|value| !value.is_undefined())
+            .and_then(|value| value.number_value(scope))
+            .unwrap_or(0.0)
+    };
+    RectRecord {
+        x: property("x"),
+        y: property("y"),
+        width: property("width"),
+        height: property("height"),
+    }
+}
+
+fn from_rect(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    let rect = from_value(scope, arguments.get(0));
+    match create(scope, rect) {
+        Ok(rect) => result.set(rect.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
 }
 
 fn construct(

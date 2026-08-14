@@ -91,15 +91,24 @@ fn construct(
         return;
     }
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "RTCErrorInit must be an object");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCError': The provided value is not of type 'RTCErrorInit'.",
+        );
         return;
     };
     let Some(detail_value) = property(scope, init, "errorDetail") else {
-        crate::webidl::throw_type_error(scope, "Required member 'errorDetail' is undefined");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCError': Failed to read the 'errorDetail' property from 'RTCErrorInit': Required member is undefined.",
+        );
         return;
     };
     if detail_value.is_undefined() {
-        crate::webidl::throw_type_error(scope, "Required member 'errorDetail' is undefined");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'RTCError': Failed to read the 'errorDetail' property from 'RTCErrorInit': Required member is undefined.",
+        );
         return;
     }
     let error_detail = crate::webidl::value_to_string(scope, detail_value);

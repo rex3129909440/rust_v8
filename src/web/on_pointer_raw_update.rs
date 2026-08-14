@@ -8,6 +8,9 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
+    if crate::browser_surface::restore_staged_window_property(scope, "onpointerrawupdate")? {
+        return Ok(());
+    }
     super::window_event_handler_support::define(
         scope,
         "onpointerrawupdate",

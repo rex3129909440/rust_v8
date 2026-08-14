@@ -84,7 +84,10 @@ fn construct(
         return;
     }
     let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "ResizeObserver callback must be a function");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'ResizeObserver': parameter 1 is not of type 'Function'.",
+        );
         return;
     };
     let record = ObserverRecord {
@@ -125,6 +128,18 @@ fn observe(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<ResizeObserverStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(target) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "ResizeObserver target must be an Element");
         return;
@@ -174,6 +189,18 @@ fn unobserve(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
+    if scope
+        .get_slot::<ResizeObserverStore>()
+        .and_then(|store| {
+            store
+                .records
+                .get(&arguments.this().get_identity_hash().get())
+        })
+        .is_none()
+    {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Ok(target) = v8::Local::<v8::Object>::try_from(arguments.get(0)) else {
         crate::webidl::throw_type_error(scope, "ResizeObserver target must be an Element");
         return;

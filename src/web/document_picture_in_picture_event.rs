@@ -70,11 +70,13 @@ pub(crate) fn construct(
         );
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
         crate::webidl::throw_type_error(
             scope,
-            "DocumentPictureInPictureEvent init must be an object",
+            "Failed to construct 'DocumentPictureInPictureEvent': The provided value is not of type 'DocumentPictureInPictureEventInit'.",
         );
         return;
     };
@@ -87,7 +89,7 @@ pub(crate) fn construct(
     let Ok(window) = v8::Local::<v8::Object>::try_from(window) else {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'DocumentPictureInPictureEvent': required member window is undefined.",
+            "Failed to construct 'DocumentPictureInPictureEvent': Failed to read the 'window' property from 'DocumentPictureInPictureEventInit': Required member is undefined.",
         );
         return;
     };

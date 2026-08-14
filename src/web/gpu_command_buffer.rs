@@ -44,7 +44,7 @@ fn illegal_constructor(
     _: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    crate::webidl::throw_type_error(s, "GPUCommandBuffer is not directly constructible")
+    crate::webidl::throw_type_error(s, "Illegal constructor")
 }
 pub(crate) fn create<'s>(
     scope: &mut v8::PinScope<'s, '_>,

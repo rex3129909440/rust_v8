@@ -104,11 +104,11 @@ fn get_handler(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    super::window_event_handler_support::return_handler(
-        s,
-        record(s, a.this()).and_then(|v| v.ondevicechange),
-        r,
-    )
+    let Some(record) = record(s, a.this()) else {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(s, record.ondevicechange, r)
 }
 fn set_handler(
     s: &mut v8::PinScope<'_, '_>,
@@ -140,7 +140,7 @@ fn enumerate_devices(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "MediaDevices", "enumerateDevices", r);
         return;
     }
     let fingerprint = crate::fingerprint::edge(s);
@@ -247,7 +247,7 @@ fn capture_stream(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "MediaDevices", "getUserMedia", r);
         return;
     }
     let Ok(constraints) = v8::Local::<v8::Object>::try_from(a.get(0)) else {
@@ -314,7 +314,7 @@ fn get_display_media(
     r: v8::ReturnValue<'_>,
 ) {
     if record(s, a.this()).is_none() {
-        crate::webidl::throw_type_error(s, "Illegal invocation");
+        crate::webidl::reject_illegal_invocation_promise(s, "MediaDevices", "getDisplayMedia", r);
         return;
     }
     reject_not_allowed(s, r)

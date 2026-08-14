@@ -186,6 +186,10 @@ fn set(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let name = crate::webidl::value_to_string(scope, arguments.get(0));
     let Ok(highlight) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
         crate::webidl::throw_type_error(
@@ -308,12 +312,12 @@ fn for_each(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
-        crate::webidl::throw_type_error(scope, "forEach callback must be callable");
-        return;
-    };
     let Some(record) = record(scope, arguments.this()) else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    let Ok(callback) = v8::Local::<v8::Function>::try_from(arguments.get(0)) else {
+        crate::webidl::throw_type_error(scope, "forEach callback must be callable");
         return;
     };
     let receiver = arguments.get(1);

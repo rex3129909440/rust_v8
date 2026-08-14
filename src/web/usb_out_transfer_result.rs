@@ -53,7 +53,28 @@ fn construct(
         crate::webidl::throw_type_error(s, "use new");
         return;
     }
-    let status = crate::webidl::value_to_string(s, a.get(0));
+    if a.get(0).is_null_or_undefined() {
+        let status = crate::webidl::value_to_string(s, a.get(0));
+        crate::webidl::throw_type_error(
+            s,
+            &format!(
+                "Failed to construct 'USBOutTransferResult': The provided value '{status}' is not a valid enum value of type USBTransferStatus."
+            ),
+        );
+        return;
+    }
+    let Some(status) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
+    if !matches!(status.as_str(), "ok" | "stall" | "babble") {
+        crate::webidl::throw_type_error(
+            s,
+            &format!(
+                "Failed to construct 'USBOutTransferResult': The provided value '{status}' is not a valid enum value of type USBTransferStatus."
+            ),
+        );
+        return;
+    }
     s.get_slot_mut::<UsbOutTransferResultStore>()
         .unwrap()
         .records

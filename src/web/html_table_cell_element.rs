@@ -125,8 +125,9 @@ pub(crate) fn get_col_span(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Integer::new_from_unsigned(scope, record.col_span).into());
+    if record(scope, arguments.this()).is_some() {
+        let value = reflected_span(scope, arguments.this(), "colspan", 1, 1000, false);
+        result.set(v8::Integer::new_from_unsigned(scope, value).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -136,11 +137,14 @@ pub(crate) fn set_col_span(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let value = arguments
-        .get(0)
-        .uint32_value(scope)
-        .unwrap_or(1)
-        .clamp(1, 1000);
+    let raw = reflected_unsigned_value(scope, arguments.get(0), false);
+    let value = raw.clamp(1, 1000);
+    let _ = super::element::set_attribute_value(
+        scope,
+        arguments.this(),
+        "colspan".to_owned(),
+        raw.to_string(),
+    );
     if let Some(record) = scope
         .get_slot_mut::<HtmlTableCellElementStore>()
         .and_then(|store| {
@@ -159,8 +163,9 @@ pub(crate) fn get_row_span(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Integer::new_from_unsigned(scope, record.row_span).into());
+    if record(scope, arguments.this()).is_some() {
+        let value = reflected_span(scope, arguments.this(), "rowspan", 1, 65534, true);
+        result.set(v8::Integer::new_from_unsigned(scope, value).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -170,7 +175,14 @@ pub(crate) fn set_row_span(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let value = arguments.get(0).uint32_value(scope).unwrap_or(1).min(65534);
+    let raw = reflected_unsigned_value(scope, arguments.get(0), true);
+    let value = if raw == 0 { 0 } else { raw.min(65534) };
+    let _ = super::element::set_attribute_value(
+        scope,
+        arguments.this(),
+        "rowspan".to_owned(),
+        raw.to_string(),
+    );
     if let Some(record) = scope
         .get_slot_mut::<HtmlTableCellElementStore>()
         .and_then(|store| {
@@ -189,8 +201,10 @@ pub(crate) fn get_no_wrap(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
-    if let Some(record) = record(scope, arguments.this()) {
-        result.set(v8::Boolean::new(scope, record.no_wrap).into());
+    if record(scope, arguments.this()).is_some() {
+        let value =
+            super::element::reflected_boolean(scope, arguments.this(), "nowrap").unwrap_or(false);
+        result.set(v8::Boolean::new(scope, value).into());
     } else {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
     }
@@ -200,19 +214,12 @@ pub(crate) fn set_no_wrap(
     arguments: v8::FunctionCallbackArguments<'_>,
     _: v8::ReturnValue<'_>,
 ) {
-    let value = arguments.get(0).boolean_value(scope);
-    if let Some(record) = scope
-        .get_slot_mut::<HtmlTableCellElementStore>()
-        .and_then(|store| {
-            store
-                .records
-                .get_mut(&arguments.this().get_identity_hash().get())
-        })
-    {
-        record.no_wrap = value;
-    } else {
+    if record(scope, arguments.this()).is_none() {
         crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
     }
+    let value = arguments.get(0).boolean_value(scope);
+    let _ = super::element::set_reflected_boolean(scope, arguments.this(), "nowrap", value);
 }
 pub(crate) fn get_cell_index(
     scope: &mut v8::PinScope<'_, '_>,
@@ -225,4 +232,79 @@ pub(crate) fn get_cell_index(
     }
     let index = super::html_table_row_element::cell_index(scope, arguments.this()).unwrap_or(-1);
     result.set(v8::Integer::new(scope, index).into());
+}
+
+fn reflected_unsigned_value(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    allow_zero: bool,
+) -> u32 {
+    let number = value.number_value(scope).unwrap_or(0.0);
+    if number == 0.0 {
+        return 0;
+    }
+    if !number.is_finite() {
+        return if number.is_sign_positive() && !number.is_nan() {
+            u32::MAX
+        } else {
+            1
+        };
+    }
+    if number < 0.0 {
+        return 1;
+    }
+    number
+        .round_ties_even()
+        .clamp(if allow_zero { 0.0 } else { 1.0 }, f64::from(u32::MAX)) as u32
+}
+
+fn reflected_span(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    attribute: &str,
+    fallback: u32,
+    maximum: u32,
+    allow_zero: bool,
+) -> u32 {
+    let Some(raw) = super::element::attribute_value(scope, object, attribute) else {
+        return fallback;
+    };
+    let Ok(value) = raw.trim().parse::<u64>() else {
+        return fallback;
+    };
+    if value == 0 {
+        return if allow_zero { 0 } else { fallback };
+    }
+    value.min(u64::from(maximum)) as u32
+}
+
+pub(crate) fn get_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value =
+        super::element::attribute_value(scope, arguments.this(), attribute).unwrap_or_default();
+    if let Some(value) = v8::String::new(scope, &value) {
+        result.set(value.into());
+    }
+}
+
+pub(crate) fn set_reflected_string(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    attribute: &str,
+) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let value = crate::webidl::value_to_string(scope, arguments.get(0));
+    let _ =
+        super::element::set_attribute_value(scope, arguments.this(), attribute.to_owned(), value);
 }

@@ -12,18 +12,13 @@ fn get_t_foot(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
-    return_optional(s, a, r, |x| &x.t_foot);
+    super::html_table_element::get_t_foot(s, a, r);
 }
 
 fn set_t_foot(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    result: v8::ReturnValue<'_>,
 ) {
-    set_special_child(
-        scope,
-        arguments.this(),
-        arguments.get(0),
-        SpecialChild::Foot,
-    );
+    super::html_table_element::set_t_foot(scope, arguments, result);
 }

@@ -97,6 +97,24 @@ pub(crate) fn replace_rules(
     super::css_rule_list::replace(scope, list, rules)
 }
 
+pub(crate) fn serialized_body(
+    scope: &v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Option<String> {
+    let list = list(scope, object)?;
+    let rules = super::css_rule_list::rules(scope, v8::Local::new(scope, &list))?;
+    let mut body = String::new();
+    for rule in rules {
+        let text = super::css_rule::serialized(scope, v8::Local::new(scope, &rule))?;
+        for line in text.lines() {
+            body.push_str("  ");
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    Some(body)
+}
+
 fn get_css_rules(
     scope: &mut v8::PinScope<'_, '_>,
     arguments: v8::FunctionCallbackArguments<'_>,

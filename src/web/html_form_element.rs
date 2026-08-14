@@ -92,7 +92,13 @@ pub(crate) fn create<'s>(
         return Err("cannot create HTMLFormElement".to_owned());
     }
     super::html_element::attach(scope, object, "FORM");
-    let rel_list = super::dom_token_list::create_bound(scope, "", object, "rel")?;
+    let rel_list = super::dom_token_list::create_bound_with_support(
+        scope,
+        "",
+        object,
+        "rel",
+        super::dom_token_list::DomTokenSupport::HyperlinkRel,
+    )?;
     let elements = super::html_form_controls_collection::create(scope, Vec::new())?;
     super::html_collection::register_form_owner(scope, elements, object);
     let rel_list = v8::Global::new(scope, rel_list);
@@ -216,12 +222,13 @@ pub(crate) fn is_listed_control(
     scope: &v8::PinScope<'_, '_>,
     object: v8::Local<'_, v8::Object>,
 ) -> bool {
-    super::element::record(scope, object).is_some_and(|element| {
-        matches!(
-            element.tag_name.as_str(),
-            "BUTTON" | "FIELDSET" | "INPUT" | "OBJECT" | "OUTPUT" | "SELECT" | "TEXTAREA"
-        )
-    })
+    super::custom_element_registry::is_form_associated(scope, object)
+        || super::element::record(scope, object).is_some_and(|element| {
+            matches!(
+                element.tag_name.as_str(),
+                "BUTTON" | "FIELDSET" | "INPUT" | "OBJECT" | "OUTPUT" | "SELECT" | "TEXTAREA"
+            )
+        })
 }
 
 pub(crate) fn collect_controls_into<'s>(
@@ -651,6 +658,15 @@ pub(crate) fn controls_valid(
         return false;
     };
     for control in collect_controls(scope, form) {
+        if super::custom_element_registry::is_form_associated(scope, control) {
+            let valid =
+                super::element_internals::is_valid_for_target(scope, control).unwrap_or(true);
+            if !valid {
+                super::html_form_element::dispatch_invalid_event(scope, control);
+                return false;
+            }
+            continue;
+        }
         let Some(callback) = control.get(scope, key.into()) else {
             continue;
         };
@@ -665,6 +681,18 @@ pub(crate) fn controls_valid(
         }
     }
     true
+}
+
+pub(crate) fn dispatch_invalid_event(
+    scope: &mut v8::PinScope<'_, '_>,
+    control: v8::Local<'_, v8::Object>,
+) {
+    let Ok(event) = super::event::create(scope, "invalid") else {
+        return;
+    };
+    super::event::reinitialize(scope, event, "invalid".to_owned(), false, true, false);
+    super::event::set_trusted(scope, event, true);
+    super::event_target::dispatch(scope, control, event);
 }
 
 pub(crate) fn check_validity(
@@ -700,13 +728,15 @@ pub(crate) fn request_submit(
     if !current.no_validate && !controls_valid(scope, arguments.this()) {
         return;
     }
-    let event = super::event_target::create_event(scope, "submit");
-    if super::event_target::dispatch(scope, arguments.this(), event) {
-        update(scope, arguments.this(), |record| record.submit_count += 1);
-    }
+    let submitter = v8::Local::<v8::Object>::try_from(arguments.get(0)).ok();
+    submit_from_activation(scope, arguments.this(), submitter);
 }
 
 pub(crate) fn reset_control(scope: &mut v8::PinScope<'_, '_>, control: v8::Local<'_, v8::Object>) {
+    if super::custom_element_registry::is_form_associated(scope, control) {
+        super::custom_element_registry::notify_form_reset(scope, control);
+        return;
+    }
     if super::html_input_element::reset_state(scope, control) {
         return;
     }
@@ -728,14 +758,53 @@ pub(crate) fn reset(
         crate::webidl::throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let event = super::event_target::create_event(scope, "reset");
-    if !super::event_target::dispatch(scope, arguments.this(), event) {
+    reset_from_activation(scope, arguments.this());
+}
+
+pub(crate) fn submit_from_activation(
+    scope: &mut v8::PinScope<'_, '_>,
+    form: v8::Local<'_, v8::Object>,
+    submitter: Option<v8::Local<'_, v8::Object>>,
+) {
+    let Some(current) = record(scope, form) else {
+        return;
+    };
+    let submitter_skips_validation = submitter
+        .and_then(|value| super::html_button_element::record(scope, value))
+        .is_some_and(|record| record.form_no_validate)
+        || submitter
+            .and_then(|value| super::html_input_element::record(scope, value))
+            .is_some_and(|record| record.form_no_validate);
+    if !current.no_validate && !submitter_skips_validation && !controls_valid(scope, form) {
         return;
     }
-    for control in collect_controls(scope, arguments.this()) {
+    let submitter = submitter.map(|value| v8::Global::new(scope, value));
+    let Ok(event) = super::submit_event::create(scope, "submit", submitter, true, true, false)
+    else {
+        return;
+    };
+    super::event::set_trusted(scope, event, true);
+    if super::event_target::dispatch(scope, form, event) {
+        update(scope, form, |record| record.submit_count += 1);
+    }
+}
+
+pub(crate) fn reset_from_activation(
+    scope: &mut v8::PinScope<'_, '_>,
+    form: v8::Local<'_, v8::Object>,
+) {
+    let Ok(event) = super::event::create(scope, "reset") else {
+        return;
+    };
+    super::event::attach(scope, event, "reset".to_owned(), true, true, false);
+    super::event::set_trusted(scope, event, true);
+    if !super::event_target::dispatch(scope, form, event) {
+        return;
+    }
+    for control in collect_controls(scope, form) {
         reset_control(scope, control);
     }
-    update(scope, arguments.this(), |record| record.reset_count += 1);
+    update(scope, form, |record| record.reset_count += 1);
 }
 
 pub(crate) fn submit(

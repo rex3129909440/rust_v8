@@ -182,6 +182,8 @@ fn destroy(
         .and_then(|x| x.records.get_mut(&a.this().get_identity_hash().get()))
     {
         v.destroyed = true
+    } else {
+        crate::webidl::throw_type_error(s, "Illegal invocation")
     }
 }
 fn measure(
@@ -189,6 +191,10 @@ fn measure(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Summarizer", "measureInputUsage", r);
+        return;
+    }
     let n = crate::webidl::value_to_string(s, a.get(0)).len() as f64;
     let x = v8::Number::new(s, n);
     promise(s, x.into(), r)
@@ -198,6 +204,10 @@ fn summarize(
     a: v8::FunctionCallbackArguments<'_>,
     r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::reject_illegal_invocation_promise(s, "Summarizer", "summarize", r);
+        return;
+    }
     let input = crate::webidl::value_to_string(s, a.get(0));
     let summary = input
         .split_whitespace()
@@ -209,9 +219,13 @@ fn summarize(
 }
 fn stream(
     s: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
+    a: v8::FunctionCallbackArguments<'_>,
     mut r: v8::ReturnValue<'_>,
 ) {
+    if record(s, a.this()).is_none() {
+        crate::webidl::throw_type_error(s, "Illegal invocation");
+        return;
+    }
     if let Ok(x) = super::readable_stream::create_empty(s) {
         r.set(x.into())
     }

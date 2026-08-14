@@ -124,7 +124,9 @@ fn construct(
         );
         return;
     }
-    let input = crate::webidl::value_to_string(scope, arguments.get(0));
+    let Some(input) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let options = match read_options(scope, arguments.get(1)) {
         Ok(options) => options,
         Err(message) => {
@@ -132,13 +134,38 @@ fn construct(
             return;
         }
     };
-    let script = match super::worker_script_source::load(scope, &input, None) {
-        Ok(script) => script,
+    let (script, deferred_error) = match super::worker_script_source::load(scope, &input, None) {
+        Ok(script) => (script, None),
+        Err(message)
+            if message.starts_with("The offline Worker cannot load network script URL") =>
+        {
+            let url = match super::worker_script_source::resolve(scope, &input, None) {
+                Ok(url) => url,
+                Err(message) => {
+                    crate::webidl::throw_type_error(scope, &message);
+                    return;
+                }
+            };
+            let error = super::worker_global_scope::WorkerScriptError {
+                message,
+                filename: url.clone(),
+                lineno: 0,
+                colno: 0,
+            };
+            (
+                super::worker_script_source::WorkerScript {
+                    url,
+                    source: String::new(),
+                },
+                Some(error),
+            )
+        }
         Err(message) => {
             crate::webidl::throw_type_error(scope, &message);
             return;
         }
     };
+    let should_evaluate = deferred_error.is_none();
     let creator_context = scope.get_entered_or_microtask_context();
     let creator_window = creator_context.global(scope);
     let creator_origin = super::html_i_frame_element::origin_for_window(scope, creator_window);
@@ -193,7 +220,7 @@ fn construct(
         parent_context: v8::Global::new(scope, scope.get_current_context()),
         object: v8::Global::new(scope, object),
         onerror: None,
-        pending_errors: Vec::new(),
+        pending_errors: deferred_error.into_iter().collect(),
     };
     scope
         .get_slot_mut::<SharedWorkerStore>()
@@ -210,6 +237,7 @@ fn construct(
         runtime.ports.push(worker_port_global.clone());
     }
     if newly_created
+        && should_evaluate
         && let Err(error) = super::worker_global_scope::evaluate(scope, realm_id, &script.source)
     {
         let canceled = super::worker_global_scope::dispatch_script_error(scope, realm_id, &error);

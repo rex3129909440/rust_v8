@@ -15,12 +15,12 @@ fn compare_boundary_points(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    let Some(left) = super::range::record_or_throw(scope, arguments.this()) else {
+        return;
+    };
     let how = arguments.get(0).int32_value(scope).unwrap_or(-1);
     let Ok(other) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
         crate::webidl::throw_type_error(scope, "The second argument is not a Range");
-        return;
-    };
-    let Some(left) = super::range::record_or_throw(scope, arguments.this()) else {
         return;
     };
     let Some(right) = super::abstract_range::record(scope, other) else {
@@ -65,7 +65,7 @@ fn compare_boundary_points(
         super::node::throw_dom_exception(
             scope,
             "WrongDocumentError",
-            "The ranges have different roots",
+            "Failed to execute 'compareBoundaryPoints' on 'Range': The source range is in a different document than this range.",
         );
         return;
     };

@@ -14,6 +14,7 @@ struct DocumentRecord {
     current_script: Option<v8::Global<v8::Object>>,
     values: HashMap<String, v8::Global<v8::Value>>,
     handlers: HashMap<String, v8::Global<v8::Value>>,
+    model_context: v8::Global<v8::Object>,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -35,7 +36,7 @@ pub(crate) fn ensure_constructor<'s>(
         "Document",
         0,
         v8::ConstructorBehavior::Allow,
-        illegal_constructor,
+        construct,
     )?;
     let prototype = crate::webidl::prototype(scope, constructor)?;
     crate::webidl::reset_constructor_order(scope, prototype)?;
@@ -280,8 +281,20 @@ pub(crate) fn ensure_constructor<'s>(
     super::document_write::define(scope, prototype)?;
     super::document_writeln::define(scope, prototype)?;
     crate::webidl::finish_constructor(scope, prototype, constructor)?;
+    crate::webidl::define_method(
+        scope,
+        constructor.into(),
+        "parseHTMLUnsafe",
+        1,
+        parse_html_unsafe,
+    )?;
+    crate::webidl::define_method(scope, constructor.into(), "parseHTML", 1, parse_html)?;
     super::document_fragment_directive_property::define(scope, prototype)?;
+    super::document_model_context_property::define(scope, prototype)?;
     super::document_onpointerrawupdate::define(scope, prototype)?;
+    for name in ["ontouchcancel", "ontouchend", "ontouchmove", "ontouchstart"] {
+        super::document_touch_handlers::define(scope, prototype, name)?;
+    }
     super::document_browsing_topics::define(scope, prototype)?;
     super::document_has_private_token::define(scope, prototype)?;
     super::document_has_redemption_record::define(scope, prototype)?;
@@ -308,6 +321,85 @@ pub(crate) fn ensure_constructor<'s>(
     Ok(constructor)
 }
 
+fn parsed_html_document<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: String,
+    safe: bool,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let document = super::html_document::create_from_source(scope, source)?;
+    set_string_value(scope, document, "URL", "about:blank");
+    set_string_value(scope, document, "documentURI", "about:blank");
+    set_string_value(scope, document, "fallbackBaseURL", "about:blank");
+    if safe {
+        remove_unsafe_html(scope, document);
+    }
+    Ok(document)
+}
+
+fn remove_unsafe_html(scope: &mut v8::PinScope<'_, '_>, parent: v8::Local<'_, v8::Object>) {
+    for child in super::node::children(scope, parent) {
+        let unsafe_element = super::element::record(scope, child).is_some_and(|record| {
+            matches!(
+                record.tag_name.to_ascii_lowercase().as_str(),
+                "script" | "iframe" | "object" | "embed"
+            )
+        });
+        if unsafe_element {
+            super::node::detach(scope, child);
+            continue;
+        }
+        for attribute in super::element::attributes_snapshot(scope, child).unwrap_or_default() {
+            if attribute.name.to_ascii_lowercase().starts_with("on") {
+                super::element::remove_attribute_full(
+                    scope,
+                    child,
+                    attribute.namespace_uri.as_deref(),
+                    attribute.name.rsplit(':').next().unwrap_or(&attribute.name),
+                );
+            }
+        }
+        remove_unsafe_html(scope, child);
+    }
+}
+
+fn parse_html_unsafe(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'parseHTMLUnsafe' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let source = crate::webidl::value_to_string(scope, arguments.get(0));
+    match parsed_html_document(scope, source, false) {
+        Ok(document) => result.set(document.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
+}
+
+fn parse_html(
+    scope: &mut v8::PinScope<'_, '_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
+) {
+    if arguments.length() < 1 {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to execute 'parseHTML' on 'Document': 1 argument required, but only 0 present.",
+        );
+        return;
+    }
+    let source = crate::webidl::value_to_string(scope, arguments.get(0));
+    match parsed_html_document(scope, source, true) {
+        Ok(document) => result.set(document.into()),
+        Err(message) => crate::webidl::throw_type_error(scope, &message),
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     let constructor = ensure_constructor(scope)?;
@@ -319,7 +411,13 @@ pub(crate) fn attach(
     object: v8::Local<'_, v8::Object>,
     content_type: String,
 ) {
+    let model_context = super::model_context::create(scope)
+        .ok()
+        .map(|value| v8::Global::new(scope, value));
     if let Some(store) = scope.get_slot_mut::<DocumentStore>() {
+        let Some(model_context) = model_context else {
+            return;
+        };
         store.records.insert(
             object.get_identity_hash().get(),
             DocumentRecord {
@@ -329,9 +427,42 @@ pub(crate) fn attach(
                 current_script: None,
                 values: HashMap::new(),
                 handlers: HashMap::new(),
+                model_context,
             },
         );
     }
+}
+
+pub(crate) fn model_context(
+    scope: &v8::PinScope<'_, '_>,
+    document: v8::Local<'_, v8::Object>,
+) -> Option<v8::Global<v8::Object>> {
+    record(scope, document).map(|record| record.model_context)
+}
+
+pub(crate) fn create_detached<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    content_type: String,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let prototype = crate::webidl::prototype(scope, constructor)?;
+    let object = v8::Object::new(scope);
+    if crate::webidl::set_platform_prototype(scope, object, prototype.into()) != Some(true) {
+        return Err("cannot create Document".to_owned());
+    }
+    super::node::attach(
+        scope,
+        object,
+        super::node::DOCUMENT_NODE,
+        "#document".to_owned(),
+        None,
+    );
+    attach(scope, object, content_type);
+    set_string_value(scope, object, "URL", "about:blank");
+    set_string_value(scope, object, "documentURI", "about:blank");
+    set_string_value(scope, object, "fallbackBaseURL", "about:blank");
+    set_string_value(scope, object, "compatMode", "CSS1Compat");
+    Ok(object)
 }
 
 pub(crate) fn parse_source(
@@ -360,7 +491,8 @@ pub(crate) fn parse_source(
             .next()
             .filter(|name| !name.is_empty())
             .unwrap_or("html");
-        let doctype = super::document_type::create(scope, name, "", "")?;
+        let (public_id, system_id) = doctype_identifiers(declaration, name);
+        let doctype = super::document_type::create(scope, name, &public_id, &system_id)?;
         super::node::set_owner_document(scope, doctype, document);
         super::node::insert_node(scope, document, doctype, 0)
             .map_err(|(_, message)| message.to_owned())?;
@@ -382,6 +514,35 @@ pub(crate) fn parse_source(
         insertion += 1;
     }
     Ok(())
+}
+
+fn doctype_identifiers(declaration: &str, name: &str) -> (String, String) {
+    let remainder = declaration[name.len()..].trim_start();
+    let quoted = |text: &str| {
+        let mut values = Vec::new();
+        let mut rest = text;
+        while let Some(start) = rest.find(['\'', '"']) {
+            let quote = rest.as_bytes()[start] as char;
+            let after = &rest[start + 1..];
+            let Some(end) = after.find(quote) else {
+                break;
+            };
+            values.push(after[..end].to_owned());
+            rest = &after[end + 1..];
+        }
+        values
+    };
+    let values = quoted(remainder);
+    if remainder.to_ascii_uppercase().starts_with("PUBLIC") {
+        (
+            values.first().cloned().unwrap_or_default(),
+            values.get(1).cloned().unwrap_or_default(),
+        )
+    } else if remainder.to_ascii_uppercase().starts_with("SYSTEM") {
+        (String::new(), values.first().cloned().unwrap_or_default())
+    } else {
+        (String::new(), String::new())
+    }
 }
 
 pub(crate) fn set_string_value(
@@ -653,12 +814,30 @@ pub(crate) fn create_svg_element<'s>(
     }
 }
 
-fn illegal_constructor(
+fn construct(
     scope: &mut v8::PinScope<'_, '_>,
-    _: v8::FunctionCallbackArguments<'_>,
-    _: v8::ReturnValue<'_>,
+    arguments: v8::FunctionCallbackArguments<'_>,
+    mut result: v8::ReturnValue<'_>,
 ) {
-    crate::webidl::throw_type_error(scope, "Failed to construct 'Document': Illegal constructor");
+    if !arguments.is_construct_call() {
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'Document': Please use the 'new' operator, this DOM object constructor cannot be called as a function.",
+        );
+        return;
+    }
+    let document = arguments.this();
+    super::node::attach(scope, document, 9, "#document".to_owned(), None);
+    attach(scope, document, "application/xml".to_owned());
+    set_string_value(scope, document, "URL", "about:blank");
+    set_string_value(scope, document, "documentURI", "about:blank");
+    set_string_value(scope, document, "fallbackBaseURL", "about:blank");
+    set_string_value(scope, document, "compatMode", "CSS1Compat");
+    if let Err(message) = super::document_global::define_location(scope, document) {
+        crate::webidl::throw_type_error(scope, &message);
+        return;
+    }
+    result.set(document.into());
 }
 
 fn record(
@@ -915,7 +1094,6 @@ pub(crate) fn validate_qualified_name<'a>(
     attribute: bool,
 ) -> Result<(), (&'static str, &'a str)> {
     if !valid_xml_name(qualified_name)
-        || qualified_name.matches(':').count() > 1
         || qualified_name.starts_with(':')
         || qualified_name.ends_with(':')
     {
@@ -941,5 +1119,46 @@ pub(crate) fn validate_qualified_name<'a>(
             "The xmlns name requires the XMLNS namespace",
         ));
     }
+    if namespace == Some("http://www.w3.org/2000/xmlns/") && !(attribute && is_xmlns) {
+        return Err((
+            "NamespaceError",
+            "Only xmlns names may use the XMLNS namespace",
+        ));
+    }
     Ok(())
+}
+
+pub(crate) fn qualified_name_error_message(
+    method: &str,
+    interface: &str,
+    error_name: &str,
+    namespace: Option<&str>,
+    qualified_name: &str,
+) -> String {
+    let prefix = format!("Failed to execute '{method}' on '{interface}':");
+    if error_name == "NamespaceError" {
+        return format!(
+            "{prefix} The namespace URI provided ('{}') is not valid for the qualified name provided ('{qualified_name}').",
+            namespace.unwrap_or_default()
+        );
+    }
+    if qualified_name.starts_with(':') {
+        return format!(
+            "{prefix} The qualified name provided ('{qualified_name}') has an empty namespace prefix."
+        );
+    }
+    if qualified_name.ends_with(':') {
+        return format!(
+            "{prefix} The qualified name provided ('{qualified_name}') has an empty local name."
+        );
+    }
+    format!("{prefix} The qualified name provided ('{qualified_name}') is not valid.")
+}
+
+pub(crate) fn canonical_qualified_name(qualified_name: &str) -> String {
+    let Some((prefix, remainder)) = qualified_name.split_once(':') else {
+        return qualified_name.to_owned();
+    };
+    let local_name = remainder.split(':').next().unwrap_or_default();
+    format!("{prefix}:{local_name}")
 }

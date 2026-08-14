@@ -56,12 +56,18 @@ pub(crate) fn construct(
     if !arguments.is_construct_call() || arguments.length() < 2 {
         crate::webidl::throw_type_error(
             scope,
-            "Failed to construct 'FormDataEvent': 2 arguments required",
+            "Failed to construct 'FormDataEvent': 2 arguments required, but only 1 present.",
         );
         return;
     }
+    let Some(event_type) = crate::webidl::dom_string(scope, arguments.get(0)) else {
+        return;
+    };
     let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
-        crate::webidl::throw_type_error(scope, "The event init dictionary is required");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'FormDataEvent': The provided value is not of type 'FormDataEventInit'.",
+        );
         return;
     };
     let Some(key) = v8::String::new(scope, "formData") else {
@@ -71,14 +77,16 @@ pub(crate) fn construct(
         return;
     };
     let Ok(form_data) = v8::Local::<v8::Object>::try_from(value) else {
-        crate::webidl::throw_type_error(scope, "formData is not of type FormData");
+        crate::webidl::throw_type_error(
+            scope,
+            "Failed to construct 'FormDataEvent': Failed to read the 'formData' property from 'FormDataEventInit': Required member is undefined.",
+        );
         return;
     };
     if !super::form_data::is_form_data(scope, form_data) {
         crate::webidl::throw_type_error(scope, "formData is not of type FormData");
         return;
     }
-    let event_type = crate::webidl::value_to_string(scope, arguments.get(0));
     let bubbles = super::event::boolean_property(scope, init, "bubbles");
     let cancelable = super::event::boolean_property(scope, init, "cancelable");
     let composed = super::event::boolean_property(scope, init, "composed");

@@ -48,16 +48,42 @@ pub(crate) fn construct(
     mut r: v8::ReturnValue<'_>,
 ) {
     if !a.is_construct_call() || a.length() < 2 {
-        crate::webidl::throw_type_error(s, "2 arguments required");
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'SensorErrorEvent': 2 arguments required, but only 1 present.",
+        );
         return;
     }
-    let t = crate::webidl::value_to_string(s, a.get(0));
-    let init = v8::Local::<v8::Object>::try_from(a.get(1)).ok();
-    let err = init
-        .and_then(|o| v8::String::new(s, "error").and_then(|k| o.get(s, k.into())))
-        .and_then(|v| v8::Local::<v8::Object>::try_from(v).ok());
-    let Some(err) = err else {
-        crate::webidl::throw_type_error(s, "error is required");
+    let Some(t) = crate::webidl::dom_string(s, a.get(0)) else {
+        return;
+    };
+    let Some(init) = v8::Local::<v8::Object>::try_from(a.get(1)).ok() else {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'SensorErrorEvent': The provided value is not of type 'SensorErrorEventInit'.",
+        );
+        return;
+    };
+    let error_key = v8::String::new(s, "error").expect("error key");
+    let Some(error_value) = init.get(s, error_key.into()) else {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'SensorErrorEvent': Failed to read the 'error' property from 'SensorErrorEventInit': Required member is undefined.",
+        );
+        return;
+    };
+    if error_value.is_undefined() {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'SensorErrorEvent': Failed to read the 'error' property from 'SensorErrorEventInit': Required member is undefined.",
+        );
+        return;
+    }
+    let Ok(err) = v8::Local::<v8::Object>::try_from(error_value) else {
+        crate::webidl::throw_type_error(
+            s,
+            "Failed to construct 'SensorErrorEvent': Failed to read the 'error' property from 'SensorErrorEventInit': The provided value is not of type 'DOMException'.",
+        );
         return;
     };
     let (bubbles, cancelable, composed) = super::event::event_init(s, a.get(1));

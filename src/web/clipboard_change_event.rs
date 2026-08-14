@@ -74,12 +74,24 @@ pub(crate) fn construct(
         crate::webidl::throw_type_error(scope, "ClipboardChangeEvent must be constructed");
         return;
     }
+    let init = if arguments.length() == 0 {
+        v8::Object::new(scope)
+    } else {
+        let Ok(init) = v8::Local::<v8::Object>::try_from(arguments.get(1)) else {
+            crate::webidl::throw_type_error(
+                scope,
+                "Failed to construct 'ClipboardChangeEvent': The provided value is not of type 'ClipboardChangeEventInit'.",
+            );
+            return;
+        };
+        init
+    };
     let event_type = if arguments.get(0).is_undefined() {
         String::new()
     } else {
         crate::webidl::value_to_string(scope, arguments.get(0))
     };
-    let (bubbles, cancelable, composed) = super::event::event_init(scope, arguments.get(1));
+    let (bubbles, cancelable, composed) = super::event::event_init(scope, init.into());
     super::event::attach(
         scope,
         arguments.this(),
@@ -88,10 +100,10 @@ pub(crate) fn construct(
         cancelable,
         composed,
     );
-    let types = member(scope, arguments.get(1), "types")
+    let types = member(scope, init.into(), "types")
         .and_then(|value| v8::Local::<v8::Array>::try_from(value).ok())
         .unwrap_or_else(|| v8::Array::new(scope, 0));
-    let change_id = member(scope, arguments.get(1), "changeId")
+    let change_id = member(scope, init.into(), "changeId")
         .map(|value| crate::webidl::value_to_string(scope, value))
         .unwrap_or_default();
     let types = v8::Global::new(scope, types);

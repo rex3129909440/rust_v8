@@ -14,7 +14,7 @@ fn get_filter(
         return;
     };
     if let Some(filter) = record.filter {
-        result.set(v8::Local::new(scope, &filter));
+        result.set(v8::Local::new(scope, &filter).into());
     } else {
         result.set(v8::null(scope).into());
     }

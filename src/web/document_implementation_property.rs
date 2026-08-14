@@ -15,7 +15,7 @@ fn get_implementation(
     if super::document_property_support::return_stored(s, a.this(), "implementation", r) {
         return;
     }
-    match super::dom_implementation::create(s) {
+    match super::dom_implementation::create(s, a.this()) {
         Ok(value) => {
             super::document::remember_value(s, a.this(), "implementation", value.into());
             r.set(value.into());

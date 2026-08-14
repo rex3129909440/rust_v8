@@ -12,6 +12,10 @@ fn get_extent_of_char(
     arguments: v8::FunctionCallbackArguments<'_>,
     mut result: v8::ReturnValue<'_>,
 ) {
+    if record(scope, arguments.this()).is_none() {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    }
     let Some((_, index)) = character_index(scope, &arguments) else {
         crate::webidl::throw_type_error(scope, "Character index is out of bounds");
         return;

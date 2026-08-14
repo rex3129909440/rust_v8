@@ -153,8 +153,11 @@ fn handler_get(
     field: impl FnOnce(SensorRecord) -> Option<v8::Global<v8::Value>>,
     result: v8::ReturnValue<'_>,
 ) {
-    let handler = record(scope, object).and_then(field);
-    super::window_event_handler_support::return_handler(scope, handler, result);
+    let Some(record) = record(scope, object) else {
+        crate::webidl::throw_type_error(scope, "Illegal invocation");
+        return;
+    };
+    super::window_event_handler_support::return_handler(scope, field(record), result);
 }
 
 fn get_onerror(

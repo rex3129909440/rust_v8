@@ -12,7 +12,9 @@ fn is_point_in_range(
     let Some(record) = super::range::record_or_throw(scope, arguments.this()) else {
         return;
     };
-    let Some((node, offset)) = super::range::boundary_arguments(scope, &arguments) else {
+    let Some((node, offset)) =
+        super::range::boundary_arguments(scope, &arguments, "isPointInRange")
+    else {
         return;
     };
     let node = v8::Local::new(scope, &node);

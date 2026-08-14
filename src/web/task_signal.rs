@@ -125,6 +125,13 @@ fn record(scope: &v8::PinScope<'_, '_>, o: v8::Local<'_, v8::Object>) -> Option<
         .get(&o.get_identity_hash().get())
         .cloned()
 }
+
+pub(crate) fn priority(
+    scope: &v8::PinScope<'_, '_>,
+    signal: v8::Local<'_, v8::Object>,
+) -> Option<String> {
+    record(scope, signal).map(|record| record.priority)
+}
 fn get_priority(
     scope: &mut v8::PinScope<'_, '_>,
     a: v8::FunctionCallbackArguments<'_>,
