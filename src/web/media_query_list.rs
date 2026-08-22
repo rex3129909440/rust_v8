@@ -392,6 +392,9 @@ fn evaluate_colon_feature(
         let Some(requested) = parse_numeric_feature_value(name, value, environment) else {
             return false;
         };
+        if indefinite_viewport_aspect_ratio(name, environment) {
+            return indefinite_ratio_comparison(comparison);
+        }
         return compare(actual, requested, comparison);
     }
     if comparison != Comparison::Equal {
@@ -580,11 +583,17 @@ fn evaluate_range_feature(
                 (Some(name), None) => {
                     let actual = numeric_feature_value(name, environment, preferences)?;
                     let expected = parse_numeric_feature_value(name, parts[1], environment)?;
+                    if indefinite_viewport_aspect_ratio(name, environment) {
+                        return Some(indefinite_ratio_comparison(*operator));
+                    }
                     Some(compare(actual, expected, *operator))
                 }
                 (None, Some(name)) => {
                     let expected = parse_numeric_feature_value(name, parts[0], environment)?;
                     let actual = numeric_feature_value(name, environment, preferences)?;
+                    if indefinite_viewport_aspect_ratio(name, environment) {
+                        return Some(indefinite_ratio_comparison(*operator));
+                    }
                     Some(compare(expected, actual, *operator))
                 }
                 _ => Some(false),
@@ -597,10 +606,28 @@ fn evaluate_range_feature(
             let actual = numeric_feature_value(name, environment, preferences)?;
             let lower = parse_numeric_feature_value(name, parts[0], environment)?;
             let upper = parse_numeric_feature_value(name, parts[2], environment)?;
+            if indefinite_viewport_aspect_ratio(name, environment) {
+                return Some(
+                    indefinite_ratio_comparison(*first) && indefinite_ratio_comparison(*second),
+                );
+            }
             Some(compare(lower, actual, *first) && compare(actual, upper, *second))
         }
         _ => Some(false),
     }
+}
+
+fn indefinite_viewport_aspect_ratio(name: &str, environment: MediaEnvironment) -> bool {
+    name == "aspect-ratio"
+        && environment.viewport_width == 0.0
+        && environment.viewport_height == 0.0
+}
+
+fn indefinite_ratio_comparison(comparison: Comparison) -> bool {
+    matches!(
+        comparison,
+        Comparison::LessOrEqual | Comparison::Equal | Comparison::GreaterOrEqual
+    )
 }
 
 fn split_comparisons(feature: &str) -> Option<(Vec<&str>, Vec<Comparison>)> {
@@ -957,6 +984,26 @@ mod tests {
         ));
         assert!(evaluate_query(
             "(aspect-ratio: 0/1)",
+            environment,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(aspect-ratio = 0.25)",
+            environment,
+            &preferences
+        ));
+        assert!(!evaluate_query(
+            "(aspect-ratio < 0.25)",
+            environment,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(min-aspect-ratio: 0.25)",
+            environment,
+            &preferences
+        ));
+        assert!(evaluate_query(
+            "(max-aspect-ratio: 0.25)",
             environment,
             &preferences
         ));

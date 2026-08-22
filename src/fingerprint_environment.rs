@@ -1238,7 +1238,7 @@ impl MemoryFingerprint {
         if self.performance_js_heap_size_limit == 0
             || self.performance_js_heap_size_limit > MAX_SAFE_INTEGER
             || self.performance_total_js_heap_size > self.performance_js_heap_size_limit
-            || self.performance_used_js_heap_size > self.performance_total_js_heap_size
+            || self.performance_used_js_heap_size > self.performance_js_heap_size_limit
             || self.console_js_heap_size_limit == 0
             || self.console_js_heap_size_limit > MAX_SAFE_INTEGER
             || self.console_total_js_heap_size > self.console_js_heap_size_limit

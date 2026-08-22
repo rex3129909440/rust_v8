@@ -58,6 +58,8 @@ class SandboxLimits:
 
     timeout_ms: int | None = None
     max_heap_bytes: int | None = None
+    max_young_generation_bytes: int | None = None
+    max_code_range_bytes: int | None = None
     max_resident_bytes: int | None = None
     max_source_bytes: int | None = None
     max_output_bytes: int | None = None

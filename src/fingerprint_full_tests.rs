@@ -567,6 +567,61 @@ fn screen_locale_media_queries_canvas_webgl_and_audio_share_one_profile() {
 }
 
 #[test]
+fn explicit_time_zone_offset_drives_date_without_changing_exposed_zone_name() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.locale.locale = "zh-CN".to_owned();
+    options.fingerprint.locale.time_zone = "Etc/GMT-8".to_owned();
+    options.fingerprint.locale.time_zone_offset_minutes = 240;
+    let mut runtime = EdgeRuntime::with_options(options).expect("configured offset runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const method = Intl.DateTimeFormat.prototype.resolvedOptions;
+              return [
+                Intl.DateTimeFormat().resolvedOptions().timeZone,
+                new Intl.DateTimeFormat("en", { timeZone: "UTC" })
+                  .resolvedOptions().timeZone,
+                new Date().getTimezoneOffset(),
+                new Date("2025-01-15T12:00:00Z").getTimezoneOffset(),
+                new Date("2025-07-15T12:00:00Z").getTimezoneOffset(),
+                /GMT-0400/.test(new Date().toString()),
+                method.name,
+                method.length,
+                Function.prototype.toString.call(method)
+              ].join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "Etc/GMT-8|UTC|240|240|240|true|",
+            "resolvedOptions|0|function resolvedOptions() { [native code] }"
+        )
+    );
+}
+
+#[test]
+fn performance_memory_profile_preserves_evidence_specific_field_values() {
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.memory.performance_js_heap_size_limit = 4_294_705_152;
+    options.fingerprint.memory.performance_total_js_heap_size = 23_200_000;
+    options.fingerprint.memory.performance_used_js_heap_size = 66_508_722;
+    let mut runtime = EdgeRuntime::with_options(options).expect("configured memory runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"[
+              performance.memory.jsHeapSizeLimit,
+              performance.memory.totalJSHeapSize,
+              performance.memory.usedJSHeapSize
+            ].join("|")"#,
+        ),
+        "4294705152|23200000|66508722"
+    );
+}
+
+#[test]
 fn in_process_runtime_threads_restore_their_icu_defaults_before_evaluation() {
     let (ready_sender, ready_receiver) = std::sync::mpsc::channel();
     let (evaluate_sender, evaluate_receiver) = std::sync::mpsc::channel();

@@ -279,7 +279,12 @@ pub(crate) fn apply_fingerprint_noise(
             value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
             value ^= value >> 31;
             let unit = ((value >> 40) as f32) / ((1_u32 << 24) as f32);
-            let sample = (unit * 2.0 - 1.0) * amplitude;
+            let noise = (unit * 2.0 - 1.0) * amplitude;
+            let current = channel
+                .get_index(scope, sample_index as u32)
+                .and_then(|value| value.number_value(scope))
+                .unwrap_or(0.0) as f32;
+            let sample = current + noise;
             let sample = v8::Number::new(scope, sample as f64);
             let _ = channel.set_index(scope, sample_index, sample.into());
         }

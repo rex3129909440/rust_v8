@@ -1,6 +1,7 @@
 #[derive(Default)]
 pub(crate) struct DocumentGlobalStore {
     document: Option<v8::Global<v8::Object>>,
+    page_initialized: bool,
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -10,6 +11,28 @@ pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     let url = crate::page_init::url(scope);
     let document = create_document(scope, &url)?;
+    let stored_document = v8::Global::new(scope, document);
+    scope
+        .get_slot_mut::<DocumentGlobalStore>()
+        .ok_or_else(|| "document global state was not prepared".to_owned())?
+        .document = Some(stored_document);
+    install_existing(scope)?;
+    Ok(())
+}
+
+pub(crate) fn initialize_page(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
+    let (document, initialized) = scope
+        .get_slot::<DocumentGlobalStore>()
+        .and_then(|store| {
+            store
+                .document
+                .as_ref()
+                .map(|document| (v8::Local::new(scope, document), store.page_initialized))
+        })
+        .ok_or_else(|| "document global state was not installed".to_owned())?;
+    if initialized {
+        return Ok(());
+    }
     let html = crate::page_init::html(scope);
     if !html.is_empty() {
         super::document_html_parser::parse_page(scope, document, &html)?;
@@ -31,12 +54,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
         })
         .and_then(|base| super::element::attribute_value(scope, base, "href"));
     crate::page_init::update_base_url(scope, base_href.as_deref());
-    let stored_document = v8::Global::new(scope, document);
     scope
         .get_slot_mut::<DocumentGlobalStore>()
-        .ok_or_else(|| "document global state was not prepared".to_owned())?
-        .document = Some(stored_document);
-    install_existing(scope)?;
+        .ok_or_else(|| "document global state was not installed".to_owned())?
+        .page_initialized = true;
     Ok(())
 }
 

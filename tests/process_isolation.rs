@@ -40,6 +40,8 @@ fn worker_enforces_limits_and_remains_reusable_after_script_timeout() {
         limits: SandboxLimits {
             timeout: Some(Duration::from_millis(25)),
             max_heap_bytes: Some(64 * 1024 * 1024),
+            max_young_generation_bytes: None,
+            max_code_range_bytes: None,
             max_resident_bytes: Some(512 * 1024 * 1024),
             max_source_bytes: Some(8 * 1024),
             max_output_bytes: Some(8 * 1024),
@@ -93,6 +95,8 @@ fn resident_memory_limit_contains_allocation_failure_and_controller_recovers() {
         limits: SandboxLimits {
             timeout: Some(Duration::from_secs(10)),
             max_heap_bytes: Some(1024 * 1024 * 1024),
+            max_young_generation_bytes: None,
+            max_code_range_bytes: None,
             max_resident_bytes: Some(256 * 1024 * 1024),
             max_source_bytes: Some(8 * 1024),
             max_output_bytes: Some(8 * 1024),

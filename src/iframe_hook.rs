@@ -2,6 +2,7 @@ const MAX_HOOKS: usize = 64;
 const MAX_HOOK_NAME_BYTES: usize = 128;
 const MAX_HOOK_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_TOTAL_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const ROOT_PRELOAD_HOOK_NAME: &str = "__edge_root_preload__";
 
 /// JavaScript executed inside every iframe realm before that frame's page
 /// scripts run.
@@ -103,7 +104,10 @@ pub(crate) fn run_for_current_iframe(
         return Ok(());
     }
     let private_api = install_native_source_protection(scope)?;
-    for hook in hooks {
+    for hook in hooks
+        .into_iter()
+        .filter(|hook| hook.name != ROOT_PRELOAD_HOOK_NAME)
+    {
         run_one(scope, frame_url, &hook, private_api)?;
     }
     Ok(())
@@ -140,13 +144,22 @@ fn install_native_source_protection<'s>(
 }
 
 pub(crate) fn install_for_root(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
-    if scope
+    let hooks = scope
         .get_slot::<IframeHookStore>()
-        .is_none_or(|store| store.hooks.is_empty())
-    {
+        .map(|store| store.hooks.clone())
+        .unwrap_or_default();
+    if hooks.is_empty() {
         return Ok(());
     }
-    install_to_string_protection(scope).map(|_| ())
+    let private_api = install_native_source_protection(scope)?;
+    let frame_url = crate::page_init::url(scope);
+    for hook in hooks
+        .iter()
+        .filter(|hook| hook.name == ROOT_PRELOAD_HOOK_NAME)
+    {
+        run_one(scope, &frame_url, hook, private_api)?;
+    }
+    Ok(())
 }
 
 fn install_to_string_protection<'s>(

@@ -64,10 +64,23 @@ pub struct CapturedConsoleOutput {
     pub arguments: Vec<ConsoleValue>,
 }
 
-#[derive(Default)]
 struct ConsoleCaptureState {
+    enabled: bool,
     next_sequence: u64,
     entries: Vec<CapturedConsoleOutput>,
+}
+
+impl Default for ConsoleCaptureState {
+    fn default() -> Self {
+        Self {
+            // Direct EdgeRuntime/EdgeSandbox callers retain the historical
+            // stdout behavior. Worker pools explicitly disable capture for
+            // their normal path and enable it only for opted-in tasks.
+            enabled: true,
+            next_sequence: 0,
+            entries: Vec::new(),
+        }
+    }
 }
 
 pub(crate) fn prepare(isolate: &mut v8::OwnedIsolate) {
@@ -79,6 +92,9 @@ pub(crate) fn record<'s>(
     level: ConsoleLevel,
     callback_arguments: &v8::FunctionCallbackArguments<'s>,
 ) {
+    if !enabled(scope) {
+        return;
+    }
     let count = callback_arguments.length().max(0) as usize;
     let retained = count.min(MAX_ARGUMENTS);
     let mut arguments = Vec::with_capacity(retained);
@@ -133,15 +149,32 @@ pub(crate) fn clear(isolate: &mut v8::OwnedIsolate) {
     }
 }
 
+pub(crate) fn set_enabled(isolate: &mut v8::OwnedIsolate, enabled: bool) {
+    if let Some(state) = isolate.get_slot_mut::<ConsoleCaptureState>() {
+        state.enabled = enabled;
+        state.entries.clear();
+        state.next_sequence = 0;
+    }
+}
+
 pub(crate) fn observe_arguments<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     callback_arguments: &v8::FunctionCallbackArguments<'s>,
     start: usize,
 ) {
+    if !enabled(scope) {
+        return;
+    }
     let count = callback_arguments.length().max(0) as usize;
     for index in start..count.min(MAX_ARGUMENTS) {
         observe_console_value(scope, callback_arguments.get(index as i32), 0);
     }
+}
+
+fn enabled(scope: &v8::PinScope<'_, '_>) -> bool {
+    scope
+        .get_slot::<ConsoleCaptureState>()
+        .is_some_and(|state| state.enabled)
 }
 
 fn capture_value<'s>(
@@ -172,6 +205,7 @@ fn capture_value<'s>(
         let (value, truncated) = bounded_string(text, MAX_STRING_BYTES);
         return ConsoleValue::BigInt { value, truncated };
     }
+    observe_webview_console_to_string_tag(scope, value, format_nested_errors);
     if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(value) {
         let backing = buffer.get_backing_store();
         let available = backing.byte_length();
@@ -299,6 +333,44 @@ fn capture_value<'s>(
     ConsoleValue::Other {
         display: format!("[object {type_name}]"),
         type_name,
+    }
+}
+
+/// Android WebView's native console preview performs an observable
+/// `Get(value, Symbol.toStringTag)` for previewable object values.  The lookup
+/// applies to top-level arguments and array/arguments elements, but not to
+/// object-property children.  V8-recognized Error, Array, Function, Date and
+/// RegExp values, as well as direct Proxy values, use dedicated preview paths
+/// and skip the lookup.  If the getter throws, WebView retries it once and
+/// suppresses both exceptions.
+fn observe_webview_console_to_string_tag<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: v8::Local<'s, v8::Value>,
+    preview_value: bool,
+) {
+    if !preview_value
+        || !crate::browser_surface::current_version(scope).is_webview()
+        || value.is_proxy()
+        || value.is_native_error()
+        || value.is_array()
+        || value.is_function()
+        || value.is_date()
+        || value.is_reg_exp()
+    {
+        return;
+    }
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+        return;
+    };
+
+    for _ in 0..2 {
+        v8::tc_scope!(let try_catch, scope);
+        let key = v8::Symbol::get_to_string_tag(try_catch);
+        let _ = object.get(try_catch, key.into());
+        if !try_catch.has_caught() {
+            break;
+        }
+        try_catch.reset();
     }
 }
 

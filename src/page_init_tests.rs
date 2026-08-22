@@ -1,4 +1,6 @@
-use crate::{EdgeRuntime, EdgeRuntimeOptions, Evaluation, NetworkReplayEntry, PageInit};
+use crate::{
+    EdgeRuntime, EdgeRuntimeOptions, Evaluation, IframeHook, NetworkReplayEntry, PageInit,
+};
 
 fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
     match runtime.evaluate(source).expect("JavaScript evaluation") {
@@ -103,6 +105,47 @@ fn parser_inserted_scripts_run_after_window_globals_are_installed() {
     assert_eq!(
         text(&mut runtime, "pageGlobalEvidence"),
         "[object Navigator]|Win32|function|function|BODY"
+    );
+}
+
+#[test]
+fn root_preload_runs_before_page_html_is_materialized() {
+    let mut runtime = EdgeRuntime::with_options(EdgeRuntimeOptions {
+        page: Some(PageInit {
+            url: "https://scripts.example.test/preload-order".to_owned(),
+            html: concat!(
+                "<!doctype html><html><body><div id='parsed'></div><script>",
+                "const frame=document.createElement('iframe');",
+                "document.body.appendChild(frame);",
+                "window.pagePreloadEvidence=[",
+                "window.preloadRuns,",
+                "document.getElementById('parsed')!==null,",
+                "typeof frame.contentWindow.preloadRuns",
+                "].join('|');",
+                "</script></body></html>"
+            )
+            .to_owned(),
+            ..PageInit::default()
+        }),
+        iframe_hooks: vec![IframeHook::new(
+            crate::iframe_hook::ROOT_PRELOAD_HOOK_NAME,
+            concat!(
+                "window.preloadRuns=(window.preloadRuns||0)+1;",
+                "window.rootPreloadEvidence=[",
+                "document.body.childElementCount,",
+                "document.getElementById('parsed')===null,",
+                "document.currentScript===null",
+                "].join('|');"
+            ),
+        )],
+        ..EdgeRuntimeOptions::default()
+    })
+    .expect("page with root preload");
+
+    assert_eq!(text(&mut runtime, "rootPreloadEvidence"), "0|true|true");
+    assert_eq!(
+        text(&mut runtime, "pagePreloadEvidence"),
+        "1|true|undefined"
     );
 }
 

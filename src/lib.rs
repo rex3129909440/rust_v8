@@ -1,5 +1,6 @@
 #[rustfmt::skip]
 mod browser_android_surface_data;
+mod browser_android_webview_surface_data;
 mod browser_surface;
 #[rustfmt::skip]
 mod browser_surface_data;
@@ -106,6 +107,6 @@ pub use isolated_runtime::{IsolatedEdgeRuntime, run_isolated_worker};
 pub use network_capture::{CapturedNetworkRequest, NetworkRequestSource};
 pub use network_replay::NetworkReplayEntry;
 pub use page_init::PageInit;
-pub use runtime::{EdgeRuntime, Evaluation};
+pub use runtime::{EdgeRuntime, Evaluation, V8MemoryStatistics};
 pub use runtime_options::EdgeRuntimeOptions;
 pub use trace::TraceEntry;

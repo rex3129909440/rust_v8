@@ -5,6 +5,7 @@ import unittest
 from demo.fp.v8_memory_profile_catalog import (
     BLINK_MEMORY_BUCKETS,
     is_known_memory_snapshot,
+    memory_snapshots_for_platform,
     quantize_blink_memory_size,
     v8_150_heap_size_limit_catalog,
     v8_150_precise_heap_size_limit,
@@ -75,6 +76,7 @@ class V8MemoryProfileCatalogTests(unittest.TestCase):
 
     def test_android_v8_150_uses_its_distinct_memory_ratios(self) -> None:
         expected = {
+            1: 274_726_912,
             2: 549_453_824,
             3: 830_472_192,
             4: 1_098_907_648,
@@ -158,7 +160,22 @@ class V8MemoryProfileCatalogTests(unittest.TestCase):
 
         self.assertEqual(len(seen_snapshot_ids["windows"]), 10)
         self.assertEqual(len(seen_snapshot_ids["macos"]), 10)
-        self.assertEqual(len(seen_snapshot_ids["android"]), 9)
+        self.assertEqual(len(seen_snapshot_ids["android"]), 2)
+
+    def test_android_runtime_snapshots_do_not_reuse_desktop_rows(self) -> None:
+        windows = {
+            snapshot.id for snapshot in memory_snapshots_for_platform("windows")
+        }
+        macos = {
+            snapshot.id for snapshot in memory_snapshots_for_platform("macos")
+        }
+        android = memory_snapshots_for_platform("android")
+        self.assertEqual(
+            [(row.total_js_heap_size, row.used_js_heap_size) for row in android],
+            [(66_508_722, 23_200_000), (10_000_000, 10_000_000)],
+        )
+        self.assertFalse({row.id for row in android} & windows)
+        self.assertFalse({row.id for row in android} & macos)
 
 
 if __name__ == "__main__":

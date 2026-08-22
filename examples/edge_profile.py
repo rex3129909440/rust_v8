@@ -304,6 +304,10 @@ class ProfileField(IntEnum):
     VISUAL_VIEWPORT_SCALE = 561
     WEBGL2_MAX_TEXTURE_LOD_BIAS = 562
     DOCUMENT_BODY_CLIENT_HEIGHT = 563
+    WINDOW_IFRAME_OUTER_WIDTH = 565
+    WINDOW_IFRAME_OUTER_HEIGHT = 566
+    WINDOW_IFRAME_INNER_WIDTH = 567
+    WINDOW_IFRAME_INNER_HEIGHT = 568
 
     AUDIO_CHANNEL_NOISE_AMPLITUDE = 600
     AUDIO_FREQUENCY_NOISE_AMPLITUDE = 601
@@ -449,6 +453,10 @@ class WindowProfile:
     inner_height: float | None = None
     outer_width: float | None = None
     outer_height: float | None = None
+    iframe_inner_width: float | None = None
+    iframe_inner_height: float | None = None
+    iframe_outer_width: float | None = None
+    iframe_outer_height: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -937,8 +945,10 @@ class XrProfile:
 class MemoryProfile:
     """One coherent V8 heap snapshot exposed by performance/console.memory.
 
-    Keep ``used <= total <= limit`` for each surface.  ``total`` and ``used``
-    are transient allocation statistics, not physical-RAM identifiers.
+    Values are transmitted exactly as configured. Keep ``used <= total <= limit``
+    for ordinary profiles; evidence-specific test profiles may intentionally
+    supply another ordering. ``total`` and ``used`` are transient allocation
+    statistics, not physical-RAM identifiers.
     """
 
     performance_js_heap_size_limit: int | None = None

@@ -9,6 +9,321 @@ fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
     }
 }
 
+fn webview_runtime(major: u16) -> EdgeRuntime {
+    let mut options = EdgeRuntimeOptions::default();
+    let navigator = &mut options.fingerprint.navigator;
+    navigator.user_agent = format!(
+        "Mozilla/5.0 (Linux; Android 11; Pixel 4; wv) \
+         AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 \
+         Chrome/{major}.0.0.0 Mobile Safari/537.36"
+    );
+    navigator.app_version = navigator
+        .user_agent
+        .trim_start_matches("Mozilla/")
+        .to_owned();
+    navigator.user_agent_data.mobile = true;
+    navigator.user_agent_data.platform = "Android".to_owned();
+    navigator.user_agent_data.ua_full_version = format!("{major}.0.0.0");
+    navigator.user_agent_data.form_factors = vec!["Mobile".to_owned(), "WebView".to_owned()];
+    EdgeRuntime::with_options(options)
+        .unwrap_or_else(|error| panic!("WebView {major} runtime: {error}"))
+}
+
+#[test]
+fn webview_140_through_150_use_dedicated_https_surface_tables() {
+    const WINDOW_COUNTS: [usize; 11] = [
+        1087, 1090, 1091, 1093, 1097, 1099, 1105, 1107, 1106, 1109, 1096,
+    ];
+    const NAVIGATOR_COUNTS: [usize; 11] = [56, 56, 56, 56, 57, 57, 57, 57, 57, 58, 57];
+    const WORKER_COUNTS: [usize; 11] = [294, 298, 298, 298, 299, 300, 300, 300, 300, 300, 300];
+
+    for offset in 0..WINDOW_COUNTS.len() {
+        let major = 140 + offset as u16;
+        let mut runtime = webview_runtime(major);
+        let observed = text(
+            &mut runtime,
+            r#"
+            (() => {
+              const top = Object.getOwnPropertyNames(window);
+              const frame = document.createElement("iframe");
+              document.body.appendChild(frame);
+              const child = Object.getOwnPropertyNames(frame.contentWindow);
+              const navigator = Object.getOwnPropertyNames(Navigator.prototype);
+              const childNavigator = Object.getOwnPropertyNames(
+                frame.contentWindow.Navigator.prototype
+              );
+              return [
+                top.length,
+                child.length,
+                JSON.stringify(top) === JSON.stringify(child),
+                navigator.length,
+                JSON.stringify(navigator) === JSON.stringify(childNavigator),
+                Object.keys(frame.contentWindow).join("\u001f")
+              ].join("\u001e");
+            })()
+            "#,
+        );
+        let fields = observed.split('\u{1e}').collect::<Vec<_>>();
+        assert_eq!(
+            fields[0],
+            WINDOW_COUNTS[offset].to_string(),
+            "WebView {major} top"
+        );
+        assert_eq!(
+            fields[1],
+            WINDOW_COUNTS[offset].to_string(),
+            "WebView {major} iframe"
+        );
+        assert_eq!(fields[2], "true", "WebView {major} realm Window ordering");
+        assert_eq!(
+            fields[3],
+            NAVIGATOR_COUNTS[offset].to_string(),
+            "WebView {major} Navigator"
+        );
+        assert_eq!(
+            fields[4], "true",
+            "WebView {major} realm Navigator ordering"
+        );
+        assert_eq!(
+            fields[5],
+            crate::browser_android_webview_surface_data::window_enumerable_names(major)
+                .expect("dedicated WebView enumerable Window evidence")
+                .join("\u{1f}"),
+            "WebView {major} enumerable Window ordering",
+        );
+        assert_eq!(
+            crate::browser_android_webview_surface_data::worker_global_names(major).len(),
+            WORKER_COUNTS[offset],
+            "WebView {major} Worker global",
+        );
+        assert_ne!(
+            crate::browser_android_webview_surface_data::window_names(major),
+            crate::browser_android_surface_data::window_names(major),
+            "WebView {major} must not delegate Window to Android Chrome",
+        );
+        assert_ne!(
+            crate::browser_android_webview_surface_data::navigator_names(major),
+            crate::browser_android_surface_data::navigator_names(major),
+            "WebView {major} must not delegate Navigator to Android Chrome",
+        );
+    }
+}
+
+#[test]
+fn webview_140_through_150_do_not_leak_chrome_speech_synthesis_globals() {
+    for major in 140..=150 {
+        let mut runtime = webview_runtime(major);
+        assert_eq!(
+            text(
+                &mut runtime,
+                r#"
+                [
+                  typeof speechSynthesis,
+                  "speechSynthesis" in window,
+                  Object.getOwnPropertyDescriptor(window, "speechSynthesis") === undefined,
+                  typeof SpeechSynthesis,
+                  typeof SpeechSynthesisVoice,
+                  typeof SpeechSynthesisUtterance,
+                  typeof SpeechSynthesisEvent,
+                  typeof SpeechSynthesisErrorEvent
+                ].join("|")
+                "#,
+            ),
+            "undefined|false|true|undefined|undefined|undefined|undefined|undefined",
+            "WebView {major} leaked Android Chrome speech-synthesis globals",
+        );
+    }
+}
+
+#[test]
+fn webview_140_through_150_complete_object_surfaces_match_https_evidence() {
+    for major in 140..=150 {
+        let mut runtime = webview_runtime(major);
+        let observed = text(
+            &mut runtime,
+            r#"
+            (() => {
+              const frame = document.createElement("iframe");
+              document.body.appendChild(frame);
+              const fnv = input => {
+                let value = 2166136261;
+                for (let index = 0; index < input.length; index += 1) {
+                  value = Math.imul(value ^ input.charCodeAt(index), 16777619);
+                }
+                return value >>> 0;
+              };
+              const descriptors = realm => Object.getOwnPropertyNames(realm)
+                .filter(name => name !== "0").flatMap(name => {
+                  const descriptor = Object.getOwnPropertyDescriptor(realm, name);
+                  if (!descriptor) return [];
+                  return [name + ":" + ("value" in descriptor ? "d" : "a") + ":" +
+                    Number(descriptor.enumerable) + Number(descriptor.configurable) +
+                    Number(Boolean(descriptor.writable)) + ":" +
+                    Number(Boolean(descriptor.get)) + Number(Boolean(descriptor.set))];
+                });
+              const missing = realm => Object.getOwnPropertyNames(realm)
+                .filter(name => name !== "0" &&
+                  !Object.getOwnPropertyDescriptor(realm, name));
+              const surface = (realm, reflectKeys) => {
+                const keyName = key => typeof key === "symbol" ?
+                  "@@" + String(key.description || "") : key;
+                const ownKeys = value => (reflectKeys ? Reflect.ownKeys(value) :
+                  Object.getOwnPropertyNames(value)).map(keyName);
+                const records = [];
+                for (const owner of Object.getOwnPropertyNames(realm).sort()) {
+                  if (owner === "0") continue;
+                  const descriptor = Object.getOwnPropertyDescriptor(realm, owner);
+                  if (!descriptor || !("value" in descriptor)) continue;
+                  const value = descriptor.value;
+                  if (typeof value === "function") {
+                    if (value.prototype) records.push(
+                      "constructorPrototypes:" + owner + ":" +
+                      ownKeys(value.prototype).join("\u001e")
+                    );
+                    records.push(
+                      "constructorStatics:" + owner + ":" +
+                      ownKeys(value).join("\u001e")
+                    );
+                  } else if (value && typeof value === "object" && value !== realm &&
+                             Object.getOwnPropertyNames(value).length) {
+                    records.push(
+                      "globalObjects:" + owner + ":" + ownKeys(value).join("\u001e")
+                    );
+                  }
+                }
+                records.sort();
+                return fnv(records.join("\u001f"));
+              };
+              return [
+                missing(globalThis).join(","),
+                missing(frame.contentWindow).join(","),
+                fnv(descriptors(globalThis).join("\u001f")),
+                fnv(descriptors(frame.contentWindow).join("\u001f")),
+                surface(globalThis, false),
+                surface(frame.contentWindow, false),
+                surface(globalThis, true),
+                surface(frame.contentWindow, true)
+              ].join("|");
+            })()
+            "#,
+        );
+        let descriptor =
+            crate::browser_android_webview_surface_data::expected_window_descriptor_hash(major);
+        let surface =
+            crate::browser_android_webview_surface_data::expected_versioned_surface_hash(major);
+        let keys =
+            crate::browser_android_webview_surface_data::expected_versioned_surface_keys_hash(
+                major,
+            );
+        assert_eq!(
+            observed,
+            format!("||{descriptor}|{descriptor}|{surface}|{surface}|{keys}|{keys}"),
+            "WebView {major} HTTPS descriptors and complete surface",
+        );
+    }
+}
+
+#[test]
+fn webview_136_iframe_object_keys_follow_the_enumerable_evidence_table() {
+    let mut options = EdgeRuntimeOptions::default();
+    let navigator = &mut options.fingerprint.navigator;
+    navigator.user_agent = concat!(
+        "Mozilla/5.0 (Linux; Android 9; Pixel 3 Build/PQ3A; wv) ",
+        "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 ",
+        "Chrome/136.0.0.0 Mobile Safari/537.36"
+    )
+    .to_owned();
+    navigator.app_version = navigator
+        .user_agent
+        .trim_start_matches("Mozilla/")
+        .to_owned();
+    navigator.user_agent_data.mobile = true;
+    navigator.user_agent_data.platform = "Android".to_owned();
+    navigator.user_agent_data.ua_full_version = "136.0.0.0".to_owned();
+    navigator.user_agent_data.form_factors = vec!["Mobile".to_owned(), "WebView".to_owned()];
+    let mut runtime = EdgeRuntime::with_options(options).expect("WebView 136 runtime");
+    let actual = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const frame = document.createElement("iframe");
+          document.body.appendChild(frame);
+          return Object.keys(frame.contentWindow).join("\u001f");
+        })()
+        "#,
+    );
+    let expected = crate::browser_android_webview_surface_data::window_enumerable_names(136)
+        .expect("WebView 136 enumerable Window evidence")
+        .join("\u{1f}");
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn webview_136_style_surface_uses_its_own_success_evidence() {
+    let mut options = EdgeRuntimeOptions::default();
+    let navigator = &mut options.fingerprint.navigator;
+    navigator.user_agent = concat!(
+        "Mozilla/5.0 (Linux; Android 9; Pixel 3 Build/PQ3A; wv) ",
+        "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 ",
+        "Chrome/136.0.0.0 Mobile Safari/537.36"
+    )
+    .to_owned();
+    navigator.app_version = navigator
+        .user_agent
+        .trim_start_matches("Mozilla/")
+        .to_owned();
+    navigator.user_agent_data.mobile = true;
+    navigator.user_agent_data.platform = "Android".to_owned();
+    navigator.user_agent_data.ua_full_version = "136.0.0.0".to_owned();
+    navigator.user_agent_data.form_factors = vec!["Mobile".to_owned(), "WebView".to_owned()];
+    let mut webview = EdgeRuntime::with_options(options).expect("WebView 136 runtime");
+    let expected =
+        crate::web::css_style_declaration_webview_properties::WEBVIEW_136_SUPPORTED_PROPERTIES
+            .join("\u{1f}");
+
+    assert_eq!(
+        text(
+            &mut webview,
+            "Object.keys(document.createElement('div').style).join('\\u001f')"
+        ),
+        expected,
+    );
+    assert_eq!(
+        text(
+            &mut webview,
+            r#"
+            (() => {
+              const frame = document.createElement("iframe");
+              document.body.appendChild(frame);
+              return Object.keys(frame.contentDocument.createElement("div").style)
+                .join("\u001f");
+            })()
+            "#,
+        ),
+        expected,
+    );
+    assert_eq!(
+        text(
+            &mut webview,
+            "'animationTrigger' in document.createElement('div').style"
+        ),
+        "false",
+    );
+
+    let mut desktop = EdgeRuntime::new().expect("desktop runtime");
+    assert_eq!(
+        text(
+            &mut desktop,
+            "Object.keys(document.createElement('div').style).length"
+        ),
+        crate::web::css_style_declaration_supported_properties::EDGE_150_SUPPORTED_PROPERTIES
+            .iter()
+            .filter(|name| !name.starts_with("epub"))
+            .count()
+            .to_string(),
+    );
+}
+
 #[test]
 fn iframe_window_has_the_complete_edge_surface_and_stable_navigation_identity() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
@@ -1281,11 +1596,9 @@ fn proxy_trace_preserves_the_cross_origin_window_proxy_edge_shape() {
     assert!(trace.iter().any(|entry| {
         entry.operation == "call" && entry.api.ends_with("Object.getPrototypeOf")
     }));
-    assert!(
-        trace
-            .iter()
-            .any(|entry| entry.operation == "call" && entry.api.ends_with("Reflect.ownKeys"))
-    );
+    assert!(trace
+        .iter()
+        .any(|entry| entry.operation == "call" && entry.api.ends_with("Reflect.ownKeys")));
     assert!(trace.iter().any(|entry| entry.operation == "get"));
     assert!(trace.iter().any(|entry| entry.operation == "call"));
 }
@@ -1383,9 +1696,7 @@ fn cross_origin_child_access_to_parent_uses_the_same_edge_whitelist() {
         entry.operation == "get"
             && (entry.api.ends_with(".parent") || entry.api.contains("parent."))
     }));
-    assert!(
-        trace
-            .iter()
-            .any(|entry| { entry.operation == "call" && entry.api.ends_with("postMessage") })
-    );
+    assert!(trace
+        .iter()
+        .any(|entry| { entry.operation == "call" && entry.api.ends_with("postMessage") }));
 }

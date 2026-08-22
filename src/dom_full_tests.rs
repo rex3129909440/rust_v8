@@ -1,4 +1,4 @@
-use crate::{EdgeRuntime, Evaluation};
+use crate::{EdgeFingerprint, EdgeRuntime, Evaluation};
 
 fn text(runtime: &mut EdgeRuntime, source: &str) -> String {
     match runtime.evaluate(source).expect("JavaScript evaluation") {
@@ -3820,6 +3820,44 @@ fn input_intrinsic_geometry_follows_edge_150_https_evidence() {
             "detached,0,0,0,0,0,0,0"
         )
     );
+}
+
+#[test]
+fn android_input_button_intrinsic_geometry_tracks_value_and_author_font_size() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.navigator.user_agent = "Mozilla/5.0 (Linux; Android 9; Pixel 4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36".to_owned();
+    fingerprint.navigator.app_version = fingerprint
+        .navigator
+        .user_agent
+        .strip_prefix("Mozilla/")
+        .unwrap()
+        .to_owned();
+    fingerprint.navigator.platform = "Linux aarch64".to_owned();
+    fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+    fingerprint.navigator.user_agent_data.mobile = true;
+    fingerprint.navigator.user_agent_data.ua_full_version = "149.0.0.0".to_owned();
+    fingerprint.css.input_button = "display:inline-block;box-sizing:border-box;width:15.636364px;height:21.272727px;padding:1px 6px;border-width:1.42857px;border-style:outset;font-family:Arial;font-size:13.3333px;font-weight:400;line-height:normal;color:rgb(0, 0, 0);appearance:auto".to_owned();
+
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).expect("Android runtime");
+    let result = text(
+        &mut runtime,
+        r#"
+        (() => {
+          const input = document.createElement("input");
+          input.type = "button";
+          input.style.fontSize = "100px";
+          input.style.margin = "-9999px";
+          input.value = "\u203c\ufe0e";
+          document.body.appendChild(input);
+          return [
+            input.clientWidth,
+            input.clientHeight,
+            getComputedStyle(input).font
+          ].join("|");
+        })()
+        "#,
+    );
+    assert_eq!(result, "112|119|100px Arial");
 }
 
 #[test]

@@ -136,6 +136,133 @@ fn android_chromium_fingerprint(major: u16) -> EdgeFingerprint {
 }
 
 #[test]
+fn application_specific_android_webview_uses_profile_version_hint() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.navigator.user_agent =
+        "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.app_version =
+        "8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.platform = "Linux armv81".to_owned();
+    fingerprint.navigator.user_agent_data.mobile = true;
+    fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+    fingerprint.navigator.user_agent_data.ua_full_version = "147.0.7727.117".to_owned();
+    fingerprint.media_preferences.pointer = "fine".to_owned();
+    fingerprint.media_preferences.any_pointer = "fine".to_owned();
+    fingerprint.media_preferences.hover = "hover".to_owned();
+    fingerprint.media_preferences.any_hover = "hover".to_owned();
+    fingerprint.rendering.audio.base_latency = 0.01;
+
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).unwrap();
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"[
+              navigator.userAgent,
+              navigator.appVersion,
+              navigator.platform,
+              navigator.userAgentData.platform,
+              navigator.userAgentData.mobile,
+              matchMedia("(pointer: fine)").matches,
+              matchMedia("(hover: hover)").matches,
+              new AudioContext().baseLatency,
+              "contacts" in navigator,
+              "get" in SharedStorage.prototype,
+              "LanguageModel" in globalThis
+            ].join("|")"#,
+        ),
+        concat!(
+            "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)|",
+            "8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)|",
+            "Linux armv81|Android|true|true|true|0.01|true|true|false"
+        )
+    );
+}
+
+fn android_webview_fingerprint(major: u16) -> EdgeFingerprint {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.navigator.user_agent = if major == 136 {
+        "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned()
+    } else {
+        format!(
+            "Mozilla/5.0 (Linux; Android 11; Pixel 4 Build/RQ2A.210505.002; wv) \
+AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/{major}.0.0.0 Mobile Safari/537.36"
+        )
+    };
+    fingerprint.navigator.app_version =
+        crate::fingerprint::app_version_from_user_agent(&fingerprint.navigator.user_agent)
+            .to_owned();
+    fingerprint.navigator.user_agent_data.mobile = true;
+    fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+    fingerprint.navigator.user_agent_data.ua_full_version = format!("{major}.0.0.0");
+    fingerprint.navigator.user_agent_data.form_factors =
+        vec!["Mobile".to_owned(), "WebView".to_owned()];
+    fingerprint
+}
+
+#[test]
+fn android_webview_136_and_150_use_separate_evidence_surfaces() {
+    let mut legacy = EdgeRuntime::with_fingerprint(android_webview_fingerprint(136)).unwrap();
+    assert_eq!(
+        text(
+            &mut legacy,
+            r#"[
+              Object.getOwnPropertyNames(window).length,
+              Object.getOwnPropertyNames(Navigator.prototype).length,
+              "userAgentData" in navigator
+            ].join("|")"#,
+        ),
+        "871|48|false"
+    );
+
+    let mut current = EdgeRuntime::with_fingerprint(android_webview_fingerprint(150)).unwrap();
+    assert_eq!(
+        text(
+            &mut current,
+            r#"[
+              Object.getOwnPropertyNames(window).length,
+              Object.getOwnPropertyNames(Navigator.prototype).length,
+              Object.getOwnPropertyNames(Request.prototype).length,
+              "userAgentData" in navigator
+            ].join("|")"#,
+        ),
+        "1096|57|26|true"
+    );
+}
+
+#[test]
+fn android_computed_system_colors_use_the_mobile_palette() {
+    let mut runtime = EdgeRuntime::with_fingerprint(android_chromium_fingerprint(149)).unwrap();
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const element = document.createElement("div");
+              document.body.appendChild(element);
+              return [
+                "ActiveBorder",
+                "ButtonFace",
+                "GrayText",
+                "Highlight",
+                "HighlightText",
+                "ThreeDShadow",
+                "WindowFrame"
+              ].map(color => {
+                element.style.color = color;
+                return getComputedStyle(element).color;
+              }).join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "rgb(118, 118, 118)|rgb(239, 239, 239)|rgb(128, 128, 128)|",
+            "rgba(51, 181, 229, 0.4)|rgb(0, 0, 0)|",
+            "rgb(118, 118, 118)|rgb(118, 118, 118)"
+        )
+    );
+}
+
+#[test]
 fn android_user_agent_converts_only_untouched_desktop_platform_defaults() {
     let mut runtime = EdgeRuntime::with_fingerprint(android_chromium_fingerprint(151)).unwrap();
     assert_eq!(

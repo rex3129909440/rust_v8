@@ -82,8 +82,8 @@ setup(
     name=PYPI_DISTRIBUTION,
     version=METADATA["version"],
     description=METADATA["description"],
-    long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
-    long_description_content_type="text/markdown",
+    long_description="",
+    long_description_content_type="text/plain",
     license=METADATA["license"],
     url="https://github.com/rex3129909440/rust_v8",
     project_urls={

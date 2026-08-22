@@ -323,7 +323,7 @@ fn snapshot_request_init<'s>(
     scope: &v8::PinScope<'s, '_>,
     init: Option<v8::Local<'s, v8::Object>>,
 ) -> RequestInitSnapshot<'s> {
-    const MEMBERS: [&str; 20] = [
+    const FULL_MEMBERS: [&str; 20] = [
         "adAuctionHeaders",
         "attributionReporting",
         "body",
@@ -345,13 +345,39 @@ fn snapshot_request_init<'s>(
         "signal",
         "targetAddressSpace",
     ];
-    let mut values = HashMap::with_capacity(MEMBERS.len());
+    const ANDROID_APP_MEMBERS: [&str; 16] = [
+        "attributionReporting",
+        "body",
+        "cache",
+        "credentials",
+        "duplex",
+        "headers",
+        "integrity",
+        "keepalive",
+        "method",
+        "mode",
+        "priority",
+        "privateToken",
+        "redirect",
+        "referrer",
+        "referrerPolicy",
+        "signal",
+    ];
+    let android_app = custom_android_app_user_agent(scope);
+    let members: &[&str] = if android_app {
+        &ANDROID_APP_MEMBERS
+    } else {
+        &FULL_MEMBERS
+    };
+    let mut values = HashMap::with_capacity(members.len());
     if let Some(init) = init {
-        for name in MEMBERS {
+        for &name in members {
             if let Some(value) = property(scope, init, name) {
                 values.insert(name, value);
             }
-            if name == "attributionReporting" {
+            if name == "attributionReporting"
+                && (!android_app || crate::browser_surface::current_version(scope).major() >= 150)
+            {
                 let Some(key) = v8::String::new(scope, name) else {
                     continue;
                 };
@@ -363,6 +389,10 @@ fn snapshot_request_init<'s>(
         }
     }
     RequestInitSnapshot { values }
+}
+
+fn custom_android_app_user_agent(scope: &v8::PinScope<'_, '_>) -> bool {
+    crate::browser_surface::current_version(scope).is_webview()
 }
 
 pub(crate) fn observe_request_init(

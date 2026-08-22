@@ -259,6 +259,7 @@ pub(crate) mod css_skew_y;
 pub(crate) mod css_starting_style_rule;
 pub(crate) mod css_style_declaration;
 pub(crate) mod css_style_declaration_supported_properties;
+pub(crate) mod css_style_declaration_webview_properties;
 pub(crate) mod css_style_rule;
 pub(crate) mod css_style_sheet;
 pub(crate) mod css_style_value;
@@ -5166,7 +5167,11 @@ pub(crate) fn install_after_late_intrinsics(
         scope,
         crate::browser_surface::WindowSurfacePhase::BeforeChrome,
     )?;
-    chrome_global::install(scope)
+    if crate::browser_surface::current_window_exposes(scope, "chrome") {
+        chrome_global::install(scope)
+    } else {
+        Ok(())
+    }
 }
 
 pub(crate) fn install_after_webassembly(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
@@ -5433,7 +5438,9 @@ fn install_after_webassembly_impl(scope: &mut v8::PinScope<'_, '_>) -> Result<()
     xr_plane_set::install(scope)?;
     xr_visibility_mask_change_event::install(scope)?;
     fetch_later_global::install(scope)?;
-    get_digital_goods_service_global::install(scope)?;
+    if crate::browser_surface::current_window_exposes(scope, "getDigitalGoodsService") {
+        get_digital_goods_service_global::install(scope)?;
+    }
     get_screen_details_global::install(scope)?;
     query_local_fonts_global::install(scope)?;
     show_directory_picker_global::install(scope)?;
@@ -5446,7 +5453,9 @@ fn install_after_webassembly_impl(scope: &mut v8::PinScope<'_, '_>) -> Result<()
     credentialless_global::install(scope)?;
     fence_global::install(scope)?;
     launch_queue_global::install(scope)?;
-    speech_synthesis_global::install(scope)?;
+    if crate::browser_surface::current_window_exposes(scope, "speechSynthesis") {
+        speech_synthesis_global::install(scope)?;
+    }
     on_scroll_snap_change::install(scope)?;
     on_scroll_snap_changing::install(scope)?;
     on_gamepad_connected::install(scope)?;
@@ -5503,11 +5512,21 @@ fn install_after_webassembly_impl(scope: &mut v8::PinScope<'_, '_>) -> Result<()
     speech_recognition::install(scope)?;
     speech_recognition_error_event::install(scope)?;
     speech_recognition_event::install(scope)?;
-    speech_synthesis::install(scope)?;
-    speech_synthesis_error_event::install(scope)?;
-    speech_synthesis_event::install(scope)?;
-    speech_synthesis_utterance::install(scope)?;
-    speech_synthesis_voice::install(scope)?;
+    if crate::browser_surface::current_window_exposes(scope, "SpeechSynthesis") {
+        speech_synthesis::install(scope)?;
+    }
+    if crate::browser_surface::current_window_exposes(scope, "SpeechSynthesisErrorEvent") {
+        speech_synthesis_error_event::install(scope)?;
+    }
+    if crate::browser_surface::current_window_exposes(scope, "SpeechSynthesisEvent") {
+        speech_synthesis_event::install(scope)?;
+    }
+    if crate::browser_surface::current_window_exposes(scope, "SpeechSynthesisUtterance") {
+        speech_synthesis_utterance::install(scope)?;
+    }
+    if crate::browser_surface::current_window_exposes(scope, "SpeechSynthesisVoice") {
+        speech_synthesis_voice::install(scope)?;
+    }
     timeline_trigger::install(scope)?;
     timeline_trigger_range::install(scope)?;
     timeline_trigger_range_list::install(scope)?;

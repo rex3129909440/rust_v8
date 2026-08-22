@@ -792,10 +792,28 @@ fn property_name(scope: &v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>) -> 
         return None;
     }
     let key = key.to_string(scope)?.to_rust_string_lossy(scope);
-    css_named_property(&key)
+    css_named_property(scope, &key)
 }
 
-fn css_named_property(name: &str) -> Option<String> {
+fn supported_named_properties(scope: &v8::PinScope<'_, '_>) -> &'static [&'static str] {
+    let version = crate::browser_surface::current_version(scope);
+    if version.is_webview() && version.major() == 136 {
+        super::css_style_declaration_webview_properties::WEBVIEW_136_SUPPORTED_PROPERTIES
+    } else {
+        super::css_style_declaration_supported_properties::EDGE_150_SUPPORTED_PROPERTIES
+    }
+}
+
+fn contains_named_property(scope: &v8::PinScope<'_, '_>, name: &str) -> bool {
+    let version = crate::browser_surface::current_version(scope);
+    if version.is_webview() && version.major() == 136 {
+        super::css_style_declaration_webview_properties::contains(name)
+    } else {
+        super::css_style_declaration_supported_properties::contains(name)
+    }
+}
+
+fn css_named_property(scope: &v8::PinScope<'_, '_>, name: &str) -> Option<String> {
     // Blink's legacy own-key enumerator still lists these historical EPUB
     // aliases, but the named-property getter/query does not expose them.
     // Consequently Reflect.ownKeys() includes them while
@@ -847,7 +865,7 @@ fn css_named_property(name: &str) -> Option<String> {
     if name == "webkitTextSizeAdjust" {
         return Some("text-size-adjust".to_owned());
     }
-    if !super::css_style_declaration_supported_properties::contains(name) {
+    if !contains_named_property(scope, name) {
         return None;
     }
     let mut output = if name.starts_with("webkit") {
@@ -955,7 +973,7 @@ fn named_enumerator(
         result.set(v8::Array::new(scope, 0));
         return;
     }
-    let names = super::css_style_declaration_supported_properties::EDGE_150_SUPPORTED_PROPERTIES
+    let names = supported_named_properties(scope)
         .iter()
         .filter_map(|name| v8::String::new(scope, name).map(|name| name.into()))
         .collect::<Vec<v8::Local<v8::Value>>>();

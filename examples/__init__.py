@@ -26,6 +26,7 @@ from .run_sandbox import (
     CapturedNetworkRequest,
     EdgeSandbox,
     SandboxExecutionError,
+    V8MemoryStatistics,
     find_native_artifacts,
 )
 
@@ -53,6 +54,7 @@ __all__ = [
     "SandboxLimits",
     "SandboxTask",
     "WebAudioProfile",
+    "V8MemoryStatistics",
     "find_native_artifacts",
     "mac_edge_150_profile",
     "windows_edge_150_profile",

@@ -1,5 +1,5 @@
 use crate::{
-    EdgeRuntime, EdgeRuntimeOptions, Evaluation, NetworkReplayEntry, PageInit,
+    EdgeFingerprint, EdgeRuntime, EdgeRuntimeOptions, Evaluation, NetworkReplayEntry, PageInit,
     PerformanceEntryFingerprint, SpeechVoiceFingerprint,
 };
 
@@ -443,6 +443,43 @@ fn offline_audio_triangle_compressor_matches_edge_rendering_kernel() {
 }
 
 #[test]
+fn offline_audio_fingerprint_noise_perturbs_instead_of_replacing_rendered_samples() {
+    const SOURCE: &str = r#"
+        (() => {
+          const context = new OfflineAudioContext(1, 256, 44100);
+          const oscillator = context.createOscillator();
+          oscillator.connect(context.destination);
+          oscillator.start();
+          return context.startRendering().then(buffer => {
+            const data = buffer.getChannelData(0);
+            let total = 0;
+            for (let index = 0; index < data.length; ++index) {
+              total += Math.abs(data[index]);
+            }
+            return total;
+          });
+        })()
+    "#;
+
+    let mut baseline = EdgeRuntime::new().expect("baseline offline audio");
+    let baseline = text(&mut baseline, SOURCE)
+        .parse::<f64>()
+        .expect("baseline aggregate");
+
+    let mut options = EdgeRuntimeOptions::default();
+    options.fingerprint.rendering.audio.channel_noise_amplitude = 0.000_01;
+    let mut noisy = EdgeRuntime::with_options(options).expect("noisy offline audio");
+    let noisy = text(&mut noisy, SOURCE)
+        .parse::<f64>()
+        .expect("noisy aggregate");
+
+    assert!(baseline > 1.0, "baseline aggregate was {baseline}");
+    assert!(noisy > 1.0, "noise replaced rendered samples: {noisy}");
+    assert!((noisy - baseline).abs() < 0.1);
+    assert_ne!(noisy, baseline);
+}
+
+#[test]
 fn oscillator_triangle_uses_the_edge_band_limited_waveform() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     let _ = runtime
@@ -612,6 +649,259 @@ fn fetch_init_is_snapshotted_before_url_validation_in_webidl_order() {
 }
 
 #[test]
+fn custom_android_app_request_init_uses_webview_feature_gates() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.navigator.user_agent =
+        "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.app_version =
+        "8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.user_agent_data.mobile = true;
+    fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+    fingerprint.navigator.user_agent_data.ua_full_version = "149.0.7827.155".to_owned();
+    fingerprint.navigator.user_agent_data.form_factors =
+        vec!["Mobile".to_owned(), "WebView".to_owned()];
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).expect("Android App runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const log = [];
+              const init = new Proxy({}, {
+                get(target, key, receiver) {
+                  log.push(`g:${String(key)}`);
+                  return Reflect.get(target, key, receiver);
+                },
+                has(target, key) {
+                  log.push(`h:${String(key)}`);
+                  return Reflect.has(target, key);
+                }
+              });
+              try { new Request("ftp:", init); } catch (_) {}
+              return log.join(",");
+            })()
+            "#,
+        ),
+        "g:attributionReporting,g:body,g:cache,g:credentials,g:duplex,g:headers,g:integrity,g:keepalive,g:method,g:mode,g:priority,g:privateToken,g:redirect,g:referrer,g:referrerPolicy,g:signal"
+    );
+}
+
+#[test]
+fn android_webview_console_preview_observes_only_native_to_string_tag_paths() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.navigator.user_agent =
+        "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.app_version =
+        "8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.user_agent_data.mobile = true;
+    fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+    fingerprint.navigator.user_agent_data.ua_full_version = "136.0.0.0".to_owned();
+    fingerprint.navigator.user_agent_data.form_factors =
+        vec!["Mobile".to_owned(), "WebView".to_owned()];
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).expect("Android WebView runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const run = method => {
+                const tagged = value => {
+                  let hits = 0;
+                  Object.defineProperty(value, Symbol.toStringTag, {
+                    configurable: true,
+                    get() { hits += 1; return "Observed"; }
+                  });
+                  console[method](value);
+                  return hits;
+                };
+                let proxyGets = 0;
+                const prototype = new Proxy({}, {
+                  get(target, key, receiver) {
+                    if (key === Symbol.toStringTag) proxyGets += 1;
+                    return Reflect.get(target, key, receiver);
+                  }
+                });
+                console[method](Object.create(prototype));
+                let directProxyGets = 0;
+                console[method](new Proxy({}, {
+                  get(target, key, receiver) {
+                    directProxyGets += 1;
+                    return Reflect.get(target, key, receiver);
+                  }
+                }));
+                let nestedObject = 0;
+                const child = {};
+                Object.defineProperty(child, Symbol.toStringTag, {
+                  get() { nestedObject += 1; return "Child"; }
+                });
+                console[method]({ child });
+                let nestedArray = 0;
+                const arrayChild = {};
+                Object.defineProperty(arrayChild, Symbol.toStringTag, {
+                  get() { nestedArray += 1; return "ArrayChild"; }
+                });
+                console[method]([arrayChild]);
+                let throwingHits = 0;
+                let escaped = false;
+                const throwing = {};
+                Object.defineProperty(throwing, Symbol.toStringTag, {
+                  get() { throwingHits += 1; throw new RangeError("tag"); }
+                });
+                try { console[method](throwing); } catch (_) { escaped = true; }
+                return [
+                  tagged({}), tagged(new Uint8Array(1)), tagged(new Map()),
+                  tagged(new Error("x")), tagged([]), tagged(function () {}),
+                  tagged(new Date(0)), tagged(/x/), proxyGets, directProxyGets,
+                  nestedObject, nestedArray, throwingHits, escaped
+                ].join(",");
+              };
+              return run("log") + "|" + run("debug");
+            })()
+            "#,
+        ),
+        "1,1,1,0,0,0,0,0,1,0,0,1,2,false|1,1,1,0,0,0,0,0,1,0,0,1,2,false"
+    );
+}
+
+#[test]
+fn android_webview_officially_absent_get_details_globals_are_not_observable() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.navigator.user_agent =
+        "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.app_version =
+        "8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.user_agent_data.mobile = true;
+    fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+    fingerprint.navigator.user_agent_data.ua_full_version = "136.0.0.0".to_owned();
+    fingerprint.navigator.user_agent_data.form_factors =
+        vec!["Mobile".to_owned(), "WebView".to_owned()];
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).expect("Android WebView runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            [
+              Object.getOwnPropertyNames(window).includes("chrome"),
+              "chrome" in window,
+              typeof window.chrome,
+              Object.getOwnPropertyDescriptor(window, "chrome") === undefined,
+              Object.getOwnPropertyNames(window).includes("getDigitalGoodsService"),
+              "getDigitalGoodsService" in window,
+              typeof window.getDigitalGoodsService,
+              Object.getOwnPropertyDescriptor(window, "getDigitalGoodsService") === undefined,
+              Object.getOwnPropertyNames(Performance.prototype).includes("interactionCount"),
+              typeof Permissions,
+              typeof PermissionStatus
+            ].join("|")
+            "#,
+        ),
+        "false|false|undefined|true|false|false|undefined|true|true|function|function"
+    );
+}
+
+#[test]
+fn iframe_outer_dimensions_can_be_configured_independently_from_root_window() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.screen.viewport_width = 900.0;
+    fingerprint.screen.viewport_height = 700.0;
+    fingerprint.screen.outer_width = 1200.0;
+    fingerprint.screen.outer_height = 800.0;
+    fingerprint.screen.iframe_viewport_width = Some(0.0);
+    fingerprint.screen.iframe_viewport_height = Some(0.0);
+    fingerprint.screen.iframe_outer_width = Some(392.0);
+    fingerprint.screen.iframe_outer_height = Some(654.0);
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).expect("configured runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const first = document.createElement("iframe");
+              const second = document.createElement("iframe");
+              document.body.append(first, second);
+              const before = [
+                outerWidth,
+                outerHeight,
+                innerWidth,
+                innerHeight,
+                first.contentWindow.outerWidth,
+                first.contentWindow.outerHeight,
+                first.contentWindow.innerWidth,
+                first.contentWindow.innerHeight,
+                second.contentWindow.outerWidth,
+                second.contentWindow.outerHeight,
+                second.contentWindow.innerWidth,
+                second.contentWindow.innerHeight
+              ];
+              first.contentWindow.resizeTo(500, 600);
+              return before.concat([
+                outerWidth,
+                outerHeight,
+                innerWidth,
+                innerHeight,
+                first.contentWindow.outerWidth,
+                first.contentWindow.outerHeight,
+                first.contentWindow.innerWidth,
+                first.contentWindow.innerHeight,
+                second.contentWindow.outerWidth,
+                second.contentWindow.outerHeight,
+                second.contentWindow.innerWidth,
+                second.contentWindow.innerHeight
+              ]).join("|");
+            })()
+            "#,
+        ),
+        concat!(
+            "1200|800|900|700|392|654|0|0|392|654|0|0|",
+            "1200|800|900|700|500|600|500|600|392|654|0|0"
+        )
+    );
+}
+
+#[test]
+fn android_webview_136_plural_rules_matches_version_and_locale_fallback() {
+    let mut fingerprint = EdgeFingerprint::default();
+    fingerprint.locale.locale = "zh-CN".to_owned();
+    fingerprint.navigator.user_agent =
+        "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.app_version =
+        "8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)".to_owned();
+    fingerprint.navigator.language = "gn-PY".to_owned();
+    fingerprint.navigator.languages = vec!["gn-PY".to_owned(), "es-PY".to_owned()];
+    fingerprint.navigator.user_agent_data.mobile = true;
+    fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+    fingerprint.navigator.user_agent_data.ua_full_version = "136.0.0.0".to_owned();
+    fingerprint.navigator.user_agent_data.form_factors =
+        vec!["Mobile".to_owned(), "WebView".to_owned()];
+    let mut runtime = EdgeRuntime::with_fingerprint(fingerprint).expect("Android WebView runtime");
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const defaults = new Intl.PluralRules().resolvedOptions();
+              const requested = new Intl.PluralRules("gn-PY").resolvedOptions();
+              const chinese = new Intl.PluralRules("zh-CN").resolvedOptions();
+              const method = Intl.PluralRules.prototype.resolvedOptions;
+              return [
+                defaults.locale,
+                "notation" in defaults,
+                requested.locale,
+                "notation" in requested,
+                chinese.locale,
+                "notation" in chinese,
+                method.name,
+                method.length,
+                Function.prototype.toString.call(method)
+              ].join("|");
+            })()
+            "#,
+        ),
+        "gn-PY|false|gn-PY|false|zh|false|resolvedOptions|0|function resolvedOptions() { [native code] }"
+    );
+}
+
+#[test]
 fn element_animate_starts_at_zero_overall_progress() {
     let mut runtime = EdgeRuntime::new().expect("Edge runtime");
     assert_eq!(
@@ -700,6 +990,76 @@ fn desktop_document_create_event_rejects_touch_event() {
         ),
         "NotSupportedError|9|Failed to execute 'createEvent' on 'Document': The provided event type ('TouchEvent') is invalid.|true|touchstart"
     );
+}
+
+#[test]
+fn android_document_create_event_supports_touch_and_touch_event() {
+    for (label, user_agent, full_version, form_factors) in [
+        (
+            "Android Chrome",
+            "Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36",
+            "150.0.0.0",
+            vec!["Mobile".to_owned()],
+        ),
+        (
+            "Android WebView",
+            "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)",
+            "136.0.0.0",
+            vec!["Mobile".to_owned(), "WebView".to_owned()],
+        ),
+    ] {
+        let mut fingerprint = EdgeFingerprint::default();
+        fingerprint.navigator.user_agent = user_agent.to_owned();
+        fingerprint.navigator.app_version = user_agent.to_owned();
+        fingerprint.navigator.user_agent_data.mobile = true;
+        fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+        fingerprint.navigator.user_agent_data.ua_full_version = full_version.to_owned();
+        fingerprint.navigator.user_agent_data.form_factors = form_factors;
+        let mut runtime = EdgeRuntime::with_fingerprint(fingerprint)
+            .unwrap_or_else(|error| panic!("{label} runtime: {error}"));
+        assert_eq!(
+            text(
+                &mut runtime,
+                r##"
+                (() => {
+                  const inspect = document => ["Touch", "TouchEvent", "tOuCh"].map(name => {
+                    const event = document.createEvent(name);
+                    const initial = [
+                      event.constructor.name,
+                      event instanceof document.defaultView.TouchEvent,
+                      event.type,
+                      event.touches.length,
+                      event.targetTouches.length,
+                      event.changedTouches.length,
+                      event.altKey,
+                      event.metaKey,
+                      event.ctrlKey,
+                      event.shiftKey,
+                      event.bubbles,
+                      event.cancelable,
+                      event.composed,
+                      event.isTrusted
+                    ].join(",");
+                    event.initEvent("touchstart", true, true);
+                    return initial + `:${event.type},${event.bubbles},${event.cancelable}`;
+                  }).join("|");
+                  const frame = document.createElement("iframe");
+                  document.body.appendChild(frame);
+                  return inspect(document) + "#" + inspect(frame.contentDocument);
+                })()
+                "##,
+            ),
+            concat!(
+                "TouchEvent,true,,0,0,0,false,false,false,false,false,false,false,false:touchstart,true,true|",
+                "TouchEvent,true,,0,0,0,false,false,false,false,false,false,false,false:touchstart,true,true|",
+                "TouchEvent,true,,0,0,0,false,false,false,false,false,false,false,false:touchstart,true,true#",
+                "TouchEvent,true,,0,0,0,false,false,false,false,false,false,false,false:touchstart,true,true|",
+                "TouchEvent,true,,0,0,0,false,false,false,false,false,false,false,false:touchstart,true,true|",
+                "TouchEvent,true,,0,0,0,false,false,false,false,false,false,false,false:touchstart,true,true"
+            ),
+            "{label}",
+        );
+    }
 }
 
 #[test]

@@ -293,6 +293,35 @@ fn iframe_text_encoder_hook_exports_console_arguments_and_bytes_without_trace() 
 }
 
 #[test]
+fn stdout_capture_can_be_disabled_without_changing_console_call_shape() {
+    let mut runtime = EdgeRuntime::new().expect("runtime");
+    runtime.set_stdout_capture_enabled(false);
+    assert_eq!(
+        text(
+            &mut runtime,
+            r#"
+            [
+              console.log("not-retained", new Uint8Array([1, 2, 3])),
+              console.log.name,
+              console.log.length,
+              Function.prototype.toString.call(console.log)
+            ].join("|")
+            "#,
+        ),
+        "|log|0|function log() { [native code] }"
+    );
+    assert!(runtime.stdout().is_empty());
+
+    runtime.set_stdout_capture_enabled(true);
+    runtime
+        .evaluate(r#"console.log("retained", new Uint8Array([4, 5, 6]))"#)
+        .expect("enabled console evaluation");
+    let stdout = runtime.stdout();
+    assert_eq!(stdout.len(), 1);
+    assert_eq!(stdout[0].arguments.len(), 2);
+}
+
+#[test]
 fn stdout_preserves_native_error_lazy_stack_and_message() {
     let mut runtime = EdgeRuntime::new().expect("runtime");
     runtime

@@ -1,6 +1,10 @@
 # edge_sandbox
 
-完整中文使用手册：[`docs/SANDBOX_USAGE_ZH.md`](docs/SANDBOX_USAGE_ZH.md)
+当前完整中文使用手册：[`docs/CURRENT_SANDBOX_USAGE_ZH.md`](docs/CURRENT_SANDBOX_USAGE_ZH.md)
+
+W6纯沙箱执行API：[`docs/W6_SANDBOX_EXECUTOR_API_ZH.md`](docs/W6_SANDBOX_EXECUTOR_API_ZH.md)
+
+历史完整手册：[`docs/SANDBOX_USAGE_ZH.md`](docs/SANDBOX_USAGE_ZH.md)
 
 所有沙箱行为修复都必须追加到
 [`docs/SANDBOX_REPAIR_AUDIT_ZH.md`](docs/SANDBOX_REPAIR_AUDIT_ZH.md)，其中保存证据来源、
@@ -152,6 +156,10 @@ profile = EdgeProfile(
         inner_height=864,
         outer_width=1920,
         outer_height=1040,
+        iframe_inner_width=0,
+        iframe_inner_height=0,
+        iframe_outer_width=1280,
+        iframe_outer_height=720,
     ),
     audio=WebAudioProfile(
         sample_rate=96_000,
@@ -169,7 +177,9 @@ with EdgeSandbox(profile=profile) as sandbox:
 ```
 
 The same validated snapshot is shared by Window, same-origin iframe, Worker and
-Worklet realms. Native tracing remains host-controlled and does not change
+Worklet realms. `iframe_inner_width` / `iframe_inner_height` and
+`iframe_outer_width` / `iframe_outer_height` optionally give iframe Window
+realms independent dimensions; omitted values inherit the root Window. Native tracing remains host-controlled and does not change
 profile-visible descriptors or function stringification.
 
 ## Typed Python runtime options

@@ -134,9 +134,57 @@ impl Default for EdgeSandboxDeterministicOptions {
 pub struct EdgeSandboxLimits {
     pub timeout_ms: u64,
     pub max_heap_bytes: u64,
+    pub max_young_generation_bytes: u64,
+    pub max_code_range_bytes: u64,
     pub max_resident_bytes: u64,
     pub max_source_bytes: u64,
     pub max_output_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EdgeSandboxV8MemoryStatistics {
+    pub total_heap_size: u64,
+    pub total_heap_size_executable: u64,
+    pub total_physical_size: u64,
+    pub total_available_size: u64,
+    pub total_global_handles_size: u64,
+    pub used_global_handles_size: u64,
+    pub used_heap_size: u64,
+    pub heap_size_limit: u64,
+    pub malloced_memory: u64,
+    pub external_memory: u64,
+    pub peak_malloced_memory: u64,
+    pub native_contexts: u64,
+    pub detached_contexts: u64,
+    pub total_allocated_bytes: u64,
+    pub code_and_metadata_size: u64,
+    pub bytecode_and_metadata_size: u64,
+    pub external_script_source_size: u64,
+}
+
+impl From<crate::V8MemoryStatistics> for EdgeSandboxV8MemoryStatistics {
+    fn from(value: crate::V8MemoryStatistics) -> Self {
+        Self {
+            total_heap_size: value.total_heap_size,
+            total_heap_size_executable: value.total_heap_size_executable,
+            total_physical_size: value.total_physical_size,
+            total_available_size: value.total_available_size,
+            total_global_handles_size: value.total_global_handles_size,
+            used_global_handles_size: value.used_global_handles_size,
+            used_heap_size: value.used_heap_size,
+            heap_size_limit: value.heap_size_limit,
+            malloced_memory: value.malloced_memory,
+            external_memory: value.external_memory,
+            peak_malloced_memory: value.peak_malloced_memory,
+            native_contexts: value.native_contexts,
+            detached_contexts: value.detached_contexts,
+            total_allocated_bytes: value.total_allocated_bytes,
+            code_and_metadata_size: value.code_and_metadata_size,
+            bytecode_and_metadata_size: value.bytecode_and_metadata_size,
+            external_script_source_size: value.external_script_source_size,
+        }
+    }
 }
 
 /// One typed Performance Timeline profile record.
@@ -497,6 +545,10 @@ pub mod profile_field {
     pub const VISUAL_VIEWPORT_SCALE: u32 = 561;
     pub const WEBGL2_MAX_TEXTURE_LOD_BIAS: u32 = 562;
     pub const DOCUMENT_BODY_CLIENT_HEIGHT: u32 = 563;
+    pub const WINDOW_IFRAME_OUTER_WIDTH: u32 = 565;
+    pub const WINDOW_IFRAME_OUTER_HEIGHT: u32 = 566;
+    pub const WINDOW_IFRAME_INNER_WIDTH: u32 = 567;
+    pub const WINDOW_IFRAME_INNER_HEIGHT: u32 = 568;
 
     pub const AUDIO_CHANNEL_NOISE_AMPLITUDE: u32 = 600;
     pub const AUDIO_FREQUENCY_NOISE_AMPLITUDE: u32 = 601;
@@ -706,7 +758,7 @@ unsafe fn options_ref<'a>(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_profile_schema_version() -> u32 {
-    13
+    15
 }
 
 fn performance_profile_string(value: EdgeSandboxStringView, name: &str) -> Result<String, String> {
@@ -898,7 +950,7 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_string(
             profile_field::TIME_ZONE => fingerprint.locale.time_zone = value,
             profile_field::NAVIGATOR_USER_AGENT => {
                 fingerprint.navigator.app_version =
-                    value.strip_prefix("Mozilla/").unwrap_or(&value).to_owned();
+                    crate::fingerprint::app_version_from_user_agent(&value).to_owned();
                 fingerprint.navigator.user_agent = value;
                 fingerprint.synchronize_default_browser_version();
             }
@@ -1747,6 +1799,18 @@ pub unsafe extern "C" fn edge_sandbox_profile_set_f64(
             profile_field::SCREEN_VIEWPORT_HEIGHT => fingerprint.screen.viewport_height = value,
             profile_field::SCREEN_OUTER_WIDTH => fingerprint.screen.outer_width = value,
             profile_field::SCREEN_OUTER_HEIGHT => fingerprint.screen.outer_height = value,
+            profile_field::WINDOW_IFRAME_OUTER_WIDTH => {
+                fingerprint.screen.iframe_outer_width = Some(value);
+            }
+            profile_field::WINDOW_IFRAME_OUTER_HEIGHT => {
+                fingerprint.screen.iframe_outer_height = Some(value);
+            }
+            profile_field::WINDOW_IFRAME_INNER_WIDTH => {
+                fingerprint.screen.iframe_viewport_width = Some(value);
+            }
+            profile_field::WINDOW_IFRAME_INNER_HEIGHT => {
+                fingerprint.screen.iframe_viewport_height = Some(value);
+            }
             profile_field::SCREEN_X => fingerprint.screen.screen_x = value,
             profile_field::SCREEN_Y => fingerprint.screen.screen_y = value,
             profile_field::SCREEN_DEVICE_PIXEL_RATIO => {
@@ -3120,7 +3184,7 @@ pub unsafe extern "C" fn edge_sandbox_profile_validate(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn edge_sandbox_options_schema_version() -> u32 {
-    3
+    4
 }
 
 /// Allocates a complete runtime-options builder using the Chrome 150 defaults.
@@ -3468,6 +3532,14 @@ pub unsafe extern "C" fn edge_sandbox_options_set_limits(
             timeout: (limits.timeout_ms != 0)
                 .then(|| std::time::Duration::from_millis(limits.timeout_ms)),
             max_heap_bytes: optional_limit(limits.max_heap_bytes, "max_heap_bytes")?,
+            max_young_generation_bytes: optional_limit(
+                limits.max_young_generation_bytes,
+                "max_young_generation_bytes",
+            )?,
+            max_code_range_bytes: optional_limit(
+                limits.max_code_range_bytes,
+                "max_code_range_bytes",
+            )?,
             max_resident_bytes: optional_limit(limits.max_resident_bytes, "max_resident_bytes")?,
             max_source_bytes: optional_limit(limits.max_source_bytes, "max_source_bytes")?,
             max_output_bytes: optional_limit(limits.max_output_bytes, "max_output_bytes")?,
@@ -4770,7 +4842,8 @@ pub unsafe extern "C" fn edge_sandbox_clear_network_requests(
 }
 
 /// Returns captured console output in the versioned ESSO binary format.
-/// Capture is always active for console output and does not require tracing.
+/// Capture is active by default for direct callers and does not require trace.
+/// Worker pools may disable it until a task explicitly requests debug output.
 ///
 /// # Safety
 ///
@@ -4840,6 +4913,115 @@ pub unsafe extern "C" fn edge_sandbox_clear_stdout(
     }
 }
 
+/// Enables or disables deep console argument capture for this isolated worker.
+/// Disabling also releases all records already retained by the worker.
+///
+/// # Safety
+///
+/// `handle` must be live and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_set_stdout_capture_enabled(
+    handle: *mut EdgeSandboxHandle,
+    enabled: bool,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        handle.runtime.set_stdout_capture_enabled(enabled)
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Returns actual V8 heap/code/external-memory counters for diagnostics.
+///
+/// # Safety
+///
+/// `handle` must be live and both output pointers must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_v8_memory_statistics(
+    handle: *mut EdgeSandboxHandle,
+    statistics_out: *mut EdgeSandboxV8MemoryStatistics,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        if statistics_out.is_null() {
+            return Err("V8 memory statistics output pointer is null".to_owned());
+        }
+        let statistics: EdgeSandboxV8MemoryStatistics =
+            handle.runtime.v8_memory_statistics()?.into();
+        // SAFETY: the caller guarantees a writable output structure.
+        unsafe { statistics_out.write(statistics) };
+        Ok(())
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
+/// Requests a full V8 low-memory collection cycle in the isolated Worker.
+///
+/// # Safety
+///
+/// `handle` must be live and `error_out` must be null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_sandbox_low_memory_notification(
+    handle: *mut EdgeSandboxHandle,
+    error_out: *mut EdgeSandboxBuffer,
+) -> bool {
+    reset_buffer(error_out);
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: guaranteed by this function's FFI contract.
+        let handle = unsafe {
+            handle
+                .as_ref()
+                .ok_or_else(|| "edge-sandbox handle is null".to_owned())?
+        };
+        handle.runtime.low_memory_notification()
+    }));
+    match operation {
+        Ok(Ok(())) => true,
+        Ok(Err(message)) => {
+            report_error(error_out, message);
+            false
+        }
+        Err(payload) => {
+            report_error(error_out, panic_message(payload));
+            false
+        }
+    }
+}
+
 /// Releases a buffer returned by this native API.
 ///
 /// # Safety
@@ -4876,6 +5058,11 @@ const _: () =
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_schema_version_tracks_iframe_window_dimensions() {
+        assert_eq!(edge_sandbox_profile_schema_version(), 15);
+    }
 
     #[test]
     fn font_binary_sources_cross_the_typed_ffi() {

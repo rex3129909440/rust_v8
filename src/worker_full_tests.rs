@@ -879,21 +879,15 @@ fn proxy_trace_records_worker_realm_apis_without_changing_shapes() {
     let service_answer = text(&mut runtime, "serviceWorkerProxyTraceAnswer");
     assert_eq!(service_answer, "https://sandbox.test/");
     let trace = runtime.proxy_trace();
-    assert!(
-        trace
-            .iter()
-            .any(|entry| { entry.operation == "get" && entry.api.ends_with(".navigator") })
-    );
-    assert!(
-        trace.iter().any(|entry| {
-            entry.operation == "get" && entry.api.ends_with(".navigator.userAgent")
-        })
-    );
-    assert!(
-        trace
-            .iter()
-            .any(|entry| { entry.operation == "call" && entry.api.ends_with(".postMessage") })
-    );
+    assert!(trace
+        .iter()
+        .any(|entry| { entry.operation == "get" && entry.api.ends_with(".navigator") }));
+    assert!(trace
+        .iter()
+        .any(|entry| { entry.operation == "get" && entry.api.ends_with(".navigator.userAgent") }));
+    assert!(trace
+        .iter()
+        .any(|entry| { entry.operation == "call" && entry.api.ends_with(".postMessage") }));
     assert!(trace.iter().any(|entry| {
         entry.operation == "get"
             && entry.api.starts_with("worker[")
@@ -1487,6 +1481,101 @@ fn android_dedicated_worker_surface_switches_with_chromium_140_through_151() {
             observed,
             format!("{count}|{navigator}|{surface}|{keys}"),
             "Android Chromium {major} worker HTTPS surface",
+        );
+    }
+}
+
+#[test]
+fn android_webview_worker_surface_matches_official_140_through_150_evidence() {
+    let expected_counts = [294, 298, 298, 298, 299, 300, 300, 300, 300, 300, 300];
+    for (offset, count) in expected_counts.into_iter().enumerate() {
+        let major = 140 + offset as u16;
+        let mut fingerprint = crate::EdgeFingerprint::default();
+        fingerprint.navigator.user_agent = format!(
+            "Mozilla/5.0 (Linux; Android 11; Pixel 4; wv) AppleWebKit/537.36 \
+(KHTML, like Gecko) Version/4.0 Chrome/{major}.0.0.0 Mobile Safari/537.36"
+        );
+        fingerprint.navigator.app_version = fingerprint
+            .navigator
+            .user_agent
+            .strip_prefix("Mozilla/")
+            .unwrap()
+            .to_owned();
+        fingerprint.navigator.user_agent_data.mobile = true;
+        fingerprint.navigator.user_agent_data.platform = "Android".to_owned();
+        fingerprint.navigator.user_agent_data.ua_full_version = format!("{major}.0.0.0");
+        fingerprint.navigator.user_agent_data.form_factors =
+            vec!["Mobile".to_owned(), "WebView".to_owned()];
+        let mut runtime = EdgeRuntime::with_fingerprint(fingerprint)
+            .unwrap_or_else(|error| panic!("Android WebView {major} runtime: {error}"));
+        text(
+            &mut runtime,
+            r#"
+            (() => {
+              const source = `
+                const keyName = key => typeof key === "symbol" ?
+                  "@@" + String(key.description || "") : key;
+                const surfaceHash = reflectKeys => {
+                  const ownKeys = value => (reflectKeys ? Reflect.ownKeys(value) :
+                    Object.getOwnPropertyNames(value)).map(keyName);
+                  const records = [];
+                  for (const owner of Object.getOwnPropertyNames(globalThis).sort()) {
+                    const descriptor = Object.getOwnPropertyDescriptor(globalThis, owner);
+                    if (!descriptor || !("value" in descriptor)) continue;
+                    const value = descriptor.value;
+                    if (typeof value === "function") {
+                      if (value.prototype) records.push(
+                        "constructorPrototypes:" + owner + ":" +
+                        ownKeys(value.prototype).join("\\u001e")
+                      );
+                      records.push(
+                        "constructorStatics:" + owner + ":" +
+                        ownKeys(value).join("\\u001e")
+                      );
+                    } else if (value && typeof value === "object" &&
+                               value !== globalThis &&
+                               Object.getOwnPropertyNames(value).length) {
+                      records.push(
+                        "globalObjects:" + owner + ":" +
+                        ownKeys(value).join("\\u001e")
+                      );
+                    }
+                  }
+                  records.sort();
+                  let hash = 2166136261;
+                  const input = records.join("\\u001f");
+                  for (let index = 0; index < input.length; index += 1) {
+                    hash = Math.imul(hash ^ input.charCodeAt(index), 16777619);
+                  }
+                  return String(hash >>> 0);
+                };
+                postMessage([
+                  Object.getOwnPropertyNames(globalThis).length,
+                  Object.getOwnPropertyNames(WorkerNavigator.prototype).join(","),
+                  surfaceHash(false),
+                  surfaceHash(true)
+                ].join("|"));
+              `;
+              const worker = new Worker("data:text/javascript," + encodeURIComponent(source));
+              globalThis.webviewWorkerSurface = "pending";
+              worker.onmessage = event => webviewWorkerSurface = event.data;
+              return "scheduled";
+            })()
+            "#,
+        );
+        let observed = text(&mut runtime, "webviewWorkerSurface");
+        let navigator =
+            crate::browser_android_webview_surface_data::worker_navigator_names(major).join(",");
+        let surface =
+            crate::browser_android_webview_surface_data::expected_worker_versioned_surface_hash(
+                major,
+            );
+        let keys = crate::browser_android_webview_surface_data::
+            expected_worker_versioned_surface_keys_hash(major);
+        assert_eq!(
+            observed,
+            format!("{count}|{navigator}|{surface}|{keys}"),
+            "Android WebView {major} worker HTTPS surface",
         );
     }
 }

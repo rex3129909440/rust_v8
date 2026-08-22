@@ -53,8 +53,18 @@ from android_device_profile_catalog import (  # noqa: E402
 from android_graphics_capability_catalog import (  # noqa: E402
     build_android_graphics_capabilities,
 )
+from android_media_capability_catalog import (  # noqa: E402
+    build_android_media_capabilities,
+)
+from android_speech_synthesis_voice_catalog import (  # noqa: E402
+    choose_android_speech_synthesis_voice_profile,
+)
 from android_font_profile_catalog import build_android_font_profile  # noqa: E402
 from android_css_profile_catalog import chromium_android_css_overrides  # noqa: E402
+from desktop_media_capability_catalog import (  # noqa: E402
+    choose_windows_audio_capabilities,
+    chromium_desktop_supported_constraints,
+)
 from mac_chromium150_capture_catalog import (  # noqa: E402
     CHROME_MAC_REMOTE_SPEECH_VOICES,
     MAC_CHROMIUM150_AUDIO,
@@ -101,6 +111,9 @@ from windows_webgl_gpu_catalog import (  # noqa: E402
     choose_weighted_windows_webgl_gpu_candidate,
     get_windows_webgl_gpu_candidates,
 )
+from windows_graphics_capability_catalog import (  # noqa: E402
+    build_windows_graphics_capabilities,
+)
 from windows_font_profile_catalog import build_windows_font_profile  # noqa: E402
 from windows_css_profile_catalog import (  # noqa: E402
     chromium148_zh_cn_dpr1_css_overrides,
@@ -109,6 +122,7 @@ from windows_css_profile_catalog import (  # noqa: E402
 from v8_memory_profile_catalog import (  # noqa: E402
     choose_v8_memory_snapshot,
     is_known_memory_snapshot,
+    memory_snapshots_for_platform,
     v8_150_precise_heap_size_limit,
 )
 
@@ -210,54 +224,6 @@ _ICU_TIME_ZONE_ALIASES: dict[str, str] = {
     "Asia/Kolkata": "Asia/Calcutta",
     "Europe/Kyiv": "Europe/Kiev",
 }
-
-_WINDOWS_WEBGL1_EXTENSIONS = (
-    "ANGLE_instanced_arrays",
-    "EXT_blend_minmax",
-    "EXT_color_buffer_half_float",
-    "EXT_float_blend",
-    "EXT_frag_depth",
-    "EXT_shader_texture_lod",
-    "EXT_texture_compression_bptc",
-    "EXT_texture_filter_anisotropic",
-    "OES_element_index_uint",
-    "OES_fbo_render_mipmap",
-    "OES_standard_derivatives",
-    "OES_texture_float",
-    "OES_texture_float_linear",
-    "OES_texture_half_float",
-    "OES_texture_half_float_linear",
-    "OES_vertex_array_object",
-    "WEBGL_color_buffer_float",
-    "WEBGL_compressed_texture_s3tc",
-    "WEBGL_compressed_texture_s3tc_srgb",
-    "WEBGL_debug_renderer_info",
-    "WEBGL_debug_shaders",
-    "WEBGL_depth_texture",
-    "WEBGL_draw_buffers",
-    "WEBGL_lose_context",
-    "WEBGL_multi_draw",
-)
-_WINDOWS_WEBGL2_EXTENSIONS = (
-    "EXT_color_buffer_float",
-    "EXT_color_buffer_half_float",
-    "EXT_float_blend",
-    "EXT_texture_compression_bptc",
-    "EXT_texture_filter_anisotropic",
-    "OES_draw_buffers_indexed",
-    "OES_texture_float_linear",
-    "WEBGL_compressed_texture_s3tc",
-    "WEBGL_compressed_texture_s3tc_srgb",
-    "WEBGL_debug_renderer_info",
-    "WEBGL_debug_shaders",
-    "WEBGL_lose_context",
-    "WEBGL_multi_draw",
-)
-_WINDOWS_COMPRESSED_TEXTURE_FORMATS = (
-    *range(0x83F0, 0x83F4),
-    *range(0x8C4C, 0x8C50),
-    *range(0x8E8C, 0x8E90),
-)
 
 _ANDROID_WEBGL1_EXTENSIONS = (
     "ANGLE_instanced_arrays",
@@ -466,6 +432,66 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
     if profile.media_preferences.forced_colors and profile.media_preferences.contrast == "no-preference":
         issues.append("forced colors conflict with prefers-contrast")
 
+    if fingerprint.platform in {"windows", "macos"}:
+        expected_constraints = chromium_desktop_supported_constraints(
+            chromium_major
+        )
+        if profile.media.supported_constraints != expected_constraints:
+            issues.append(
+                "desktop supported media constraints conflict with Chromium version"
+            )
+
+    preferences = profile.media_preferences
+    if fingerprint.platform == "windows":
+        if preferences.forced_colors:
+            if preferences.contrast not in {"more", "less", "custom"}:
+                issues.append(
+                    "Windows forced-color palette has invalid contrast state"
+                )
+            if preferences.inverted_colors:
+                issues.append(
+                    "Windows forced colors and inverted colors are simultaneously active"
+                )
+        elif preferences.contrast != "no-preference":
+            issues.append(
+                "Windows non-forced-color profile has a synthetic contrast preference"
+            )
+        if preferences.pointer == "coarse":
+            if navigator.max_touch_points <= 0:
+                issues.append("Windows coarse primary pointer has no touch device")
+            if (
+                preferences.any_pointer != "coarse"
+                or preferences.hover != "none"
+                or preferences.any_hover != "none"
+            ):
+                issues.append("Windows tablet-mode input capabilities conflict")
+
+        windows_audio_row = (
+            float(profile.audio.sample_rate),
+            float(profile.audio.base_latency),
+            float(profile.audio.output_latency),
+        )
+        allowed_windows_audio_rows = {
+            (48_000.0, 480 / 48_000.0, 0.0),
+            (44_100.0, 448 / 44_100.0, 0.0),
+        }
+        if windows_audio_row not in allowed_windows_audio_rows:
+            issues.append(
+                "Windows AudioContext sample rate and hardware period are unlinked"
+            )
+    elif fingerprint.platform == "macos":
+        if preferences.forced_colors:
+            issues.append("Mac profile exposes Windows-only forced colors")
+        if preferences.contrast not in {"no-preference", "more"}:
+            issues.append("Mac profile exposes an unsupported contrast preference")
+        if (
+            preferences.pointer != "fine"
+            or preferences.any_pointer != "fine"
+            or preferences.hover != "hover"
+            or preferences.any_hover != "hover"
+        ):
+            issues.append("Mac desktop input capabilities conflict")
+
     allowed_device_memory = (
         {1.0, 2.0, 4.0, 8.0}
         if fingerprint.platform == "android"
@@ -654,8 +680,18 @@ def audit_random_fp(fingerprint: RandomFingerprint) -> tuple[str, ...]:
             issues.append("Android profile disables available motion/orientation sensors")
         if profile.plugins.plugins:
             issues.append("Android clean profile unexpectedly exposes desktop PDF plugins")
-        if profile.speech.voices:
-            issues.append("Android clean profile unexpectedly injects desktop speech voices")
+        android_voices = profile.speech.voices or ()
+        if not android_voices:
+            issues.append("Android Chromium profile has no country TTS voice pool")
+        elif any(
+            "microsoft" in voice.name.lower() or "apple" in voice.name.lower()
+            for voice in android_voices
+        ):
+            issues.append("Android profile injects a desktop speech voice")
+        elif sum(bool(voice.is_default) for voice in android_voices) != 1:
+            issues.append("Android speech voice pool must have exactly one default")
+        elif not android_voices[0].is_default:
+            issues.append("Android primary speech voice is not first")
         try:
             selected_android_device = get_android_device_profile_by_id(
                 fingerprint.screen_profile_id
@@ -1186,11 +1222,13 @@ def _mac_speech_profile(
     )
 
 
-def _mac_media_profile(media: object) -> object:
+def _mac_media_profile(media: object, chromium_major: int) -> object:
     lists = MAC_CHROMIUM150_MEDIA_LISTS
     return replace(
         media,
-        supported_constraints=lists["supported_constraints"],
+        supported_constraints=chromium_desktop_supported_constraints(
+            chromium_major
+        ),
         can_play_probably_types=lists["can_play_probably_types"],
         can_play_maybe_types=lists["can_play_maybe_types"],
         media_source_types=lists["media_source_types"],
@@ -1225,86 +1263,38 @@ def _mac_media_profile(media: object) -> object:
     )
 
 
+def _windows_media_profile(media: object, chromium_major: int) -> object:
+    """Complete the desktop MediaTrackSupportedConstraints surface.
+
+    Codec lists remain tied to the Windows Chromium baseline.  Supported
+    constraints are a browser-build surface, not a GPU lottery, and therefore
+    vary only when Chromium actually gates a field by version.
+    """
+
+    return replace(
+        media,
+        supported_constraints=chromium_desktop_supported_constraints(
+            chromium_major
+        ),
+    )
+
+
 def _android_media_profile(
     media: object,
     device: dict[str, object],
     chromium_major: int,
+    *,
+    webview: bool = False,
 ) -> object:
     """Build the Android Chromium codec surface for one device tier."""
 
-    supported_constraints = [
-        "aspectRatio", "autoGainControl", "brightness", "channelCount",
-        "colorTemperature", "contrast", "deviceId", "displaySurface",
-        "echoCancellation", "exposureCompensation", "exposureMode",
-        "exposureTime", "facingMode", "focusDistance", "focusMode",
-        "frameRate", "groupId", "height", "iso", "latency",
-        "noiseSuppression", "pan", "pointsOfInterest", "resizeMode",
-        "sampleRate", "sampleSize", "saturation", "sharpness",
-        "suppressLocalAudioPlayback", "tilt", "torch", "voiceIsolation",
-        "whiteBalanceMode", "width", "zoom",
-    ]
-    if int(chromium_major) >= 141:
-        supported_constraints.insert(
-            supported_constraints.index("sampleRate"),
-            "restrictOwnAudio",
-        )
-    power_efficient = [
-        'audio/webm; codecs="opus"',
-        'video/webm; codecs="vp09.00.10.08"',
-    ]
-    if str(device.get("mediaTier", "")) == "av1-hardware":
-        power_efficient.append('video/webm; codecs="av01.0.04M.08"')
-
     return replace(
         media,
-        supported_constraints=tuple(supported_constraints),
-        can_play_probably_types=(
-            "audio/mpeg",
-            'audio/ogg; codecs="vorbis"',
-            'audio/webm; codecs="opus"',
-            'video/webm; codecs="vp8"',
-            'video/webm; codecs="vp09.00.10.08"',
-            'video/webm; codecs="av01.0.04M.08"',
+        **build_android_media_capabilities(
+            device,
+            chromium_major,
+            webview=webview,
         ),
-        can_play_maybe_types=(),
-        media_source_types=(
-            "audio/mpeg",
-            'audio/webm; codecs="opus"',
-            'video/webm; codecs="vp8"',
-            'video/webm; codecs="vp09.00.10.08"',
-            'video/webm; codecs="av01.0.04M.08"',
-        ),
-        media_recorder_types=(
-            'audio/webm; codecs="opus"',
-            'video/webm; codecs="vp8"',
-            'video/webm; codecs="av01.0.04M.08"',
-        ),
-        decoding_supported_types=(
-            'audio/webm; codecs="opus"',
-            'video/webm; codecs="vp09.00.10.08"',
-            'video/webm; codecs="av01.0.04M.08"',
-        ),
-        decoding_smooth_types=(
-            'audio/webm; codecs="opus"',
-            'video/webm; codecs="vp09.00.10.08"',
-            'video/webm; codecs="av01.0.04M.08"',
-        ),
-        decoding_power_efficient_types=tuple(power_efficient),
-        encoding_supported_types=(
-            'audio/webm; codecs="opus"',
-            'video/webm; codecs="vp8"',
-            'video/webm; codecs="av01.0.04M.08"',
-        ),
-        encoding_smooth_types=(
-            'audio/webm; codecs="opus"',
-            'video/webm; codecs="vp8"',
-            'video/webm; codecs="av01.0.04M.08"',
-        ),
-        encoding_power_efficient_types=(),
-        audio_decoder_codecs=("opus",),
-        audio_encoder_codecs=("opus",),
-        video_decoder_codecs=("vp8", "vp9", "av1"),
-        video_encoder_codecs=("vp8", "av1"),
     )
 
 
@@ -1490,16 +1480,62 @@ def _media_preference_values(
 
     rng = random.Random(seed ^ 0x4D45444941505245)
     tags = {str(item).lower() for item in hardware.get("tags", ())}
-    forced_colors = platform_name == "windows" and rng.random() < 0.04
-    if forced_colors:
-        contrast = "custom"
-    else:
+    if platform_name == "android":
+        # This desktop-focused pass must not perturb the established Android
+        # distribution or its deterministic seed mapping.
         contrast = rng.choices(
             ("no-preference", "more", "less"),
             weights=(94, 4, 2),
             k=1,
         )[0]
-    if platform_name == "android":
+        return (
+            {
+                "color_scheme": rng.choices(
+                    ("light", "dark"), weights=(68, 32), k=1
+                )[0],
+                "contrast": contrast,
+                "reduced_motion": rng.random() < 0.10,
+                "reduced_transparency": rng.random() < 0.025,
+                "reduced_data": bool(network.save_data),
+                "forced_colors": False,
+                "inverted_colors": rng.random() < 0.01,
+                "monochrome_bits": 0,
+                "color_gamut": "srgb",
+                "pointer": "coarse",
+                "any_pointer": "coarse",
+                "hover": "none",
+                "any_hover": "none",
+                "display_mode": "browser",
+                "dynamic_range": "standard",
+                "video_dynamic_range": "standard",
+                "scripting": "enabled",
+            },
+            "continuous",
+        )
+
+    forced_colors = platform_name == "windows" and rng.random() < 0.04
+    color_scheme = rng.choices(("light", "dark"), weights=(68, 32), k=1)[0]
+    if forced_colors:
+        # Chromium classifies the selected Windows forced-color palette by its
+        # measured contrast.  High, low and neither-high-nor-low palettes map
+        # to more, less and custom respectively.
+        contrast = rng.choices(
+            ("more", "less", "custom"), weights=(8, 1, 1), k=1
+        )[0]
+    elif platform_name == "macos":
+        # macOS exposes accessibilityDisplayShouldIncreaseContrast. It has no
+        # corresponding OS-level "prefer less contrast" setting.
+        contrast = "more" if rng.random() < 0.04 else "no-preference"
+    else:
+        contrast = "no-preference"
+    if (
+        platform_name == "windows"
+        and "touch" in tags
+        and rng.random() < 0.25
+    ):
+        # Chromium's Windows input path reports coarse/none when a convertible
+        # is currently being used as a tablet. In laptop mode the same hardware
+        # continues to report the mouse/touchpad as fine/hover.
         pointer = "coarse"
         hover = "none"
     else:
@@ -1521,13 +1557,13 @@ def _media_preference_values(
     posture = "continuous"
     return (
         {
-            "color_scheme": rng.choices(("light", "dark"), weights=(68, 32), k=1)[0],
+            "color_scheme": color_scheme,
             "contrast": contrast,
             "reduced_motion": rng.random() < 0.10,
             "reduced_transparency": rng.random() < (0.06 if platform_name == "macos" else 0.025),
             "reduced_data": bool(network.save_data),
             "forced_colors": forced_colors,
-            "inverted_colors": rng.random() < 0.01,
+            "inverted_colors": not forced_colors and rng.random() < 0.01,
             "monochrome_bits": 0,
             "color_gamut": color_gamut,
             "pointer": pointer,
@@ -1675,6 +1711,7 @@ def get_random_fp_details(
     document_has_focus: bool | None = None,
     document_visibility_state: str | None = "visible",
     is_popup: bool | None = False,
+    _android_chromium_major: int | None = None,
 ) -> RandomFingerprint:
     """Return a country-aware Windows, macOS, or Android Mobile profile.
 
@@ -1699,6 +1736,15 @@ def get_random_fp_details(
     resolved_seed = _resolve_seed(seed)
     rng = random.Random(resolved_seed)
     user_agent_profile, platform_name = _resolve_user_agent(user_agent)
+    chromium_major = int(user_agent_profile.get("chromiumMajor", 150))
+    if _android_chromium_major is not None:
+        if platform_name != "android":
+            raise ValueError("_android_chromium_major requires an Android profile")
+        if (
+            isinstance(_android_chromium_major, bool)
+            or not 136 <= _android_chromium_major <= 151
+        ):
+            raise ValueError("_android_chromium_major must be between 136 and 151")
     if body_child_element_count is not None:
         if (
             isinstance(body_child_element_count, bool)
@@ -1859,19 +1905,28 @@ def get_random_fp_details(
             raise ValueError("Android UA has no numeric platform version") from error
         requested_android_major = None if frozen_android_ua else parsed_android_major
         requested_device_model = None if frozen_android_ua else requested_model
+        minimum_android_major = (
+            10
+            if (
+                _android_chromium_major
+                if _android_chromium_major is not None
+                else int(user_agent_profile.get("chromiumMajor", 0))
+            ) >= 140
+            else 8
+        )
         device = choose_android_device_profile(
             rng,
             get_android_device_profiles(
                 requested_device_model,
                 android_version=requested_android_major,
-                minimum_android_version=10,
+                minimum_android_version=minimum_android_major,
             ),
         )
         selected_android_major = choose_android_version_for_device(
             rng,
             device,
             requested_android_major,
-            minimum_android_version=10,
+            minimum_android_version=minimum_android_major,
         )
         device = materialize_android_device_profile(
             device,
@@ -1916,13 +1971,11 @@ def get_random_fp_details(
             )
         }
     elif platform_name == "android":
-        # A clean Android Chromium document can have an empty voice list until
-        # the platform speech service reports voices. Do not inject Windows
-        # Microsoft voices into that lifecycle state.
-        speech = {
-            "id": "android-clean-profile-empty-voices",
-            "voices": (),
-        }
+        speech = choose_android_speech_synthesis_voice_profile(
+            random.Random(resolved_seed ^ 0x414E44524F494454),
+            country,
+            languages,
+        )
     else:
         speech = choose_speech_synthesis_voice_profile(
             rng,
@@ -2108,6 +2161,16 @@ def get_random_fp_details(
         # Preserve the connected-device value only for that exact device row;
         # other Android devices continue through the V8 memory calculation.
         heap_limit = int(device["jsHeapSizeLimit"])
+    if platform_name == "android" and device.get("memorySnapshotId") is not None:
+        selected_snapshot_id = str(device["memorySnapshotId"])
+        selected_snapshot = next(
+            snapshot
+            for snapshot in memory_snapshots_for_platform("android")
+            if snapshot.id == selected_snapshot_id
+        )
+        memory_snapshot_profile_id = selected_snapshot.id
+        total_heap = selected_snapshot.total_js_heap_size
+        used_heap = selected_snapshot.used_js_heap_size
     canvas_profile = replace(
         base_profile.canvas,
         data_url_salt=canvas_salt,
@@ -2246,6 +2309,10 @@ def get_random_fp_details(
             {str(item).lower() for item in hardware.get("tags", ())}
             & {"touch", "convertible", "surface"}
         )
+        windows_webgl_capabilities, windows_webgpu_capabilities = (
+            build_windows_graphics_capabilities(gpu, chromium_major)
+        )
+        windows_audio_capabilities = choose_windows_audio_capabilities(rng)
         profile = replace(
             shared_profile,
             id=f"random-windows-{country.lower()}-{resolved_seed:016x}",
@@ -2253,41 +2320,24 @@ def get_random_fp_details(
                 base_profile.webgl,
                 unmasked_vendor=str(webgl_data.get("unmaskedVendor", "")),
                 unmasked_renderer=str(webgl_data.get("unmaskedRenderer", "")),
-                webgl1_extensions=_WINDOWS_WEBGL1_EXTENSIONS,
-                webgl2_extensions=_WINDOWS_WEBGL2_EXTENSIONS,
-                compressed_texture_formats=tuple(
-                    int(item) for item in _WINDOWS_COMPRESSED_TEXTURE_FORMATS
-                ),
-                webgl2_max_samples=16,
                 webgl2_max_combined_vertex_uniform_components=212_988,
                 aliased_point_size_max=1024.0,
+                **windows_webgl_capabilities,
             ),
             webgpu=replace(
                 base_profile.webgpu,
-                available=bool(gpu.get("webgpuSupported", True)),
-                vendor=str(gpu.get("vendor", "")),
-                architecture=str(gpu.get("webgpuArchitecture", "")),
                 # Keep a valid internal adapter identity. GPUAdapterInfo masks
                 # device/description to empty strings while developerFeatures
                 # is false, matching the sourced browser observation.
                 device=str(gpu.get("deviceId", "")),
                 description=str(gpu.get("model", "")),
-                developer_features=False,
-                subgroup_min_size=32,
-                subgroup_max_size=(
-                    64 if str(gpu.get("vendor", "")).lower() == "amd" else 32
-                ),
-                is_fallback_adapter=False,
-                features=("bgra8unorm-storage", "texture-compression-bc"),
-                max_compute_workgroup_storage_size=16_384,
+                **windows_webgpu_capabilities,
             ),
             audio=replace(
                 shared_profile.audio,
-                sample_rate=rng.choice((44_100.0, 48_000.0, 48_000.0, 48_000.0)),
-                max_channel_count=2,
-                base_latency=0.01,
-                output_latency=0.0,
+                **windows_audio_capabilities,
             ),
+            media=_windows_media_profile(shared_profile.media, chromium_major),
             media_preferences=replace(
                 shared_profile.media_preferences,
                 color_gamut="srgb",
@@ -2329,7 +2379,7 @@ def get_random_fp_details(
                 base_latency=float(MAC_CHROMIUM150_AUDIO["base_latency"]),
                 output_latency=float(MAC_CHROMIUM150_AUDIO["output_latency"]),
             ),
-            media=_mac_media_profile(shared_profile.media),
+            media=_mac_media_profile(shared_profile.media, chromium_major),
             permissions=replace(
                 shared_profile.permissions,
                 speaker_selection="unsupported",

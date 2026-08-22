@@ -2,6 +2,7 @@
 pub(crate) enum BrowserPlatform {
     Desktop,
     Android,
+    AndroidWebView,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -13,6 +14,7 @@ pub(crate) struct BrowserVersion {
 impl BrowserVersion {
     pub(crate) const MIN_SUPPORTED: u16 = 140;
     pub(crate) const MAX_SUPPORTED: u16 = 151;
+    pub(crate) const MIN_WEBVIEW_SUPPORTED: u16 = 136;
     pub(crate) const EDGE_150: Self = Self {
         major: 150,
         platform: BrowserPlatform::Desktop,
@@ -23,7 +25,14 @@ impl BrowserVersion {
     }
 
     pub(crate) fn is_android(self) -> bool {
-        self.platform == BrowserPlatform::Android
+        matches!(
+            self.platform,
+            BrowserPlatform::Android | BrowserPlatform::AndroidWebView
+        )
+    }
+
+    pub(crate) fn is_webview(self) -> bool {
+        self.platform == BrowserPlatform::AndroidWebView
     }
 
     pub(crate) fn from_major(major: u16) -> Result<Self, String> {
@@ -40,31 +49,101 @@ impl BrowserVersion {
         })
     }
 
+    fn from_webview_major(major: u16) -> Result<Self, String> {
+        if !(Self::MIN_WEBVIEW_SUPPORTED..=Self::MAX_SUPPORTED).contains(&major) {
+            return Err(format!(
+                "Android WebView surface only supports Chromium major versions {}-{}; requested {major}",
+                Self::MIN_WEBVIEW_SUPPORTED,
+                Self::MAX_SUPPORTED,
+            ));
+        }
+        Ok(Self {
+            major,
+            platform: BrowserPlatform::AndroidWebView,
+        })
+    }
+
     pub(crate) fn from_user_agent(user_agent: &str) -> Result<Self, String> {
         let explicit = browser_version_token(user_agent)
             .and_then(|version| version.split('.').next())
             .and_then(|major| major.parse::<u16>().ok());
         let Some(major) = explicit else {
-            // Existing application-specific UAs without a Chromium token keep
-            // the historical Edge 150 surface. Recognizable tokens are strict.
-            return Ok(Self::EDGE_150);
-        };
-        Self::from_major(major).map(|mut version| {
-            if user_agent.contains("Android") {
-                version.platform = BrowserPlatform::Android;
+            // Existing application-specific UAs without a Chromium token use
+            // the version-150 compatibility surface. Android WebViews often
+            // replace the product token while retaining the Android platform
+            // marker, so preserve that platform instead of silently selecting
+            // the desktop table.
+            let mut version = Self::EDGE_150;
+            if contains_android_marker(user_agent) {
+                version.platform = android_platform(user_agent);
             }
-            version
-        }).map_err(|_| {
+            return Ok(version);
+        };
+        if contains_android_marker(user_agent)
+            && android_platform(user_agent) == BrowserPlatform::AndroidWebView
+        {
+            return Self::from_webview_major(major);
+        }
+        Self::from_major(major)
+            .map(|mut version| {
+                if contains_android_marker(user_agent) {
+                    version.platform = BrowserPlatform::Android;
+                }
+                version
+            })
+            .map_err(|_| {
             format!(
                 "browser API surface only supports Chromium/Edge major versions {}-{}; userAgent requested {major}",
                 Self::MIN_SUPPORTED,
                 Self::MAX_SUPPORTED,
             )
-        })
+            })
+    }
+
+    pub(crate) fn from_user_agent_with_profile_hint(
+        user_agent: &str,
+        android_hint: bool,
+        webview_hint: bool,
+        major_hint: Option<u16>,
+    ) -> Result<Self, String> {
+        if browser_version_token(user_agent).is_some() {
+            let mut version = Self::from_user_agent(user_agent)?;
+            if webview_hint && version.is_android() {
+                version.platform = BrowserPlatform::AndroidWebView;
+            }
+            return Ok(version);
+        }
+        let selected_major = major_hint.unwrap_or(Self::EDGE_150.major);
+        let mut version = if webview_hint {
+            Self::from_webview_major(selected_major)?
+        } else {
+            Self::from_major(selected_major)?
+        };
+        if android_hint || contains_android_marker(user_agent) {
+            version.platform = if webview_hint {
+                BrowserPlatform::AndroidWebView
+            } else {
+                android_platform(user_agent)
+            };
+        }
+        Ok(version)
     }
 
     pub(crate) fn full_version_from_user_agent(user_agent: &str) -> Option<String> {
         browser_version_token(user_agent).map(str::to_owned)
+    }
+}
+
+fn contains_android_marker(user_agent: &str) -> bool {
+    user_agent.to_ascii_lowercase().contains("android")
+}
+
+fn android_platform(user_agent: &str) -> BrowserPlatform {
+    let lower = user_agent.trim_start().to_ascii_lowercase();
+    if lower.contains("; wv") || lower.contains(" version/4.0") {
+        BrowserPlatform::AndroidWebView
+    } else {
+        BrowserPlatform::Android
     }
 }
 
@@ -118,12 +197,37 @@ mod tests {
         )
         .unwrap();
         assert!(android.is_android());
+        assert!(!android.is_webview());
         assert_eq!(
             BrowserVersion::from_user_agent("application-specific-agent")
                 .unwrap()
                 .major(),
             150
         );
+        let android_webview = BrowserVersion::from_user_agent(
+            "Mozilla/5.0 (Linux; Android 15; Pixel WebView) MyApplication/9.4",
+        )
+        .unwrap();
+        assert_eq!(android_webview.major(), 150);
+        assert!(android_webview.is_android());
+        let app_specific = BrowserVersion::from_user_agent_with_profile_hint(
+            "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)",
+            true,
+            false,
+            Some(147),
+        )
+        .unwrap();
+        assert_eq!(app_specific.major(), 147);
+        assert!(app_specific.is_android());
+        assert!(!app_specific.is_webview());
+        let app_webview = BrowserVersion::from_user_agent_with_profile_hint(
+            "wizz-air/8.1.9 (com.wizzair.WizzAirApp; build:2207; android 9)",
+            true,
+            true,
+            Some(147),
+        )
+        .unwrap();
+        assert!(app_webview.is_webview());
         assert_eq!(
             BrowserVersion::full_version_from_user_agent(
                 "Mozilla/5.0 Chrome/149.0.7827.155 Safari/537.36 Edg/147.0.101.2"

@@ -138,6 +138,16 @@ pub(crate) fn construct(
     result.set(object.into());
 }
 
+pub(crate) fn create<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+) -> Result<v8::Local<'s, v8::Object>, String> {
+    let constructor = ensure_constructor(scope)?;
+    let event_type = crate::webidl::string(scope, "")?;
+    constructor
+        .new_instance(scope, &[event_type.into()])
+        .ok_or_else(|| "cannot create TouchEvent".to_owned())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn create_with_data<'s>(
     scope: &mut v8::PinScope<'s, '_>,

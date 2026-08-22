@@ -8,10 +8,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>) -> Result<(), String> {
     )
 }
 
-fn get_own_property_names(
-    scope: &mut v8::PinScope<'_, '_>,
-    arguments: v8::FunctionCallbackArguments<'_>,
-    mut result: v8::ReturnValue<'_>,
+fn get_own_property_names<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    arguments: v8::FunctionCallbackArguments<'s>,
+    mut result: v8::ReturnValue<'s>,
 ) {
     if let Ok(object) = v8::Local::<v8::Object>::try_from(arguments.get(0))
         && let Some(keys) =
@@ -26,6 +26,14 @@ fn get_own_property_names(
         return;
     };
     if let Some(value) = original.call(scope, arguments.this().into(), &[arguments.get(0)]) {
-        result.set(value);
+        if let Ok(object) = v8::Local::<v8::Object>::try_from(arguments.get(0))
+            && let Ok(keys) = v8::Local::<v8::Array>::try_from(value)
+            && let Some(keys) =
+                crate::browser_surface::virtualize_webview_window_keys(scope, object, keys, true)
+        {
+            result.set(keys.into());
+        } else {
+            result.set(value);
+        }
     }
 }

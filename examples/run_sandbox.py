@@ -22,8 +22,8 @@ except ImportError:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ABI_VERSION = 2
-PROFILE_SCHEMA_VERSION = 13
-OPTIONS_SCHEMA_VERSION = 3
+PROFILE_SCHEMA_VERSION = 15
+OPTIONS_SCHEMA_VERSION = 4
 
 DEMO_JAVASCRIPT = r"""
 (() => {
@@ -141,14 +141,59 @@ class _NativeSandboxLimits(ctypes.Structure):
     _fields_ = [
         ("timeout_ms", ctypes.c_uint64),
         ("max_heap_bytes", ctypes.c_uint64),
+        ("max_young_generation_bytes", ctypes.c_uint64),
+        ("max_code_range_bytes", ctypes.c_uint64),
         ("max_resident_bytes", ctypes.c_uint64),
         ("max_source_bytes", ctypes.c_uint64),
         ("max_output_bytes", ctypes.c_uint64),
     ]
 
 
+class _NativeV8MemoryStatistics(ctypes.Structure):
+    _fields_ = [
+        ("total_heap_size", ctypes.c_uint64),
+        ("total_heap_size_executable", ctypes.c_uint64),
+        ("total_physical_size", ctypes.c_uint64),
+        ("total_available_size", ctypes.c_uint64),
+        ("total_global_handles_size", ctypes.c_uint64),
+        ("used_global_handles_size", ctypes.c_uint64),
+        ("used_heap_size", ctypes.c_uint64),
+        ("heap_size_limit", ctypes.c_uint64),
+        ("malloced_memory", ctypes.c_uint64),
+        ("external_memory", ctypes.c_uint64),
+        ("peak_malloced_memory", ctypes.c_uint64),
+        ("native_contexts", ctypes.c_uint64),
+        ("detached_contexts", ctypes.c_uint64),
+        ("total_allocated_bytes", ctypes.c_uint64),
+        ("code_and_metadata_size", ctypes.c_uint64),
+        ("bytecode_and_metadata_size", ctypes.c_uint64),
+        ("external_script_source_size", ctypes.c_uint64),
+    ]
+
+
 class SandboxExecutionError(RuntimeError):
     """Raised when the native sandbox cannot complete an operation."""
+
+
+@dataclass(frozen=True)
+class V8MemoryStatistics:
+    total_heap_size: int
+    total_heap_size_executable: int
+    total_physical_size: int
+    total_available_size: int
+    total_global_handles_size: int
+    used_global_handles_size: int
+    used_heap_size: int
+    heap_size_limit: int
+    malloced_memory: int
+    external_memory: int
+    peak_malloced_memory: int
+    native_contexts: int
+    detached_contexts: int
+    total_allocated_bytes: int
+    code_and_metadata_size: int
+    bytecode_and_metadata_size: int
+    external_script_source_size: int
 
 
 @dataclass(frozen=True)
@@ -1240,6 +1285,23 @@ class EdgeSandbox:
             buffer_pointer,
         ]
         library.edge_sandbox_clear_stdout.restype = ctypes.c_bool
+        library.edge_sandbox_set_stdout_capture_enabled.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_bool,
+            buffer_pointer,
+        ]
+        library.edge_sandbox_set_stdout_capture_enabled.restype = ctypes.c_bool
+        library.edge_sandbox_v8_memory_statistics.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(_NativeV8MemoryStatistics),
+            buffer_pointer,
+        ]
+        library.edge_sandbox_v8_memory_statistics.restype = ctypes.c_bool
+        library.edge_sandbox_low_memory_notification.argtypes = [
+            ctypes.c_void_p,
+            buffer_pointer,
+        ]
+        library.edge_sandbox_low_memory_notification.restype = ctypes.c_bool
 
         library.edge_sandbox_buffer_free.argtypes = [buffer_pointer]
         library.edge_sandbox_buffer_free.restype = None
@@ -1706,6 +1768,19 @@ class EdgeSandbox:
                 field_id,
                 value,
             )
+        if window is not None:
+            for field_id, value in (
+                (field.WINDOW_IFRAME_INNER_WIDTH, window.iframe_inner_width),
+                (field.WINDOW_IFRAME_INNER_HEIGHT, window.iframe_inner_height),
+                (field.WINDOW_IFRAME_OUTER_WIDTH, window.iframe_outer_width),
+                (field.WINDOW_IFRAME_OUTER_HEIGHT, window.iframe_outer_height),
+            ):
+                self._profile_set_number(
+                    "edge_sandbox_profile_set_f64",
+                    handle,
+                    field_id,
+                    value,
+                )
 
         canvas = profile.canvas
         if canvas is not None:
@@ -3644,6 +3719,10 @@ class EdgeSandbox:
             native_limits = _NativeSandboxLimits(
                 timeout_ms=limits.timeout_ms or 0,
                 max_heap_bytes=limits.max_heap_bytes or 0,
+                max_young_generation_bytes=(
+                    limits.max_young_generation_bytes or 0
+                ),
+                max_code_range_bytes=limits.max_code_range_bytes or 0,
                 max_resident_bytes=limits.max_resident_bytes or 0,
                 max_source_bytes=limits.max_source_bytes or 0,
                 max_output_bytes=limits.max_output_bytes or 0,
@@ -4278,6 +4357,46 @@ class EdgeSandbox:
 
     def clear_stdout(self) -> None:
         self._trace_control("edge_sandbox_clear_stdout")
+
+    def set_stdout_capture_enabled(self, enabled: bool) -> None:
+        """Toggle deep console-value capture without enabling native trace."""
+
+        if not isinstance(enabled, bool):
+            raise TypeError("enabled must be a bool")
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_set_stdout_capture_enabled(
+            self._require_handle(),
+            enabled,
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+
+    def v8_memory_statistics(self) -> V8MemoryStatistics:
+        """Return actual V8 counters, independent from fingerprinted JS APIs."""
+
+        native = _NativeV8MemoryStatistics()
+        error = _NativeBuffer()
+        succeeded = self._library.edge_sandbox_v8_memory_statistics(
+            self._require_handle(),
+            ctypes.byref(native),
+            ctypes.byref(error),
+        )
+        if not succeeded:
+            raise SandboxExecutionError(self._consume_buffer(error))
+        self._consume_buffer(error)
+        return V8MemoryStatistics(
+            **{
+                name: int(getattr(native, name))
+                for name, _ctype in _NativeV8MemoryStatistics._fields_
+            }
+        )
+
+    def low_memory_notification(self) -> None:
+        """Ask V8 to perform its low-memory collection cycle."""
+
+        self._trace_control("edge_sandbox_low_memory_notification")
 
     def close(self) -> None:
         if self._handle is not None:

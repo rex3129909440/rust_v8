@@ -101,10 +101,16 @@ pub(crate) fn compute(
         .map(|(_, parent)| parent.content_width + parent.padding_left + parent.padding_right);
     let vertical_percentage_basis = positioned_parent_box
         .map(|(_, parent)| parent.content_height + parent.padding_top + parent.padding_bottom);
-    let specified_width =
-        percentage_aware_property_length(scope, element, "width", horizontal_percentage_basis);
-    let specified_height =
-        percentage_aware_property_length(scope, element, "height", vertical_percentage_basis);
+    let specified_width = if input_button_uses_intrinsic_width(scope, element) {
+        None
+    } else {
+        percentage_aware_property_length(scope, element, "width", horizontal_percentage_basis)
+    };
+    let specified_height = if input_button_uses_intrinsic_height(scope, element) {
+        None
+    } else {
+        percentage_aware_property_length(scope, element, "height", vertical_percentage_basis)
+    };
     let border_box_sizing =
         property(scope, element, "box-sizing").eq_ignore_ascii_case("border-box");
     let horizontal_edges = padding_left + padding_right + border_left + border_right;
@@ -431,12 +437,20 @@ fn flow_box_metrics(
     let vertical_edges = padding_top + padding_bottom + border_top + border_bottom;
     let border_box_sizing =
         property(scope, element, "box-sizing").eq_ignore_ascii_case("border-box");
-    let width = percentage_aware_property_length(scope, element, "width", Some(horizontal_basis))
-        .unwrap_or(fallback_width)
-        .max(0.0);
-    let height = percentage_aware_property_length(scope, element, "height", Some(vertical_basis))
-        .unwrap_or(fallback_height)
-        .max(0.0);
+    let width = if input_button_uses_intrinsic_width(scope, element) {
+        fallback_width
+    } else {
+        percentage_aware_property_length(scope, element, "width", Some(horizontal_basis))
+            .unwrap_or(fallback_width)
+    }
+    .max(0.0);
+    let height = if input_button_uses_intrinsic_height(scope, element) {
+        fallback_height
+    } else {
+        percentage_aware_property_length(scope, element, "height", Some(vertical_basis))
+            .unwrap_or(fallback_height)
+    }
+    .max(0.0);
     let border_width = if border_box_sizing {
         width
     } else {
@@ -505,7 +519,127 @@ fn intrinsic_replaced_dimensions(
             line_box_height(scope, element) + vertical_edges,
         );
     }
+    if input_button_record(scope, element).is_some() {
+        let padding = side_lengths(scope, element, "padding", 0.0);
+        let border_shorthand = property(scope, element, "border");
+        let border_fallback = border_shorthand_width(&border_shorthand);
+        let border_widths = side_lengths(scope, element, "border-width", border_fallback);
+        let border_left = border_side_width(scope, element, "left").unwrap_or(border_widths.3);
+        let border_right = border_side_width(scope, element, "right").unwrap_or(border_widths.1);
+        let border_top = border_side_width(scope, element, "top").unwrap_or(border_widths.0);
+        let border_bottom = border_side_width(scope, element, "bottom").unwrap_or(border_widths.2);
+        return (
+            input_button_content_width(scope, element)
+                + padding.1
+                + padding.3
+                + border_left
+                + border_right,
+            line_box_height(scope, element) + padding.0 + padding.2 + border_top + border_bottom,
+        );
+    }
     (0.0, 0.0)
+}
+
+fn input_button_record(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+) -> Option<super::html_input_element::InputRecord> {
+    let record = super::html_input_element::record(scope, element)?;
+    matches!(record.input_type.as_str(), "button" | "submit" | "reset").then_some(record)
+}
+
+fn inline_size_is_auto_or_absent(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> bool {
+    super::get_computed_style_global::inline_property_source(scope, element, name)
+        .is_none_or(|value| value.trim().eq_ignore_ascii_case("auto"))
+}
+
+fn input_button_uses_intrinsic_width(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+) -> bool {
+    input_button_record(scope, element).is_some_and(|record| {
+        !record.value.is_empty() && inline_size_is_auto_or_absent(scope, element, "width")
+    })
+}
+
+fn input_button_uses_intrinsic_height(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+) -> bool {
+    input_button_record(scope, element).is_some()
+        && inline_size_is_auto_or_absent(scope, element, "height")
+        && ["font", "font-size", "line-height"]
+            .into_iter()
+            .any(|name| {
+                super::get_computed_style_global::inline_property_source(scope, element, name)
+                    .is_some()
+            })
+}
+
+fn input_button_text(record: &super::html_input_element::InputRecord) -> &str {
+    if !record.value.is_empty() {
+        &record.value
+    } else {
+        match record.input_type.as_str() {
+            "submit" => "Submit",
+            "reset" => "Reset",
+            _ => "",
+        }
+    }
+}
+
+fn input_button_content_width(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+) -> f64 {
+    let Some(record) = input_button_record(scope, element) else {
+        return 0.0;
+    };
+    let text = input_button_text(&record);
+    let android = is_android_environment(scope);
+    let visible = text
+        .chars()
+        .filter(|character| !matches!(*character as u32, 0xFE00..=0xFE0F | 0xE0100..=0xE01EF))
+        .collect::<Vec<_>>();
+    if android && visible.len() == 1 && android_full_em_control_symbol(visible[0]) {
+        return font_sizes(scope, element).0;
+    }
+    let font = property(scope, element, "font");
+    let measured = super::offscreen_canvas_rendering_context_2d::measured_text_width_for_font(
+        scope, text, &font,
+    );
+    (measured * 64.0).ceil() / 64.0
+}
+
+fn android_full_em_control_symbol(character: char) -> bool {
+    matches!(character as u32,
+        0x203C | 0x2049 | 0x2122 | 0x2139 |
+        0x2194..=0x2199 | 0x21A9..=0x21AA |
+        0x231A..=0x231B | 0x2328 | 0x23CF | 0x23E9..=0x23F3 |
+        0x23F8..=0x23FA | 0x24C2 | 0x25AA..=0x25AB | 0x25B6 |
+        0x25C0 | 0x25FB..=0x25FE | 0x2600..=0x27BF |
+        0x2934..=0x2935 | 0x2B05..=0x2B07 | 0x2B1B..=0x2B1C |
+        0x2B50 | 0x2B55 | 0x3030 | 0x303D | 0x3297 | 0x3299
+    )
+}
+
+fn is_android_environment(scope: &v8::PinScope<'_, '_>) -> bool {
+    let navigator = &crate::fingerprint::edge(scope).navigator;
+    crate::browser_version::BrowserVersion::from_user_agent_with_profile_hint(
+        &navigator.user_agent,
+        navigator.user_agent_data.mobile,
+        navigator
+            .user_agent_data
+            .form_factors
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case("webview")),
+        None,
+    )
+    .is_ok_and(crate::browser_version::BrowserVersion::is_android)
 }
 
 fn button_content_width(scope: &v8::PinScope<'_, '_>, element: v8::Local<'_, v8::Object>) -> f64 {
@@ -1194,7 +1328,14 @@ fn standard_font_line_height(
     // and line gap. A replaced inline with no text uses this CSS strut even
     // when the document's implicit text run takes the captured default-font
     // shaping path.
-    let scale = if family.contains("segoe ui") {
+    let android = is_android_environment(scope);
+    let scale = if android && family.contains("arial") {
+        // Chromium Android resolves the CSS Arial alias through Roboto.  Its
+        // 1900-unit ascent plus 500-unit descent on a 2048-unit em produces
+        // a 75/64 normal line box, which is observably taller than desktop
+        // Arial for large native controls.
+        75.0 / 64.0
+    } else if family.contains("segoe ui") {
         1.3125
     } else if family.contains("times new roman") {
         55.0 / 48.0
@@ -1323,6 +1464,8 @@ fn default_content_width(
         (super::window_view_state::inner_width(scope) - 16.0).max(0.0)
     } else if tag.eq_ignore_ascii_case("BUTTON") {
         button_content_width(scope, element)
+    } else if input_button_uses_intrinsic_width(scope, element) {
+        input_button_content_width(scope, element)
     } else if let Some(parent) = nearest_element_parent(scope, element) {
         (compute(scope, parent).content_width - edges).max(0.0)
     } else {
@@ -1354,6 +1497,9 @@ fn calc_size_auto_content_width(
     }
     if tag.eq_ignore_ascii_case("BUTTON") {
         return button_content_width(scope, element);
+    }
+    if input_button_uses_intrinsic_width(scope, element) {
+        return input_button_content_width(scope, element);
     }
     nearest_element_parent(scope, element)
         .map(|parent| shallow_content_width_without_descendants(scope, parent))
@@ -1413,6 +1559,8 @@ fn default_content_height(
             .map(|dimensions| f64::from(dimensions.1))
             .unwrap_or(0.0)
     } else if tag.eq_ignore_ascii_case("BUTTON") {
+        line_box_height(scope, element)
+    } else if input_button_uses_intrinsic_height(scope, element) {
         line_box_height(scope, element)
     } else {
         auto_flow_content_height(scope, element, content_width)

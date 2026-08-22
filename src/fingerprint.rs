@@ -360,16 +360,24 @@ impl EdgeFingerprint {
 
         let preference_defaults =
             crate::fingerprint_environment::MediaPreferencesFingerprint::default();
-        if self.media_preferences.pointer == preference_defaults.pointer {
+        if navigator_is_untouched_desktop
+            && self.media_preferences.pointer == preference_defaults.pointer
+        {
             self.media_preferences.pointer = "coarse".to_owned();
         }
-        if self.media_preferences.any_pointer == preference_defaults.any_pointer {
+        if navigator_is_untouched_desktop
+            && self.media_preferences.any_pointer == preference_defaults.any_pointer
+        {
             self.media_preferences.any_pointer = "coarse".to_owned();
         }
-        if self.media_preferences.hover == preference_defaults.hover {
+        if navigator_is_untouched_desktop
+            && self.media_preferences.hover == preference_defaults.hover
+        {
             self.media_preferences.hover = "none".to_owned();
         }
-        if self.media_preferences.any_hover == preference_defaults.any_hover {
+        if navigator_is_untouched_desktop
+            && self.media_preferences.any_hover == preference_defaults.any_hover
+        {
             self.media_preferences.any_hover = "none".to_owned();
         }
 
@@ -379,7 +387,9 @@ impl EdgeFingerprint {
         }
 
         let audio_defaults = crate::fingerprint_surface::AudioFingerprint::default();
-        if self.rendering.audio.base_latency == audio_defaults.base_latency {
+        if navigator_is_untouched_desktop
+            && self.rendering.audio.base_latency == audio_defaults.base_latency
+        {
             self.rendering.audio.base_latency = 0.002_666_666_666_666_666_6;
         }
     }
@@ -396,7 +406,7 @@ impl EdgeFingerprint {
                 "fingerprint id must contain at most 128 ASCII identifier characters".to_owned(),
             );
         }
-        crate::browser_version::BrowserVersion::from_user_agent(&self.navigator.user_agent)?;
+        browser_version_for_navigator(&self.navigator)?;
         self.locale.validate()?;
         self.navigator.validate()?;
         self.screen.validate()?;
@@ -474,15 +484,9 @@ impl NavigatorFingerprint {
         {
             return Err("navigator.languages must begin with navigator.language".to_owned());
         }
-        if self.app_version
-            != self
-                .user_agent
-                .strip_prefix("Mozilla/")
-                .unwrap_or(&self.user_agent)
-        {
+        if self.app_version != app_version_from_user_agent(&self.user_agent) {
             return Err(
-                "navigator.app_version must equal user_agent without the Mozilla/ prefix"
-                    .to_owned(),
+                "navigator.app_version does not match the configured user_agent".to_owned(),
             );
         }
         if self.max_touch_points > 256 {
@@ -628,8 +632,44 @@ pub(crate) fn navigator<'a>(scope: &'a v8::PinScope<'_, '_>) -> &'a NavigatorFin
 pub(crate) fn browser_version(
     scope: &v8::PinScope<'_, '_>,
 ) -> crate::browser_version::BrowserVersion {
-    crate::browser_version::BrowserVersion::from_user_agent(&navigator(scope).user_agent)
+    browser_version_for_navigator(navigator(scope))
         .expect("validated browser version was not available")
+}
+
+fn browser_version_for_navigator(
+    navigator: &NavigatorFingerprint,
+) -> Result<crate::browser_version::BrowserVersion, String> {
+    let data = &navigator.user_agent_data;
+    let android_hint = data.mobile || data.platform.eq_ignore_ascii_case("Android");
+    let major_hint = data
+        .ua_full_version
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u16>().ok());
+    crate::browser_version::BrowserVersion::from_user_agent_with_profile_hint(
+        &navigator.user_agent,
+        android_hint,
+        data.form_factors
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case("webview")),
+        major_hint,
+    )
+}
+
+pub(crate) fn app_version_from_user_agent(user_agent: &str) -> &str {
+    if let Some(app_version) = user_agent.strip_prefix("Mozilla/") {
+        return app_version;
+    }
+    let first_space = user_agent
+        .find(char::is_whitespace)
+        .unwrap_or(user_agent.len());
+    if let Some(slash) = user_agent[..first_space].find('/')
+        && slash > 0
+        && slash + 1 < user_agent.len()
+    {
+        return &user_agent[slash + 1..];
+    }
+    user_agent
 }
 
 pub(crate) fn edge<'a>(scope: &'a v8::PinScope<'_, '_>) -> &'a EdgeFingerprint {

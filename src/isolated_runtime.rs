@@ -16,6 +16,7 @@ const EVALUATION_GRACE: Duration = Duration::from_millis(100);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const TRACE_EXPORT_BATCH_SIZE: u64 = 8_192;
+const RESIDENT_LIMIT_CONSECUTIVE_SAMPLES: u8 = 3;
 
 fn initialization_timeout(configured: Option<Duration>) -> Duration {
     configured
@@ -72,6 +73,9 @@ enum WorkerCommand {
     ClearNetworkRequests,
     Stdout,
     ClearStdout,
+    SetStdoutCaptureEnabled(bool),
+    V8MemoryStatistics,
+    LowMemoryNotification,
     Shutdown,
 }
 
@@ -84,6 +88,7 @@ enum WorkerResponse {
     Trace(Result<Vec<crate::TraceEntry>, String>),
     NetworkRequests(Result<Vec<crate::CapturedNetworkRequest>, String>),
     Stdout(Result<Vec<crate::CapturedConsoleOutput>, String>),
+    V8MemoryStatistics(Result<crate::V8MemoryStatistics, String>),
 }
 
 struct ControllerState {
@@ -515,6 +520,30 @@ impl IsolatedEdgeRuntime {
         match self.request(WorkerCommand::ClearStdout, CONTROL_TIMEOUT)? {
             WorkerResponse::Unit(result) => result,
             _ => Err("isolated worker returned an invalid stdout-clear response".to_owned()),
+        }
+    }
+
+    pub fn set_stdout_capture_enabled(&self, enabled: bool) -> Result<(), String> {
+        match self.request(
+            WorkerCommand::SetStdoutCaptureEnabled(enabled),
+            CONTROL_TIMEOUT,
+        )? {
+            WorkerResponse::Unit(result) => result,
+            _ => Err("isolated worker returned an invalid stdout-capture response".to_owned()),
+        }
+    }
+
+    pub fn v8_memory_statistics(&self) -> Result<crate::V8MemoryStatistics, String> {
+        match self.request(WorkerCommand::V8MemoryStatistics, CONTROL_TIMEOUT)? {
+            WorkerResponse::V8MemoryStatistics(result) => result,
+            _ => Err("isolated worker returned invalid V8 memory statistics".to_owned()),
+        }
+    }
+
+    pub fn low_memory_notification(&self) -> Result<(), String> {
+        match self.request(WorkerCommand::LowMemoryNotification, CONTROL_TIMEOUT)? {
+            WorkerResponse::Unit(result) => result,
+            _ => Err("isolated worker returned invalid low-memory response".to_owned()),
         }
     }
 
@@ -1127,15 +1156,20 @@ impl WorkerProcess {
             self.failure(format!("cannot send isolated worker request: {error}"))
         })?;
         let started = Instant::now();
+        let mut resident_limit_violations = 0_u8;
         loop {
-            if resident_limit.is_some_and(|limit| {
-                process_resident_memory_bytes(&self.child)
-                    .is_some_and(|resident| resident > limit as u64)
-            }) {
-                let limit = resident_limit.expect("resident limit was checked");
-                return Err(self.failure(format!(
-                    "isolated Edge worker exceeded max_resident_bytes ({limit} bytes)"
-                )));
+            if let Some(limit) = resident_limit {
+                match process_resident_memory_bytes(&self.child) {
+                    Some(resident) if resident > limit as u64 => {
+                        resident_limit_violations = resident_limit_violations.saturating_add(1);
+                        if resident_limit_violations >= RESIDENT_LIMIT_CONSECUTIVE_SAMPLES {
+                            return Err(self.failure(format!(
+                                "isolated Edge worker exceeded max_resident_bytes: observed {resident} bytes, limit {limit} bytes, across {RESIDENT_LIMIT_CONSECUTIVE_SAMPLES} consecutive samples"
+                            )));
+                        }
+                    }
+                    Some(_) | None => resident_limit_violations = 0,
+                }
             }
             if let Some(status) = self
                 .child
@@ -1417,6 +1451,18 @@ fn execute_worker_command(
             runtime.clear_stdout();
             (WorkerResponse::Unit(Ok(())), false)
         }
+        WorkerCommand::SetStdoutCaptureEnabled(enabled) => {
+            runtime.set_stdout_capture_enabled(enabled);
+            (WorkerResponse::Unit(Ok(())), false)
+        }
+        WorkerCommand::V8MemoryStatistics => (
+            WorkerResponse::V8MemoryStatistics(Ok(runtime.v8_memory_statistics())),
+            false,
+        ),
+        WorkerCommand::LowMemoryNotification => {
+            runtime.low_memory_notification();
+            (WorkerResponse::Unit(Ok(())), false)
+        }
         WorkerCommand::Shutdown => (WorkerResponse::Unit(Ok(())), true),
     }
 }
@@ -1657,12 +1703,11 @@ struct WindowsJob(isize);
 
 #[cfg(windows)]
 impl WindowsJob {
-    fn attach(child: &WorkerChild, resident_limit: Option<usize>) -> Result<Self, String> {
+    fn attach(child: &WorkerChild, _resident_limit: Option<usize>) -> Result<Self, String> {
         use std::os::windows::io::AsRawHandle;
 
         const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: i32 = 9;
         const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
-        const JOB_OBJECT_LIMIT_PROCESS_MEMORY: u32 = 0x0000_0100;
         const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
 
         #[repr(C)]
@@ -1733,10 +1778,11 @@ impl WindowsJob {
         limits.basic_limit_information.limit_flags =
             JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         limits.basic_limit_information.active_process_limit = 1;
-        if let Some(maximum) = resident_limit {
-            limits.basic_limit_information.limit_flags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-            limits.process_memory_limit = maximum;
-        }
+        // max_resident_bytes is a working-set/RSS contract. Windows Job
+        // Object PROCESS_MEMORY_LIMIT constrains committed virtual memory,
+        // which is a different metric and can terminate V8 merely for address
+        // space commitment while its resident set remains below the limit.
+        // The controller's GetProcessMemoryInfo sampler enforces RSS directly.
         // SAFETY: `limits` has the documented extended-limit layout and the
         // child handle remains valid for the assignment call.
         let configured = unsafe {

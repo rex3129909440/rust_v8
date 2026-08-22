@@ -603,6 +603,16 @@ pub(crate) fn computed_color_with_preferences(
     forced_colors: bool,
     color_scheme: &str,
 ) -> Option<String> {
+    computed_color_with_platform_preferences(name, value, forced_colors, color_scheme, false)
+}
+
+pub(crate) fn computed_color_with_platform_preferences(
+    name: &str,
+    value: &str,
+    forced_colors: bool,
+    color_scheme: &str,
+    android: bool,
+) -> Option<String> {
     if !is_color_property(name) {
         return None;
     }
@@ -612,6 +622,14 @@ pub(crate) fn computed_color_with_preferences(
             forced_system_color(value, color_scheme.eq_ignore_ascii_case("dark"))
     {
         return Some(computed.to_owned());
+    }
+    if android
+        && let Some(value) = canonical_system_color(value)
+        && let Some((_, computed)) = ANDROID_SYSTEM_COLORS
+            .iter()
+            .find(|(name, _)| *name == value)
+    {
+        return Some((*computed).to_owned());
     }
     if let Some(value) = computed_system_color(name, value) {
         return Some(value.to_owned());
@@ -701,6 +719,27 @@ const SYSTEM_COLORS: &[(&str, &str)] = &[
     ("windowtext", "rgb(0, 0, 0)"),
     ("accentcolor", "rgb(0, 117, 255)"),
     ("accentcolortext", "rgb(255, 255, 255)"),
+];
+
+// Android Chromium/WebView resolves the legacy CSS2 system colors through
+// the platform theme rather than the Windows palette used by desktop Edge.
+// Values are taken from the supplied successful Android black-box sample.
+const ANDROID_SYSTEM_COLORS: &[(&str, &str)] = &[
+    ("activeborder", "rgb(118, 118, 118)"),
+    ("activecaption", "rgb(0, 0, 0)"),
+    ("buttonface", "rgb(239, 239, 239)"),
+    ("buttonhighlight", "rgb(239, 239, 239)"),
+    ("buttonshadow", "rgb(239, 239, 239)"),
+    ("graytext", "rgb(128, 128, 128)"),
+    ("highlight", "rgba(51, 181, 229, 0.4)"),
+    ("highlighttext", "rgb(0, 0, 0)"),
+    ("inactiveborder", "rgb(118, 118, 118)"),
+    ("threeddarkshadow", "rgb(118, 118, 118)"),
+    ("threedface", "rgb(239, 239, 239)"),
+    ("threedhighlight", "rgb(118, 118, 118)"),
+    ("threedlightshadow", "rgb(118, 118, 118)"),
+    ("threedshadow", "rgb(118, 118, 118)"),
+    ("windowframe", "rgb(118, 118, 118)"),
 ];
 
 // CSS Color Adjustment defines these two palettes for forced-colors

@@ -123,6 +123,17 @@ fn inline_properties(
         .unwrap_or_default()
 }
 
+pub(crate) fn inline_property_source(
+    scope: &v8::PinScope<'_, '_>,
+    element: v8::Local<'_, v8::Object>,
+    name: &str,
+) -> Option<String> {
+    inline_properties(scope, element)
+        .into_iter()
+        .find(|property| property.name.eq_ignore_ascii_case(name))
+        .map(|property| property.source)
+}
+
 fn computed_properties(
     scope: &v8::PinScope<'_, '_>,
     element: v8::Local<'_, v8::Object>,
@@ -176,11 +187,12 @@ fn computed_properties(
         if property.source.trim().eq_ignore_ascii_case("currentcolor") {
             property.value = current_color.clone();
         } else if !captured_default
-            && let Some(value) = super::css_calculation::computed_color_with_preferences(
+            && let Some(value) = super::css_calculation::computed_color_with_platform_preferences(
                 &property.name,
                 &property.source,
                 preferences.forced_colors,
                 &preferences.color_scheme,
+                crate::browser_surface::current_version(scope).is_android(),
             )
         {
             property.value = value;
@@ -659,11 +671,12 @@ pub(crate) fn computed_property_value(
             .to_owned();
     }
     let preferences = &crate::fingerprint::edge(scope).media_preferences;
-    if let Some(value) = super::css_calculation::computed_color_with_preferences(
+    if let Some(value) = super::css_calculation::computed_color_with_platform_preferences(
         &property.name,
         &property.source,
         preferences.forced_colors,
         &preferences.color_scheme,
+        crate::browser_surface::current_version(scope).is_android(),
     ) {
         property.value = value;
     } else if super::css_calculation::is_length_property(&property.name)

@@ -13,11 +13,21 @@ from typing import Sequence, Self
 try:
     from .edge_profile import EdgeProfile
     from .edge_runtime_options import EdgeRunOptions
-    from .run_sandbox import CapturedNetworkRequest, EdgeSandbox, find_native_artifacts
+    from .run_sandbox import (
+        CapturedConsoleOutput,
+        CapturedNetworkRequest,
+        EdgeSandbox,
+        find_native_artifacts,
+    )
 except ImportError:
     from edge_profile import EdgeProfile
     from edge_runtime_options import EdgeRunOptions
-    from run_sandbox import CapturedNetworkRequest, EdgeSandbox, find_native_artifacts
+    from run_sandbox import (
+        CapturedConsoleOutput,
+        CapturedNetworkRequest,
+        EdgeSandbox,
+        find_native_artifacts,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +123,7 @@ class EdgeSandboxPool:
         self._worker_ids = count(1)
         self._task_ids = count(1)
         self._requests: list[PooledNetworkRequest] = []
+        self._stdout_by_task: dict[int, tuple[CapturedConsoleOutput, ...]] = {}
         self._completed_worker_by_task: dict[int, int] = {}
         self._completed_process_by_task: dict[int, int] = {}
         self._collected_tasks: set[int] = set()
@@ -160,13 +171,23 @@ class EdgeSandboxPool:
         self,
         source: str,
         *,
+        preload_javascript: str | None = None,
+        preload_source_url: str = "https://sandbox.test/__pool_preload__.js",
         source_url: str | None = None,
         profile: EdgeProfile | None = None,
         options: EdgeRunOptions | None = None,
         timeout_ms: int | None = None,
+        capture_stdout: bool = False,
     ) -> SandboxTask:
         if not isinstance(source, str):
             raise TypeError("source must be a string")
+        if preload_javascript is not None:
+            if not isinstance(preload_javascript, str):
+                raise TypeError("preload_javascript must be a string or None")
+            if not preload_javascript.strip():
+                raise ValueError("preload_javascript must not be blank")
+        if not isinstance(capture_stdout, bool):
+            raise TypeError("capture_stdout must be a bool")
         effective_profile = profile if profile is not None else self._default_profile
         effective_options = self._effective_options(options, timeout_ms)
         if self._one_shot_workers and effective_options != self._one_shot_options:
@@ -182,9 +203,12 @@ class EdgeSandboxPool:
             self._run_task,
             task_id,
             source,
+            preload_javascript,
+            preload_source_url,
             source_url,
             effective_profile,
             effective_options,
+            capture_stdout,
         )
         return SandboxTask(task_id, future)
 
@@ -192,17 +216,23 @@ class EdgeSandboxPool:
         self,
         source: str,
         *,
+        preload_javascript: str | None = None,
+        preload_source_url: str = "https://sandbox.test/__pool_preload__.js",
         source_url: str | None = None,
         profile: EdgeProfile | None = None,
         options: EdgeRunOptions | None = None,
         timeout_ms: int | None = None,
+        capture_stdout: bool = False,
     ) -> str:
         return self.submit(
             source,
+            preload_javascript=preload_javascript,
+            preload_source_url=preload_source_url,
             source_url=source_url,
             profile=profile,
             options=options,
             timeout_ms=timeout_ms,
+            capture_stdout=capture_stdout,
         ).result()
 
     def evaluate_many(
@@ -307,6 +337,25 @@ class EdgeSandboxPool:
                 self._completed_process_by_task.pop(task_id, None)
                 self._collected_tasks.discard(task_id)
 
+    def stdout(self, task_id: int | None = None) -> tuple[CapturedConsoleOutput, ...]:
+        """Return console output only for tasks submitted with capture enabled."""
+
+        with self._condition:
+            if task_id is not None:
+                return self._stdout_by_task.get(task_id, ())
+            return tuple(
+                entry
+                for completed_task in sorted(self._stdout_by_task)
+                for entry in self._stdout_by_task[completed_task]
+            )
+
+    def clear_stdout(self, task_id: int | None = None) -> None:
+        with self._condition:
+            if task_id is None:
+                self._stdout_by_task.clear()
+            else:
+                self._stdout_by_task.pop(task_id, None)
+
     def close(self) -> None:
         with self._condition:
             if self._closed:
@@ -344,23 +393,38 @@ class EdgeSandboxPool:
         self,
         task_id: int,
         source: str,
+        preload_javascript: str | None,
+        preload_source_url: str,
         source_url: str | None,
         profile: EdgeProfile | None,
         options: EdgeRunOptions,
+        capture_stdout: bool,
     ) -> str:
         worker = self._acquire_worker(profile, options)
         discard = False
         try:
             worker.sandbox.clear_network_requests()
+            if capture_stdout:
+                worker.sandbox.set_stdout_capture_enabled(True)
+            if preload_javascript is not None:
+                worker.sandbox.evaluate(
+                    preload_javascript,
+                    source_url=preload_source_url,
+                )
             value = worker.sandbox.evaluate(source, source_url=source_url)
             captured = worker.sandbox.network_requests()
             worker.sandbox.clear_network_requests()
+            stdout = worker.sandbox.stdout() if capture_stdout else ()
+            if capture_stdout:
+                worker.sandbox.clear_stdout()
             self._store_requests(
                 task_id,
                 worker.worker_id,
                 worker.process_id,
                 captured,
             )
+            if capture_stdout:
+                self._store_stdout(task_id, stdout)
             return value
         except BaseException:
             # Timeouts and native failures must release the process and its V8
@@ -368,7 +432,20 @@ class EdgeSandboxPool:
             discard = True
             raise
         finally:
+            if capture_stdout and not self._one_shot_workers and not discard:
+                try:
+                    worker.sandbox.set_stdout_capture_enabled(False)
+                except BaseException:
+                    discard = True
             self._release_worker(worker, discard)
+
+    def _store_stdout(
+        self,
+        task_id: int,
+        entries: tuple[CapturedConsoleOutput, ...],
+    ) -> None:
+        with self._condition:
+            self._stdout_by_task[task_id] = entries
 
     def _store_requests(
         self,
@@ -440,6 +517,7 @@ class EdgeSandboxPool:
                 profile=profile,
                 options=options,
             )
+            sandbox.set_stdout_capture_enabled(False)
         except BaseException:
             with self._condition:
                 self._creating_workers -= 1
@@ -493,6 +571,10 @@ class EdgeSandboxPool:
 
         try:
             available.sandbox.reinitialize_profile(profile or EdgeProfile())
+            # Reinitialization constructs a fresh isolate whose direct-caller
+            # compatibility default is capture-on. Pools always reset it to
+            # capture-off before deciding whether this task opted in.
+            available.sandbox.set_stdout_capture_enabled(False)
             available.profile = profile
             return available
         except BaseException:
@@ -517,6 +599,7 @@ class EdgeSandboxPool:
                 profile=self._default_profile,
                 options=self._one_shot_options,
             )
+            sandbox.set_stdout_capture_enabled(False)
             created = _PoolWorker(
                 worker_id=worker_id,
                 process_id=sandbox.process_id(),

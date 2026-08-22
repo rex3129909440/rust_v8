@@ -8,6 +8,8 @@ quantized to the selected device DPR in the same way Blink exposes CSS pixels.
 
 from __future__ import annotations
 
+import math
+
 
 def _number(value: float) -> str:
     return f"{float(value):g}"
@@ -46,7 +48,9 @@ def chromium_android_css_overrides(
     # The capture uses DPR 2.75.  Blink snaps native control borders to device
     # pixels, so express the same integer-device-pixel widths at every device
     # DPR instead of copying a Windows DPR table.
-    dpr = max(1.0, float(device_pixel_ratio))
+    dpr = float(device_pixel_ratio)
+    if not math.isfinite(dpr) or dpr <= 0:
+        raise ValueError("Android devicePixelRatio must be a finite positive number")
     border = 5.0 / dpr
     thin_border = 2.0 / dpr
     text_width = 184.363636

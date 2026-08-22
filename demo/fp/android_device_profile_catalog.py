@@ -9,6 +9,12 @@ Primary references:
 - https://github.com/ChromeDevTools/devtools-frontend/blob/main/front_end/models/emulation/EmulatedDevices.ts
 - https://store.google.com/product/pixel_9_pro_specs
 - https://www.samsung.com/ca/business/smartphones/galaxy-s/galaxy-s24-ultra-titanium-black-256gb-sm-s928wzkexac/
+- https://www.mi.com/sg/product/xiaomi-14/specs/
+- https://www.mi.com/es/product/xiaomi-13t-pro-leica/specs/
+- https://www.iqoo.com/in/products/param/iqoo12
+- https://www.iqoo.com/in/products/param/neo9pro
+- https://www.vivo.com/en/products/param/x100
+- https://www.oppo.com/en/smartphones/series-find-x/find-x8/specs/
 - https://www.qualcomm.com/smartphones/products/8-series/snapdragon-8-elite-mobile-platform
 - https://www.mediatek.com/products/smartphones/mediatek-dimensity-9400
 - https://dawn.googlesource.com/dawn/+/refs/heads/main/src/dawn/gpu_info.json
@@ -18,6 +24,21 @@ from __future__ import annotations
 
 import random
 from typing import Sequence
+
+try:
+    from demo.fp.android_extended_device_catalog import (
+        ANDROID_EXTENDED_DEVICE_ROWS,
+        ANDROID_EXTENDED_GRAPHICS,
+        ANDROID_EXTENDED_OEMS,
+        ANDROID_EXTENDED_OS_RANGES,
+    )
+except ModuleNotFoundError:
+    from android_extended_device_catalog import (  # type: ignore
+        ANDROID_EXTENDED_DEVICE_ROWS,
+        ANDROID_EXTENDED_GRAPHICS,
+        ANDROID_EXTENDED_OEMS,
+        ANDROID_EXTENDED_OS_RANGES,
+    )
 
 
 # id, UA-CH model, Android version, hardwareConcurrency, physical RAM choices,
@@ -57,6 +78,18 @@ ANDROID_DEVICE_ROWS: tuple[
     ("android_surface_duo", "Surface Duo", "11.0", 8, (6,), 540, 720, 2.5, "Qualcomm", "Adreno (TM) 640", "adreno-6xx", "3.2", 1, ("phone", "foldable")),
     ("android_moto_g_power_2022", "moto g power (2022)", "11", 8, (4,), 412, 823, 1.75, "Imagination Technologies", "PowerVR Rogue GE8320", "rogue", "3.2", 8, ("phone", "entry")),
     ("android_moto_g4", "Moto G (4)", "6.0.1", 8, (2, 3), 360, 640, 3.0, "Qualcomm", "Adreno (TM) 405", "adreno-4xx", "3.1", 3, ("phone", "legacy", "entry")),
+
+    # Additional public OEM rows shared by every compatible Android Chromium
+    # and WebView version.
+    # CSS dimensions are physical resolution divided by the selected Android
+    # density scale, rounded to the integer Screen values exposed by Chromium.
+    ("android_xiaomi_14", "Xiaomi 14", "14", 8, (12,), 400, 890, 3.0, "Qualcomm", "Adreno (TM) 750", "adreno-7xx", "3.2", 8, ("phone", "flagship", "xiaomi")),
+    ("android_xiaomi_13t_pro", "23078PND5G", "13", 8, (12, 16), 407, 904, 3.0, "ARM", "Immortalis-G715", "valhall", "3.2", 6, ("phone", "flagship", "xiaomi")),
+    ("android_iqoo_12", "I2220", "14", 8, (12, 16), 420, 933, 3.0, "Qualcomm", "Adreno (TM) 750", "adreno-7xx", "3.2", 7, ("phone", "flagship", "iqoo", "vivo")),
+    ("android_iqoo_neo9_pro", "I2304", "14", 8, (8, 12), 420, 933, 3.0, "Qualcomm", "Adreno (TM) 740", "adreno-7xx", "3.2", 6, ("phone", "flagship", "iqoo", "vivo")),
+    ("android_vivo_x100", "V2308", "14", 8, (12, 16), 420, 933, 3.0, "ARM", "Immortalis-G720", "valhall", "3.2", 7, ("phone", "flagship", "vivo")),
+    ("android_oppo_find_x8", "CPH2651", "15", 8, (12, 16), 419, 920, 3.0, "ARM", "Immortalis-G925", "valhall", "3.2", 7, ("phone", "flagship", "oppo")),
+    *ANDROID_EXTENDED_DEVICE_ROWS,
 )
 
 
@@ -84,6 +117,13 @@ ANDROID_DEVICE_OS_RANGE_BY_PROFILE_ID: dict[str, tuple[int, int]] = {
     "android_surface_duo": (10, 12),
     "android_moto_g_power_2022": (11, 12),
     "android_moto_g4": (6, 8),
+    "android_xiaomi_14": (14, 16),
+    "android_xiaomi_13t_pro": (13, 16),
+    "android_iqoo_12": (14, 16),
+    "android_iqoo_neo9_pro": (14, 16),
+    "android_vivo_x100": (14, 16),
+    "android_oppo_find_x8": (15, 16),
+    **ANDROID_EXTENDED_OS_RANGES,
 }
 
 ANDROID_DEVICE_OEM_BY_PROFILE_ID: dict[str, str] = {
@@ -102,6 +142,13 @@ ANDROID_DEVICE_OEM_BY_PROFILE_ID: dict[str, str] = {
     "android_surface_duo": "microsoft",
     "android_moto_g_power_2022": "motorola",
     "android_moto_g4": "motorola",
+    "android_xiaomi_14": "xiaomi",
+    "android_xiaomi_13t_pro": "xiaomi",
+    "android_iqoo_12": "vivo",
+    "android_iqoo_neo9_pro": "vivo",
+    "android_vivo_x100": "vivo",
+    "android_oppo_find_x8": "oppo",
+    **ANDROID_EXTENDED_OEMS,
 }
 
 ANDROID_GRAPHICS_PROFILE_BY_PROFILE_ID: dict[str, str] = {
@@ -125,6 +172,13 @@ ANDROID_GRAPHICS_PROFILE_BY_PROFILE_ID: dict[str, str] = {
     "android_surface_duo": "adreno-6xx-mainstream",
     "android_moto_g_power_2022": "powervr-rogue",
     "android_moto_g4": "adreno-4xx",
+    "android_xiaomi_14": "adreno-7xx-flagship",
+    "android_xiaomi_13t_pro": "mali-valhall-modern",
+    "android_iqoo_12": "adreno-7xx-flagship",
+    "android_iqoo_neo9_pro": "adreno-7xx-flagship",
+    "android_vivo_x100": "mali-fifth-gen",
+    "android_oppo_find_x8": "mali-fifth-gen",
+    **ANDROID_EXTENDED_GRAPHICS,
 }
 
 ANDROID_MEDIA_TIER_BY_PROFILE_ID: dict[str, str] = {
@@ -134,6 +188,9 @@ ANDROID_MEDIA_TIER_BY_PROFILE_ID: dict[str, str] = {
             "android_pixel_9_pro_fold", "android_pixel_8",
             "android_galaxy_z_fold_6", "android_galaxy_z_fold_5",
             "android_galaxy_s24_ultra", "android_galaxy_a55",
+            "android_xiaomi_14", "android_xiaomi_13t_pro",
+            "android_iqoo_12", "android_iqoo_neo9_pro",
+            "android_vivo_x100", "android_oppo_find_x8",
         }
         else "chromium-software-av1"
     )
@@ -144,6 +201,10 @@ ANDROID_MEDIA_TIER_BY_PROFILE_ID: dict[str, str] = {
 # Other devices continue through V8's RAM/platform calculation.
 ANDROID_HEAP_LIMIT_BY_PROFILE_ID: dict[str, int] = {
     "android_pixel_4": 1_530_000_000,
+}
+
+ANDROID_MEMORY_SNAPSHOT_BY_PROFILE_ID: dict[str, str] = {
+    "android_pixel_4": "android_pixel4_webview150_https_initial_bucket",
 }
 
 
@@ -182,6 +243,7 @@ def build_android_device_profile(row: tuple[object, ...]) -> dict[str, object]:
         "graphicsProfileId": ANDROID_GRAPHICS_PROFILE_BY_PROFILE_ID[profile_key],
         "mediaTier": ANDROID_MEDIA_TIER_BY_PROFILE_ID[profile_key],
         "jsHeapSizeLimit": ANDROID_HEAP_LIMIT_BY_PROFILE_ID.get(profile_key),
+        "memorySnapshotId": ANDROID_MEMORY_SNAPSHOT_BY_PROFILE_ID.get(profile_key),
         "hardwareConcurrency": concurrency,
         "physicalMemoryChoicesGb": memory_choices,
         "maxTouchPoints": 5,

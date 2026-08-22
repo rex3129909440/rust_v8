@@ -1,6 +1,7 @@
 use std::sync::Once;
 
 static V8_INIT: Once = Once::new();
+const EXPLICIT_GENERATION_HEAP_OVERHEAD_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum Evaluation {
@@ -10,6 +11,27 @@ pub enum Evaluation {
     Number(String),
     String(String),
     Other(String),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct V8MemoryStatistics {
+    pub total_heap_size: u64,
+    pub total_heap_size_executable: u64,
+    pub total_physical_size: u64,
+    pub total_available_size: u64,
+    pub total_global_handles_size: u64,
+    pub used_global_handles_size: u64,
+    pub used_heap_size: u64,
+    pub heap_size_limit: u64,
+    pub malloced_memory: u64,
+    pub external_memory: u64,
+    pub peak_malloced_memory: u64,
+    pub native_contexts: u64,
+    pub detached_contexts: u64,
+    pub total_allocated_bytes: u64,
+    pub code_and_metadata_size: u64,
+    pub bytecode_and_metadata_size: u64,
+    pub external_script_source_size: u64,
 }
 
 impl std::fmt::Display for Evaluation {
@@ -61,15 +83,31 @@ impl EdgeRuntime {
         initialize_v8();
 
         let locale = options.fingerprint.locale.locale.clone();
-        let time_zone = options.fingerprint.locale.time_zone.clone();
+        let time_zone = crate::locale_runtime::effective_process_time_zone(
+            &options.fingerprint.locale.time_zone,
+            options.fingerprint.locale.time_zone_offset_minutes,
+        )?;
         let _locale_guard = crate::locale_runtime::lock_process_defaults();
         crate::locale_runtime::configure_process_defaults(&locale, &time_zone)?;
-        let create_params = options
+        let mut create_params = options
             .limits
             .max_heap_bytes
             .map_or_else(v8::CreateParams::default, |maximum| {
                 v8::CreateParams::default().heap_limits(0, maximum)
             });
+        if let Some(maximum) = options.limits.max_young_generation_bytes {
+            if let Some(total_heap_limit) = options.limits.max_heap_bytes {
+                create_params = create_params.set_max_old_generation_size_in_bytes(
+                    total_heap_limit
+                        .saturating_sub(maximum)
+                        .saturating_sub(EXPLICIT_GENERATION_HEAP_OVERHEAD_BYTES),
+                );
+            }
+            create_params = create_params.set_max_young_generation_size_in_bytes(maximum);
+        }
+        if let Some(maximum) = options.limits.max_code_range_bytes {
+            create_params = create_params.set_code_range_size_in_bytes(maximum);
+        }
         let mut isolate = v8::Isolate::new(create_params);
         // Browsers own the task/microtask checkpoint boundary.  Explicit
         // policy prevents V8 from draining Promise reactions inside a host
@@ -82,7 +120,7 @@ impl EdgeRuntime {
         crate::fingerprint::prepare(&mut isolate, options.fingerprint);
         crate::browser_surface::prepare(&mut isolate);
         crate::determinism::prepare(&mut isolate, deterministic);
-        crate::locale_runtime::prepare(&mut isolate);
+        crate::locale_runtime::prepare(&mut isolate, time_zone.clone());
         crate::network_replay::prepare(&mut isolate, options.network_replay);
         crate::network_capture::prepare(&mut isolate);
         crate::console_capture::prepare(&mut isolate);
@@ -132,6 +170,7 @@ impl EdgeRuntime {
             crate::locale_runtime::install(context_scope)?;
             crate::determinism::install(context_scope)?;
             crate::iframe_hook::install_for_root(context_scope)?;
+            crate::web::document_global::initialize_page(context_scope)?;
             crate::web::document_global::execute_parser_inserted_scripts(context_scope);
             crate::web::performance::finalize_page_load(context_scope);
             (v8::Global::new(context_scope, context), late_intrinsics)
@@ -617,6 +656,44 @@ impl EdgeRuntime {
 
     pub fn clear_stdout(&mut self) {
         crate::console_capture::clear(&mut self.isolate);
+    }
+
+    pub fn v8_memory_statistics(&mut self) -> V8MemoryStatistics {
+        let statistics = self.isolate.get_heap_statistics();
+        let code = self.isolate.get_heap_code_and_metadata_statistics();
+        V8MemoryStatistics {
+            total_heap_size: statistics.total_heap_size() as u64,
+            total_heap_size_executable: statistics.total_heap_size_executable() as u64,
+            total_physical_size: statistics.total_physical_size() as u64,
+            total_available_size: statistics.total_available_size() as u64,
+            total_global_handles_size: statistics.total_global_handles_size() as u64,
+            used_global_handles_size: statistics.used_global_handles_size() as u64,
+            used_heap_size: statistics.used_heap_size() as u64,
+            heap_size_limit: statistics.heap_size_limit() as u64,
+            malloced_memory: statistics.malloced_memory() as u64,
+            external_memory: statistics.external_memory() as u64,
+            peak_malloced_memory: statistics.peak_malloced_memory() as u64,
+            native_contexts: statistics.number_of_native_contexts() as u64,
+            detached_contexts: statistics.number_of_detached_contexts() as u64,
+            total_allocated_bytes: statistics.total_allocated_bytes(),
+            code_and_metadata_size: code
+                .as_ref()
+                .map_or(0, |value| value.code_and_metadata_size() as u64),
+            bytecode_and_metadata_size: code
+                .as_ref()
+                .map_or(0, |value| value.bytecode_and_metadata_size() as u64),
+            external_script_source_size: code
+                .as_ref()
+                .map_or(0, |value| value.external_script_source_size() as u64),
+        }
+    }
+
+    pub fn low_memory_notification(&mut self) {
+        self.isolate.low_memory_notification();
+    }
+
+    pub fn set_stdout_capture_enabled(&mut self, enabled: bool) {
+        crate::console_capture::set_enabled(&mut self.isolate, enabled);
     }
 
     #[cfg(test)]

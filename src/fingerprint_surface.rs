@@ -21,8 +21,16 @@ pub struct ScreenFingerprint {
     pub pixel_depth: i32,
     pub viewport_width: f64,
     pub viewport_height: f64,
+    #[serde(default)]
+    pub iframe_viewport_width: Option<f64>,
+    #[serde(default)]
+    pub iframe_viewport_height: Option<f64>,
     pub outer_width: f64,
     pub outer_height: f64,
+    #[serde(default)]
+    pub iframe_outer_width: Option<f64>,
+    #[serde(default)]
+    pub iframe_outer_height: Option<f64>,
     pub screen_x: f64,
     pub screen_y: f64,
     pub device_pixel_ratio: f64,
@@ -223,8 +231,12 @@ impl Default for ScreenFingerprint {
             pixel_depth: 24,
             viewport_width: 1280.0,
             viewport_height: 720.0,
+            iframe_viewport_width: None,
+            iframe_viewport_height: None,
             outer_width: 1280.0,
             outer_height: 720.0,
+            iframe_outer_width: None,
+            iframe_outer_height: None,
             screen_x: 10.0,
             screen_y: 10.0,
             device_pixel_ratio: 1.0,
@@ -483,10 +495,22 @@ impl ScreenFingerprint {
             || self.viewport_width < 0.0
             || !self.viewport_height.is_finite()
             || self.viewport_height < 0.0
+            || self
+                .iframe_viewport_width
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
+            || self
+                .iframe_viewport_height
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
             || !self.outer_width.is_finite()
             || self.outer_width < 0.0
             || !self.outer_height.is_finite()
             || self.outer_height < 0.0
+            || self
+                .iframe_outer_width
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
+            || self
+                .iframe_outer_height
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
             || !self.device_pixel_ratio.is_finite()
             || self.device_pixel_ratio <= 0.0
             || self.device_pixel_ratio > 16.0

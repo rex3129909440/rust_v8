@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "edge-sandbox"
-version = "3.2.9"
+version = "3.2.11"
 dependencies = [
  "aes",
  "bincode",

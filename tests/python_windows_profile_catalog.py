@@ -320,11 +320,14 @@ class WindowsProfileCatalogTests(unittest.TestCase):
             self.assertEqual(profile.css.input_text, expected_css["input_text"])
             self.assertEqual(profile.css.input_file, expected_css["input_file"])
             self.assertEqual(profile.webgl.max_viewport_width, 32_767)
-            self.assertEqual(profile.webgl.max_vertex_uniform_vectors, 4_096)
-            self.assertEqual(profile.webgpu.max_buffer_size, 268_435_456)
-            self.assertEqual(profile.webgpu.max_vertex_attributes, 16)
-            self.assertEqual(profile.webgpu.max_color_attachment_bytes_per_sample, 32)
-            self.assertEqual(profile.webgpu.max_compute_invocations_per_workgroup, 256)
+            self.assertEqual(
+                profile.webgl.max_vertex_uniform_vectors,
+                4_095 if profile.webgpu.vendor == "nvidia" else 4_096,
+            )
+            self.assertEqual(profile.webgpu.max_buffer_size, 2_147_483_648)
+            self.assertEqual(profile.webgpu.max_vertex_attributes, 30)
+            self.assertEqual(profile.webgpu.max_color_attachment_bytes_per_sample, 128)
+            self.assertEqual(profile.webgpu.max_compute_invocations_per_workgroup, 1_024)
             self.assertEqual(len(profile.media.media_recorder_types), 15)
             self.assertIn(
                 "video/mp4;codecs=av01.*",

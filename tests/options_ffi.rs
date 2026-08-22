@@ -53,7 +53,7 @@ fn evaluate(runtime: *mut edge_sandbox::ffi::EdgeSandboxHandle, source: &str) ->
 
 #[test]
 fn complete_typed_options_cross_ffi_and_binary_worker_boundaries() {
-    assert_eq!(edge_sandbox_options_schema_version(), 3);
+    assert_eq!(edge_sandbox_options_schema_version(), 4);
     let mut error = EdgeSandboxBuffer::default();
     let options = edge_sandbox_options_create(&mut error);
     assert!(!options.is_null(), "{}", take_buffer(&mut error));
@@ -151,6 +151,8 @@ fn complete_typed_options_cross_ffi_and_binary_worker_boundaries() {
     let limits = EdgeSandboxLimits {
         timeout_ms: 5_000,
         max_heap_bytes: 256 * 1024 * 1024,
+        max_young_generation_bytes: 16 * 1024 * 1024,
+        max_code_range_bytes: 64 * 1024 * 1024,
         max_resident_bytes: 768 * 1024 * 1024,
         max_source_bytes: 2 * 1024 * 1024,
         max_output_bytes: 2 * 1024 * 1024,
